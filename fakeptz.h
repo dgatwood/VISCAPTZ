@@ -9,6 +9,10 @@
 #define SET_ZOOM_SPEED(speed) debugSetZoomSpeed(speed)
 #define SET_ZOOM_POSITION(position, maxSpeed) setZoomPositionIncrementally(position, maxSpeed)
 
+#define SPEED_FOR_PAN(fromPosition, toPosition) 1.0
+#define SPEED_FOR_TILT(fromPosition, toPosition) 1.0
+#define SPEED_FOR_ZOOM(fromPosition, toPosition) 1.0
+
 #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
 #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
 #define ZOOM_SPEED_SCALE(speedInt) (speedInt * 1.0)

@@ -1,5 +1,6 @@
 #include "panasonicptz.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -36,6 +37,7 @@ void *runZoomPositionThread(void *argIgnored);
 
 static CURL *tallyQueryHandle = NULL;
 static CURL *zoomPositionQueryHandle = NULL;
+static CURL *zoomSpeedSetHandle = NULL;
 
 bool panaPanTiltPositionEnabled = false;
 bool panaZoomPositionEnabled = false;
@@ -44,7 +46,6 @@ static char *g_cameraIPAddr = NULL;
 
 static volatile double g_pan_speed = 0;
 static volatile double g_tilt_speed = 0;
-static volatile double g_zoom_speed = 0;
 
 static volatile double g_last_pan_position = 0;
 static volatile double g_last_tilt_position = 0;
@@ -66,6 +67,10 @@ bool panaModuleInit(void) {
   zoomPositionQueryHandle = curl_easy_init();
   curl_easy_setopt(zoomPositionQueryHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
   curl_easy_setopt(zoomPositionQueryHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+  zoomSpeedSetHandle = curl_easy_init();
+  curl_easy_setopt(zoomSpeedSetHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
+  curl_easy_setopt(zoomSpeedSetHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 
   if (pana_enable_debugging) fprintf(stderr, "Module init done\n");
   return true;
@@ -89,8 +94,31 @@ bool panaSetTiltSpeed(double speed) {
   return true;
 }
 
+int panaZoomIntSpeedForFloat(double floatSpeed) {
+  // Range 01 - 99; 50 is stopped.
+  double scaledValue = floatSpeed * 99.0;  // possible values.
+  int valueWithoutClipping = (int)(scaledValue + 0.5);
+  return (valueWithoutClipping < 1) ? 1 : (valueWithoutClipping > 99) ? 99 : valueWithoutClipping;
+}
+
 bool panaSetZoomSpeed(double speed) {
-  g_zoom_speed = speed;
+  int intSpeed = panaZoomIntSpeedForFloat(speed);
+  bool localDebug = pana_enable_debugging || false;
+  char *URL = NULL;
+  asprintf(&URL, "http://%s/cgi-bin/aw_cam?cmd=%%23Z%02d&res=1", g_cameraIPAddr, intSpeed);  // #GZ
+  curl_buffer_t *data = fetchURLWithCURL(URL, zoomSpeedSetHandle);
+
+  // #Z50 stop
+  if (data != NULL) {
+    if (!strncmp(data->data, "zs", 2)) {
+      int32_t value = atoi(&(data->data[2]));
+      if (value != intSpeed) return false;
+    } else {
+      fprintf(stderr, "Unknown response for #GZ: %s", data->data);
+      return false;
+    }
+    freeURLBuffer(data);
+  }
   return true;
 }
 
@@ -147,6 +175,23 @@ int panaGetTallyState(void) {
 bool panaSetZoomPosition(double position, double maxSpeed) {
     return setZoomPositionIncrementally(position, maxSpeed);
 }
+
+// If farther than one-sixth the zoom range, go at full speed.  Otherwise, go at a
+// speed proportional to the distance divided by one-sixth the range.
+double panaPanSpeed(double fromPosition, double toPosition) {
+  double distance = toPosition - fromPosition;
+  if (fabs(distance) > 0.3) return 1.0;
+  return distance / 0.3;
+}
+
+double panaTiltSpeed(double fromPosition, double toPosition) {
+  return 1.0;
+}
+
+double panaZoomSpeed(double fromPosition, double toPosition) {
+  return 1.0;
+}
+
 
 #pragma mark - Position monitor thread
 

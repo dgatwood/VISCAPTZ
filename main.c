@@ -139,11 +139,11 @@ int debugGetTallyState(void) {
 double speedForMotion(double fromPosition, double toPosition, axis_identifier_t axis) {
   switch(axis) {
     case axis_identifier_pan:
-        return GET_PAN_POSITION();
+        return SPEED_FOR_PAN(fromPosition, toPosition);
     case axis_identifier_tilt:
-        return GET_TILT_POSITION();
+        return SPEED_FOR_TILT(fromPosition, toPosition);
     case axis_identifier_zoom:
-        return GET_ZOOM_POSITION();
+        return SPEED_FOR_ZOOM(fromPosition, toPosition);
   }
 }
 
@@ -498,8 +498,8 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 int16_t panValue = (int16_t)rawPanValue;
                 int16_t tiltValue = (int16_t)rawTiltValue;
 
-                setTiltPosition(tiltValue, TILT_SPEED_SCALE(tiltSpeed));
-                setPanPosition(tiltValue, PAN_SPEED_SCALE(panSpeed));
+                if (!setTiltPosition(tiltValue, TILT_SPEED_SCALE(tiltSpeed))) return false;
+                if (!setPanPosition(tiltValue, PAN_SPEED_SCALE(panSpeed))) return false;
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;
@@ -518,8 +518,8 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
                 double panPosition = GET_PAN_POSITION() + panValue;
                 double tiltPosition = GET_TILT_POSITION() + tiltValue;
-                setTiltPosition(tiltPosition, TILT_SPEED_SCALE(tiltSpeed));
-                setPanPosition(tiltPosition, PAN_SPEED_SCALE(panSpeed));
+                if (!setTiltPosition(tiltPosition, TILT_SPEED_SCALE(tiltSpeed))) return false;
+                if (!setPanPosition(tiltPosition, PAN_SPEED_SCALE(panSpeed))) return false;
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;

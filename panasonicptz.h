@@ -18,6 +18,10 @@
 #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
 #define ZOOM_SPEED_SCALE(speedInt) (speedInt * 1.0)
 
+#define SPEED_FOR_PAN(fromPosition, toPosition) panaPanSpeed(fromPosition, toPosition)
+#define SPEED_FOR_TILT(fromPosition, toPosition) panaTiltSpeed(fromPosition, toPosition)
+#define SPEED_FOR_ZOOM(fromPosition, toPosition) panaZoomSpeed(fromPosition, toPosition)
+
 #define PAN_AND_TILT_POSITION_SUPPORTED panaPanTiltPositionEnabled
 #define ZOOM_POSITION_SUPPORTED panaZoomPositionEnabled
 
@@ -34,3 +38,7 @@ double panaGetTiltPosition(void);
 double panaGetZoomPosition(void);
 bool panaSetZoomPosition(double position, double maxSpeed);
 int panaGetTallyState(void);
+
+double panaPanSpeed(double fromPosition, double toPosition);
+double panaTiltSpeed(double fromPosition, double toPosition);
+double panaZoomSpeed(double fromPosition, double toPosition);
