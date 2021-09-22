@@ -1,16 +1,42 @@
 #include "panasonicptz.h"
 
+#include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <strings.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <curl/curl.h>
 
 #include "main.h"
+
+#ifdef ENABLE_HARDWARE
+
+#include "DEV_Config.h"
+#include "Debug.h"
+#include "MotorDriver.h"
+#include "PCA9685.h"
+#include "DEV_Config.c"
+#include "MotorDriver.c"
+#include "PCA9685.c"
+
+#endif
+
+
+// Figure out these values when we have the hardware.  They will probably
+// have to be configurable, too.
+#define SERIAL_DEV_FILE_FOR_TILT "/dev/char/serial/uart0"
+#define MIN_ENCODER_POSITION_FOR_TILT 3000
+#define MAX_ENCODER_POSITION_FOR_TILT 20000
+#define ENCODER_SCALE_FOR_TILT (MAX_ENCODER_POSITION_FOR_TILT - MIN_ENCODER_POSITION_FOR_TILT)
+#define SERIAL_DEV_FILE_FOR_PAN "/dev/char/serial/uart1"
+#define MIN_ENCODER_POSITION_FOR_PAN 3000
+#define MAX_ENCODER_POSITION_FOR_PAN 20000
+#define ENCODER_SCALE_FOR_PAN (MAX_ENCODER_POSITION_FOR_PAN - MIN_ENCODER_POSITION_FOR_PAN)
 
 #pragma mark URL support
  
@@ -29,9 +55,11 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
 #pragma mark - Panasonic implementation
 
 pthread_t motor_control_thread;
+pthread_t position_monitor_thread;
 pthread_t tally_fetch_thread;
 pthread_t zoom_position_thread;
 void *runMotorControlThread(void *argIgnored);
+void *runPositionMonitorThread(void *argIgnored);
 void *runTallyThread(void *argIgnored);
 void *runZoomPositionThread(void *argIgnored);
 
@@ -53,9 +81,18 @@ static volatile double g_last_zoom_position = 0;
 static volatile int g_last_tally_state = 0;
 
 bool panaModuleInit(void) {
+
+#ifdef ENABLE_HARDWARE
+    if (DEV_ModuleInit()) {
+      return false;
+    }
+    Motor_Init();
+#endif
+
   // Start the motor control thread in the background.
   if (pana_enable_debugging) fprintf(stderr, "Module init\n");
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
+  pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
   pthread_create(&tally_fetch_thread, NULL, runTallyThread, NULL);
   pthread_create(&zoom_position_thread, NULL, runZoomPositionThread, NULL);
 
@@ -195,6 +232,72 @@ double panaZoomSpeed(double fromPosition, double toPosition) {
 
 #pragma mark - Position monitor thread
 
+int panaOpenSerialDev(char *path) {
+  int fd = open(path, O_RDWR);
+
+  if (fd < 0) return fd;
+
+  struct termios serial_port_settings;
+  int retval = tcgetattr(fd, &serial_port_settings);
+  if (retval < 0) {
+    perror("Failed to get termios structure");
+    exit(2);
+  }
+  retval = cfsetospeed(&serial_port_settings, B9600);
+  if (retval < 0) {
+    perror("Failed to set 9600 output baud rate");
+    exit(3);
+  }
+  retval = cfsetispeed(&serial_port_settings, B9600);
+  if (retval < 0) {
+    perror("Failed to set 9600 input baud rate");
+    exit(4);
+  }
+  retval = tcsetattr(fd, TCSANOW, &serial_port_settings);
+  if (retval < 0) {
+    perror("Failed to set serial attributes");
+    exit(5);
+  }
+  return fd;
+}
+
+void *runPositionMonitorThread(void *argIgnored) {
+  int tilt_fd = panaOpenSerialDev(SERIAL_DEV_FILE_FOR_TILT);
+  int pan_fd = panaOpenSerialDev(SERIAL_DEV_FILE_FOR_PAN);
+
+  if (pan_fd < 0 || tilt_fd < 0) {
+    fprintf(stderr, "Could not open serial ports.  Disabling position monitoring.\n");
+    return NULL;
+  }
+
+  // Read the position.
+  while (1) {
+    static const uint8_t requestBuf[] =
+        { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0a };
+    const uint8_t responseBuf[5];
+
+    // Read the pan position.
+    write(pan_fd, requestBuf, sizeof(requestBuf));
+    read(pan_fd, (void *)responseBuf, sizeof(responseBuf));
+    uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
+
+    // Read the tilt position.
+    write(tilt_fd, requestBuf, sizeof(requestBuf));
+    read(tilt_fd, (void *)responseBuf, sizeof(responseBuf));
+    uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
+
+    double g_last_pan_position =
+        (((pan_position - MIN_ENCODER_POSITION_FOR_PAN) / (double)ENCODER_SCALE_FOR_PAN) - 0.5) * 2;
+
+    double g_last_tilt_position =
+        (((tilt_position - MIN_ENCODER_POSITION_FOR_TILT) / (double)ENCODER_SCALE_FOR_TILT) - 0.5) * 2;
+
+    usleep(10000);  // Update 100x per second (latency-critical).
+  }
+  close(pan_fd);
+  close(tilt_fd);
+  return NULL;
+}
 
 #pragma mark - Tally monitor thread
 
@@ -239,7 +342,15 @@ void *runTallyThread(void *argIgnored) {
 #pragma mark - Motor control thread
 
 void *runMotorControlThread(void *argIgnored) {
-  while (1);  // Just spin for now.
+  while (1) {
+#ifdef ENABLE_HARDWARE
+    Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_pan_speed * 100.0)));
+    Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_tilt_speed * 100.0)));
+#else
+    printf("ZOOM SPEED: %lf\nTILT SPEED: %lf\n", g_pan_speed, g_tilt_speed);
+#endif
+    usleep(10000);  // Update 100x per second (latency-critical).
+  }
   return NULL;
 }
 
