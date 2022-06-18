@@ -2,13 +2,11 @@
 
 #pragma mark - Base implementation functions, callable from modules.
 
-int debugGetTallyState(void);
-bool debugSetPanSpeed(double speed);
-bool debugSetTiltSpeed(double speed);
-bool debugSetZoomSpeed(double speed);
-double debugGetPanPosition(void);
-double debugGetTiltPosition(void);
-double debugGetZoomPosition(void);
+int scaleSpeed(int speed, int fromScale, int toScale);
 
-bool setZoomPositionIncrementally(double position, double maxSpeed);
+int debugGetTallyState(void);
+bool debugSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed);
+bool debugSetZoomSpeed(int64_t speed);
+bool debugGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
+int64_t debugGetZoomPosition(void);
 

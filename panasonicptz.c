@@ -2,30 +2,18 @@
 
 #include <fcntl.h>
 #include <math.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <strings.h>
+#include <sys/param.h>
 #include <termios.h>
 #include <unistd.h>
 
 #include <curl/curl.h>
 
 #include "main.h"
-
-#ifdef ENABLE_HARDWARE
-
-#include "DEV_Config.h"
-#include "Debug.h"
-#include "MotorDriver.h"
-#include "PCA9685.h"
-#include "DEV_Config.c"
-#include "MotorDriver.c"
-#include "PCA9685.c"
-
-#endif
-
+#include "constants.h"
 
 // Figure out these values when we have the hardware.  They will probably
 // have to be configurable, too.
@@ -38,6 +26,8 @@
 #define MAX_ENCODER_POSITION_FOR_PAN 20000
 #define ENCODER_SCALE_FOR_PAN (MAX_ENCODER_POSITION_FOR_PAN - MIN_ENCODER_POSITION_FOR_PAN)
 
+#define FREEMULTI(array) freeMulti(array, sizeof(array) / sizeof(array[0]))
+
 #pragma mark URL support
  
 typedef struct {
@@ -47,70 +37,47 @@ typedef struct {
 
 static bool pana_enable_debugging = false;
 
+char *panaIntString(uint64_t value, int digits, bool hex);
 void freeURLBuffer(curl_buffer_t *buffer);
 curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle);
 static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChunks, void *userp);
-
+char *sendCommand(const char *group, const char *command, char *values[],
+                  int numValues, const char *responsePrefix);
 
 #pragma mark - Panasonic implementation
-
-pthread_t motor_control_thread;
-pthread_t position_monitor_thread;
-pthread_t tally_fetch_thread;
-pthread_t zoom_position_thread;
-void *runMotorControlThread(void *argIgnored);
-void *runPositionMonitorThread(void *argIgnored);
-void *runTallyThread(void *argIgnored);
-void *runZoomPositionThread(void *argIgnored);
 
 static CURL *tallyQueryHandle = NULL;
 static CURL *zoomPositionQueryHandle = NULL;
 static CURL *zoomSpeedSetHandle = NULL;
 
-bool panaPanTiltPositionEnabled = false;
-bool panaZoomPositionEnabled = false;
-
 static char *g_cameraIPAddr = NULL;
 
-static volatile double g_pan_speed = 0;
-static volatile double g_tilt_speed = 0;
-
-static volatile double g_last_pan_position = 0;
-static volatile double g_last_tilt_position = 0;
-static volatile double g_last_zoom_position = 0;
-static volatile int g_last_tally_state = 0;
-
 bool panaModuleInit(void) {
+    // fprintf(stderr, "0x444(2) : %s\n", panaIntString(0x444, 2, true));
+    // fprintf(stderr, "0x444(3) : %s\n", panaIntString(0x444, 3, true));
+    // fprintf(stderr, "0x444(4) : %s\n", panaIntString(0x444, 4, true));
+    // fprintf(stderr, "0x444(5) : %s\n", panaIntString(0x444, 5, true));
 
-#ifdef ENABLE_HARDWARE
-    if (DEV_ModuleInit()) {
-      return false;
-    }
-    Motor_Init();
+    // fprintf(stderr, "333(2) : %s\n", panaIntString(333, 2, false));
+    // fprintf(stderr, "333(3) : %s\n", panaIntString(333, 3, false));
+    // fprintf(stderr, "333(4) : %s\n", panaIntString(333, 4, false));
+    // fprintf(stderr, "333(5) : %s\n", panaIntString(333, 5, false));
+
+#if USE_PANASONIC_PTZ
+    if (pana_enable_debugging) fprintf(stderr, "Panasonic module init\n");
+
+    curl_global_init(CURL_GLOBAL_ALL);
+
+    if (pana_enable_debugging) fprintf(stderr, "Panasonic module init done\n");
+#else
+    if (pana_enable_debugging) fprintf(stderr, "Panasonic module init skipped\n");
 #endif
+    return true;
+}
 
-  // Start the motor control thread in the background.
-  if (pana_enable_debugging) fprintf(stderr, "Module init\n");
-  pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
-  pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
-  pthread_create(&tally_fetch_thread, NULL, runTallyThread, NULL);
-  pthread_create(&zoom_position_thread, NULL, runZoomPositionThread, NULL);
-
-  curl_global_init(CURL_GLOBAL_ALL);
-  tallyQueryHandle = curl_easy_init();
-  curl_easy_setopt(tallyQueryHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
-  curl_easy_setopt(tallyQueryHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-
-  zoomPositionQueryHandle = curl_easy_init();
-  curl_easy_setopt(zoomPositionQueryHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
-  curl_easy_setopt(zoomPositionQueryHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-
-  zoomSpeedSetHandle = curl_easy_init();
-  curl_easy_setopt(zoomSpeedSetHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
-  curl_easy_setopt(zoomSpeedSetHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-
-  if (pana_enable_debugging) fprintf(stderr, "Module init done\n");
-  return true;
+bool panaModuleTeardown(void) {
+    curl_global_cleanup();
+    return true;
 }
 
 bool panaSetIPAddress(char *address) {
@@ -121,248 +88,260 @@ bool panaSetIPAddress(char *address) {
   return true;
 }
 
-bool panaSetPanSpeed(double speed) {
-  g_pan_speed = speed;
-  return true;
-}
-
-bool panaSetTiltSpeed(double speed) {
-  g_tilt_speed = speed;
-  return true;
-}
-
-int panaZoomIntSpeedForFloat(double floatSpeed) {
-  // Range 01 - 99; 50 is stopped.
-  double scaledValue = floatSpeed * 99.0;  // possible values.
-  int valueWithoutClipping = (int)(scaledValue + 0.5);
-  return (valueWithoutClipping < 1) ? 1 : (valueWithoutClipping > 99) ? 99 : valueWithoutClipping;
-}
-
-bool panaSetZoomSpeed(double speed) {
-  int intSpeed = panaZoomIntSpeedForFloat(speed);
-  bool localDebug = pana_enable_debugging || false;
-  char *URL = NULL;
-  asprintf(&URL, "http://%s/cgi-bin/aw_cam?cmd=%%23Z%02d&res=1", g_cameraIPAddr, intSpeed);  // #GZ
-  curl_buffer_t *data = fetchURLWithCURL(URL, zoomSpeedSetHandle);
-
-  // #Z50 stop
-  if (data != NULL) {
-    if (!strncmp(data->data, "zs", 2)) {
-      int32_t value = atoi(&(data->data[2]));
-      if (value != intSpeed) return false;
-    } else {
-      fprintf(stderr, "Unknown response for #GZ: %s", data->data);
-      return false;
-    }
-    freeURLBuffer(data);
+int hexDigits(uint64_t value) {
+  int digits = 1;
+  value = value >> 4;
+  while (value > 0) {
+    value = value >> 4;
+    digits++;
   }
-  return true;
+  return digits;
 }
 
-double panaGetPanPosition(void) {
-  return g_last_pan_position;
+int decDigits(uint64_t value) {
+  int digits = 1;
+  value = value / 10;
+  while (value > 0) {
+    value = value / 10;
+    digits++;
+  }
+  return digits;
 }
 
-double panaGetTiltPosition(void) {
-  return g_last_tilt_position;
+char *panaIntString(uint64_t value, int digits, bool hex) {
+    int actualDigits = hex ? hexDigits(value) : decDigits(value);
+    ssize_t length = MAX(digits, actualDigits);
+    char *str = malloc(length + 1);
+    memset(str, (int)'0', length);
+    if (hex) {
+        sprintf(str + MAX(0, (digits - actualDigits)), "%" PRIx64 "", value);
+    } else {
+        sprintf(str + MAX(0, (digits - actualDigits)), "%" PRId64 "", value);
+    }
+    return str;
 }
 
-// Set zoom position absolute:
-// Try #AXZxxx where xxx 0x555..0xfff (standard PTZ code from Panasonic PTZ cams)
-// Try #GZxxx where xxx is 0x555..0xfff (adding a value to something supported by the AG-CX350)
-
-double panaGetZoomPosition(void) {
-  return g_last_zoom_position;
+void freeMulti(char **array, ssize_t count) {
+  for (ssize_t i = 0; i < count; i++) {
+    free(array[i]);
+  }
 }
 
-void updateZoomPosition(void) {
-  bool localDebug = pana_enable_debugging || false;
-  char *URL = NULL;
-  asprintf(&URL, "http://%s/cgi-bin/aw_cam?cmd=%%23GZ&res=1", g_cameraIPAddr);  // #GZ
-  curl_buffer_t *data = fetchURLWithCURL(URL, zoomPositionQueryHandle);
+bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed) {
+    bool localDebug = pana_enable_debugging || false;
+    static int64_t last_zoom_position = 0;
+    char *values[2] = { panaIntString(panSpeed, 3, true), panaIntString(tiltSpeed, 3, true) };
+    char *response = sendCommand("ptz", "#PTS", values, 2, "gz");
+    bool retval = false;
+    if (response != NULL) {
+        retval = true;
+        free(response);
+    }
 
-  if (data != NULL) {
-    if (!strncmp(data->data, "gz", 2)) {
-      char buf[6] = { '\0', '\0', '\0', '\0' };
-      for (int i = 2; i < data->len && i < 5; i++) {
-        if ((data->data[i] >= '0' && data->data[i] <= '9') ||
-            (data->data[i] >= 'a' && data->data[i] <= 'f') ||
-            (data->data[i] >= 'A' && data->data[i] <= 'F')) {
-          buf[i - 2] = data->data[i];
-        } else {
-          break;
-        }
+    FREEMULTI(values);
+    return retval;
+}
+
+bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
+                            int64_t tiltPosition, int64_t tiltSpeed) {
+    // Panasonic's documentation makes no sense, so this is probably wrong,
+    // and I don't have the hardware required to try it, so this should be
+    // considered entirely unsupported.
+    int convertedPanSpeed = scaleSpeed(panSpeed, SCALE_CORE, 0x1D) - 1;    // Speeds are 0 through 0x1D?
+    int convertedTiltSpeed = scaleSpeed(tiltSpeed, SCALE_CORE, 3) - 1;  // Speeds are 0, 1, or 2?
+
+    char *values[4] = {
+        panaIntString(panPosition, 4, true),
+        panaIntString(tiltPosition, 4, true),
+        panaIntString(convertedPanSpeed, 2, true),
+        panaIntString(convertedTiltSpeed, 1, true)
+    };
+    char *response = sendCommand("ptz", "#APS", values, 4, "aPS");
+    if (response != NULL) {
+        free(response);
+        FREEMULTI(values);
+        return true;
+    }
+    FREEMULTI(values);
+    return false;
+}
+
+bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
+    char *value = panaIntString(position, 3, true);
+    char *response = sendCommand("ptz", "#AXZ", &value, 1, "axz");
+    if (response != NULL) {
+        free(response);
+        free(value);
+        return true;
+    }
+    free(value);
+    return false;
+}
+
+// Sends the command, strips the specified prefix from the response, and returns it as a
+// newly allocated string.
+char *sendCommand(const char *group, const char *command, char *values[],
+                  int numValues, const char *responsePrefix) {
+    CURL *curlQueryHandle = curl_easy_init();
+    curl_easy_setopt(curlQueryHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
+    curl_easy_setopt(curlQueryHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+    char *encoded_command = curl_easy_escape(curlQueryHandle, command, 0);
+    // fprintf(stderr, "Command: \"%s\" encoded command: \"%s\"\n", command, encoded_command);
+
+    bool localDebug = pana_enable_debugging || false;
+    char *URL = NULL;
+    char *valueString = NULL;
+    asprintf(&valueString, "");
+    for (int i = 0 ; i < numValues; i++) {
+        char *temp = valueString;
+        asprintf(&valueString, "%s%s", temp, values[i]);
+        free(temp);
+    }
+
+    asprintf(&URL, "http://%s/cgi-bin/aw_%s?cmd=%s%s&res=1",
+             g_cameraIPAddr, group, encoded_command, valueString);
+    curl_buffer_t *data = fetchURLWithCURL(URL, curlQueryHandle);
+
+    char *retval = NULL;
+    if (data != NULL) {
+      ssize_t prefixLength = strlen(responsePrefix);
+      if (!strncmp(data->data, responsePrefix, prefixLength)) {
+        asprintf(&retval, "%s", &(data->data[prefixLength]));
+      } else {
+        fprintf(stderr, "Unexpected prefix %s for %s (expected %s)\n",
+                data->data, command, responsePrefix);
       }
-      int32_t value = strtol(buf, NULL, 16);
-      // Convert from range 0x555..0xfff to -0.5..0.5
-      g_last_zoom_position = ((value - 0x555) / 2730.0) -0.5;
-      if (localDebug) fprintf(stderr, "Zoom position: %lf\n", g_last_zoom_position);
-    } else {
-      fprintf(stderr, "Unknown response for #GZ: %s", data->data);
+      freeURLBuffer(data);
     }
-    freeURLBuffer(data);
-  }
+
+    free(encoded_command);
+    free(valueString);
+
+    curl_easy_cleanup(curlQueryHandle);
+
+    return retval;
+}
+
+static int64_t last_zoom_speed = 0;
+
+int64_t panaGetZoomSpeed(void) {
+    // Just return the last cached value.  The camera doesn't provide
+    // a way to query this.
+    return last_zoom_speed;
+}
+
+bool panaSetZoomSpeed(int64_t speed) {
+    bool localDebug = false;
+    last_zoom_speed = speed;
+
+    int intSpeed = scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE) + 50;
+    char *intSpeedString = panaIntString(intSpeed, 2, false);
+
+    if (localDebug) {
+        fprintf(stderr, "Core speed %" PRId64 "\n", speed);
+        fprintf(stderr, "Speed %d\n", intSpeed);
+        fprintf(stderr, "Speed string %s\n", intSpeedString);
+    }
+
+    bool retval = true;
+    char *response = sendCommand("ptz", "#Z", &intSpeedString, 1, "zS");
+    if (!response || atoi(response) != intSpeed) {
+        retval = false;
+        free(response);
+    }
+    free(intSpeedString);
+    return retval;
+}
+
+bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
+    bool localDebug = pana_enable_debugging || false;
+    static int64_t last_pan_position = 0;
+    static int64_t last_tilt_position = 0;
+    char *response = sendCommand("ptz", "#APC", NULL, 0, "aPC");
+    bool retval = false;
+    if (response != NULL) {
+        retval = true;
+        int32_t value = strtol(response, NULL, 16);
+        last_pan_position = (value >> 12) & 0xfff;
+        last_tilt_position = value & 0xfff;
+
+        if (localDebug) fprintf(stderr, "Pan position: %" PRId64 "\n", last_pan_position);
+        if (localDebug) fprintf(stderr, "Tilt position: %" PRId64 "\n", last_tilt_position);
+        free(response);
+    }
+    return retval;
+}
+
+int64_t panaGetZoomPosition(void) {
+    bool localDebug = pana_enable_debugging || false;
+    static int64_t last_zoom_position = 0;
+    char *response = sendCommand("ptz", "#GZ", NULL, 0, "gz");
+    if (response != NULL && strlen(response)) {
+        int32_t value = strtol(response, NULL, 16);
+        last_zoom_position = value;
+        if (localDebug) fprintf(stderr, "Zoom position: %" PRId64 "\n", last_zoom_position);
+        free(response);
+    }
+    return last_zoom_position;
 }
 
 int panaGetTallyState(void) {
-  return g_last_tally_state;
-}
-
-// Eventually, this MAY be implemented differently with a direct call to the camera.
-bool panaSetZoomPosition(double position, double maxSpeed) {
-    return setZoomPositionIncrementally(position, maxSpeed);
-}
-
-// If farther than one-sixth the zoom range, go at full speed.  Otherwise, go at a
-// speed proportional to the distance divided by one-sixth the range.
-double panaPanSpeed(double fromPosition, double toPosition) {
-  double distance = toPosition - fromPosition;
-  if (fabs(distance) > 0.3) return 1.0;
-  return distance / 0.3;
-}
-
-double panaTiltSpeed(double fromPosition, double toPosition) {
-  return 1.0;
-}
-
-double panaZoomSpeed(double fromPosition, double toPosition) {
-  return 1.0;
-}
-
-
-#pragma mark - Position monitor thread
-
-int panaOpenSerialDev(char *path) {
-  int fd = open(path, O_RDWR);
-
-  if (fd < 0) return fd;
-
-  struct termios serial_port_settings;
-  int retval = tcgetattr(fd, &serial_port_settings);
-  if (retval < 0) {
-    perror("Failed to get termios structure");
-    exit(2);
-  }
-  retval = cfsetospeed(&serial_port_settings, B9600);
-  if (retval < 0) {
-    perror("Failed to set 9600 output baud rate");
-    exit(3);
-  }
-  retval = cfsetispeed(&serial_port_settings, B9600);
-  if (retval < 0) {
-    perror("Failed to set 9600 input baud rate");
-    exit(4);
-  }
-  retval = tcsetattr(fd, TCSANOW, &serial_port_settings);
-  if (retval < 0) {
-    perror("Failed to set serial attributes");
-    exit(5);
-  }
-  return fd;
-}
-
-void *runPositionMonitorThread(void *argIgnored) {
-  int tilt_fd = panaOpenSerialDev(SERIAL_DEV_FILE_FOR_TILT);
-  int pan_fd = panaOpenSerialDev(SERIAL_DEV_FILE_FOR_PAN);
-
-  if (pan_fd < 0 || tilt_fd < 0) {
-    fprintf(stderr, "Could not open serial ports.  Disabling position monitoring.\n");
-    return NULL;
-  }
-
-  // Read the position.
-  while (1) {
-    static const uint8_t requestBuf[] =
-        { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0a };
-    const uint8_t responseBuf[5];
-
-    // Read the pan position.
-    write(pan_fd, requestBuf, sizeof(requestBuf));
-    read(pan_fd, (void *)responseBuf, sizeof(responseBuf));
-    uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
-
-    // Read the tilt position.
-    write(tilt_fd, requestBuf, sizeof(requestBuf));
-    read(tilt_fd, (void *)responseBuf, sizeof(responseBuf));
-    uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
-
-    double g_last_pan_position =
-        (((pan_position - MIN_ENCODER_POSITION_FOR_PAN) / (double)ENCODER_SCALE_FOR_PAN) - 0.5) * 2;
-
-    double g_last_tilt_position =
-        (((tilt_position - MIN_ENCODER_POSITION_FOR_TILT) / (double)ENCODER_SCALE_FOR_TILT) - 0.5) * 2;
-
-    usleep(10000);  // Update 100x per second (latency-critical).
-  }
-  close(pan_fd);
-  close(tilt_fd);
-  return NULL;
-}
-
-#pragma mark - Tally monitor thread
-
-void *runTallyThread(void *argIgnored) {
-  bool localDebug = pana_enable_debugging || false;
-  if (localDebug) fprintf(stderr, "Starting tally thread.\n");
-  char *redURL = NULL;
-  char *greenURL = NULL;
-  asprintf(&redURL, "http://%s/cgi-bin/aw_cam?cmd=QLR&res=1", g_cameraIPAddr);
-  asprintf(&greenURL, "http://%s/cgi-bin/aw_cam?cmd=QLG&res=1", g_cameraIPAddr);
-  while (1) {
+    bool localDebug = pana_enable_debugging || false;
+    static int g_last_tally_state = 0;
     bool redState = false;
     bool greenState = false;
     if (localDebug) fprintf(stderr, "Fetching RED\n");
-    curl_buffer_t *data = fetchURLWithCURL(redURL, tallyQueryHandle);
-    if (data != NULL) {
-      if (!strncmp(data->data, "TLR:", 4)) {
-        redState = data->data[4] == '1';
-      } else {
-        fprintf(stderr, "Unknown response for QLR: %s", data->data);
-      }
-      freeURLBuffer(data);
+
+    char *redResponse = sendCommand("cam", "QLR", NULL, 0, "TLR:");
+    char *greenResponse = sendCommand("cam", "QLG", NULL, 0, "TLG:");
+
+    if (redResponse != NULL && greenResponse != NULL) {
+        redState = redResponse[0] == '1';
+
+        greenState = greenResponse[0] == '1';
+
+        g_last_tally_state = redState ? kTallyStateRed : greenState ? kTallyStateGreen : 0;
+        if (localDebug) {
+            fprintf(stderr, "Tally state: %d\n", g_last_tally_state);
+        }
+    } else if (localDebug) {
+        fprintf(stderr, "Request failed.  Returning previons tally state: %d\n", g_last_tally_state);
     }
-    if (localDebug) fprintf(stderr, "Fetching GREEN\n");
-    data = fetchURLWithCURL(greenURL, tallyQueryHandle);
-    if (data != NULL) {
-      if (!strncmp(data->data, "TLG:", 4)) {
-        greenState = data->data[4] == '1';
-      } else {
-        fprintf(stderr, "Unknown response for QLG: %s", data->data);
-      }
-      freeURLBuffer(data);
+    if (redResponse != NULL) {
+        free(redResponse);
     }
-    g_last_tally_state = redState ? 5 : greenState ?  6 : 0;
-    if (localDebug) fprintf(stderr, "State: %d\n", g_last_tally_state);
-    usleep(100000);  // Update 10x per second (non-latency-critical).
-  }
-  return NULL;
+    if (greenResponse != NULL) {
+        free(greenResponse);
+    }
+    return g_last_tally_state;
 }
 
+bool panaSetTallyState(int tallyState) {
+    bool localDebug = pana_enable_debugging || false;
+    int redState = (tallyState == 5);
+    int greenState = (tallyState == 6);
+    if (localDebug) fprintf(stderr, "Fetching RED\n");
 
-#pragma mark - Motor control thread
+    char *redTallyState = panaIntString(redState, 1, false);
+    char *greenTallyState = panaIntString(greenState, 1, false);
 
-void *runMotorControlThread(void *argIgnored) {
-  while (1) {
-#ifdef ENABLE_HARDWARE
-    Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_pan_speed * 100.0)));
-    Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_tilt_speed * 100.0)));
-#else
-    printf("ZOOM SPEED: %lf\nTILT SPEED: %lf\n", g_pan_speed, g_tilt_speed);
-#endif
-    usleep(10000);  // Update 100x per second (latency-critical).
-  }
-  return NULL;
+    char *redResponse = sendCommand("cam", "TLR:", &redTallyState, 1, "TLR:");
+    char *greenResponse = sendCommand("cam", "TLG:", &greenTallyState, 1, "TLG:");
+
+    bool retval = (redResponse != NULL && greenResponse != NULL);
+
+    if (redResponse != NULL) {
+        free(redResponse);
+    }
+    if (greenResponse != NULL) {
+        free(greenResponse);
+    }
+    free(redTallyState);
+    free(greenTallyState);
+
+    return retval;
 }
-
-
-void *runZoomPositionThread(void *argIgnored) {
-  if (pana_enable_debugging) fprintf(stderr, "Starting zoom position thread.\n");
-  while (1) {
-    updateZoomPosition();
-    usleep(10000);  // Update 100x per second (latency-critical).
-  }
-}
-
 
 #pragma mark - URL support
 
@@ -390,13 +369,6 @@ curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
 void freeURLBuffer(curl_buffer_t *buffer) {
   free(buffer->data);
   free(buffer);
-}
-
-// Realistically, we won't ever get the chance to call this.
-void cleanupCURLBits(void) {
-  curl_easy_cleanup(tallyQueryHandle);
-  curl_easy_cleanup(zoomPositionQueryHandle);
-  curl_global_cleanup();
 }
 
 static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChunks, void *userp)
