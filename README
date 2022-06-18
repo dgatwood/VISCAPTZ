@@ -1,9 +1,0 @@
-
-This is a Raspberry Pi-based PTZ motor controller that takes input via the VISCA protocol.
-You can control it with a VISCA-based PTZ control app or tool.
-
-The current implementation sends Panasonic Zoom commands to an AG-CX350 to emulate full
-zoom control, complete with absolute positioning.  It controls a mechanical pan-tilt
-controller.  It is designed to be moduler so that, if desired, the zoom functionality
-can be replaced with code to send LANC commands through an appropriate adapter.
-
