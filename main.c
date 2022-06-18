@@ -6,6 +6,11 @@
 // #include <string>
 // #include <thread>
 
+#include "constants.h"
+#include "fakeptz.h"
+#include "motorptz.h"
+#include "panasonicptz.h"
+
 #include <math.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -25,11 +30,6 @@
 #include <errno.h>
 
 #include <pthread.h>
-
-#include "constants.h"
-#include "fakeptz.h"
-#include "motorptz.h"
-#include "panasonicptz.h"
 
 static int kAxisStallThreshold = 100;
 
