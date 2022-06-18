@@ -43,7 +43,7 @@ controlled by a Waveshare Motor Driver HAT.
 
 This also uses a Waveshare RS485 CAN HAT to communicate with a pair of
 BRT38-COM4069D24-RT1 encoders that provide absolute positioning.  I'm going
-to attach a pair of 0.4M 60T 6 mm shaft gears, which you can find here:
+to attach a pair of 0.4M 60-tooth 6mm shaft gears, which you can find here:
 
     https://www.aliexpress.com/item/2255800029508174.html
 
