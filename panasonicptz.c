@@ -128,10 +128,13 @@ void freeMulti(char **array, ssize_t count) {
   }
 }
 
+#if !PANASONIC_PTZ_ZOOM_ONLY
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed) {
+    int scaledTiltSpeed = scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE);
+
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_zoom_position = 0;
-    char *values[2] = { panaIntString(panSpeed, 3, true), panaIntString(tiltSpeed, 3, true) };
+    char *values[2] = { panaIntString(panSpeed, 3, true), panaIntString(scaledTiltSpeed, 3, true) };
     char *response = sendCommand("ptz", "#PTS", values, 2, "gz");
     bool retval = false;
     if (response != NULL) {
@@ -147,7 +150,7 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
                             int64_t tiltPosition, int64_t tiltSpeed) {
     // Panasonic's documentation makes no sense, so this is probably wrong,
     // and I don't have the hardware required to try it, so this should be
-    // considered entirely unsupported.
+    // considered entirely unsupported.  Why don't these use PAN_TILT_SCALE_HARDWARE?
     int convertedPanSpeed = scaleSpeed(panSpeed, SCALE_CORE, 0x1D) - 1;    // Speeds are 0 through 0x1D?
     int convertedTiltSpeed = scaleSpeed(tiltSpeed, SCALE_CORE, 3) - 1;  // Speeds are 0, 1, or 2?
 
@@ -166,6 +169,7 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
     FREEMULTI(values);
     return false;
 }
+#endif
 
 bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
     char *value = panaIntString(position, 3, true);

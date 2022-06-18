@@ -184,8 +184,11 @@ void *runPositionMonitorThread(void *argIgnored) {
 void *runMotorControlThread(void *argIgnored) {
   while (1) {
 #if ENABLE_HARDWARE
-    Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_pan_speed * 100.0)));
-    Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_tilt_speed * 100.0)));
+    int scaledPanSpeed = abs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
+    int scaledTiltSpeed = abs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
+
+    Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
+    Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
 #else  // !ENABLE_HARDWARE
     int64_t zoom_speed = GET_ZOOM_SPEED();
     int64_t zoom_position = GET_ZOOM_POSITION();

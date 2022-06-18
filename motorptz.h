@@ -33,7 +33,6 @@ int64_t motorTiltSpeed(int64_t fromPosition, int64_t toPosition);
     #define PAN_RANGE 1000
     #define TILT_RANGE 1000
 
-    #define PAN_SCALE_HARDWARE 100
-    #define TILT_SCALE_HARDWARE 100
+    #define PAN_TILT_SCALE_HARDWARE 100
 
 #endif

@@ -64,8 +64,7 @@ bool panaSetTallyState(int tallyState);
         #define TILT_RANGE`0xffff
 
         // Panasonic defines the range as 0 to 99.
-        #define PAN_SCALE_HARDWARE 49
-        #define TILT_SCALE_HARDWARE 49
+        #define PAN_TILT_SCALE_HARDWARE 49
     #endif
 
 #endif
