@@ -14,20 +14,20 @@
 #include "main.h"
 #include "constants.h"
 
-#ifdef ENABLE_HARDWARE
+#if ENABLE_HARDWARE
 
-#include "DEV_Config.h"
-#include "Debug.h"
-#include "MotorDriver.h"
-#include "PCA9685.h"
-#include "DEV_Config.c"
-#include "MotorDriver.c"
-#include "PCA9685.c"
+#include "motorcontrol/DEV_Config.h"
+#include "motorcontrol/Debug.h"
+#include "motorcontrol/MotorDriver.h"
+#include "motorcontrol/PCA9685.h"
+#include "motorcontrol/DEV_Config.c"
+#include "motorcontrol/MotorDriver.c"
+#include "motorcontrol/PCA9685.c"
 
-#else
+#else  // !ENABLE_HARDWARE
 // For printing zoom speed.
 #include "panasonicptz.h"
-#endif
+#endif  // ENABLE_HARDWARE
 
 
 // Figure out these values when we have the hardware.  They will probably
@@ -63,12 +63,12 @@ static volatile int64_t g_last_tilt_position = 0;
 
 bool motorModuleInit(void) {
 
-#ifdef ENABLE_HARDWARE
+#if ENABLE_HARDWARE
     if (DEV_ModuleInit()) {
       return false;
     }
     Motor_Init();
-#endif
+#endif  // ENABLE_HARDWARE
 
   // Start the motor control thread in the background.
   if (motor_enable_debugging) fprintf(stderr, "Motor module init\n");
@@ -135,7 +135,7 @@ int motorOpenSerialDev(char *path) {
 }
 
 void *runPositionMonitorThread(void *argIgnored) {
-#ifdef ENABLE_HARDWARE
+#if ENABLE_HARDWARE
   int tilt_fd = motorOpenSerialDev(SERIAL_DEV_FILE_FOR_TILT);
   int pan_fd = motorOpenSerialDev(SERIAL_DEV_FILE_FOR_PAN);
 
@@ -147,7 +147,7 @@ void *runPositionMonitorThread(void *argIgnored) {
 
   // Read the position.
   while (1) {
-#ifdef ENABLE_HARDWARE
+#if ENABLE_HARDWARE
     static const uint8_t requestBuf[] =
         { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0a };
     const uint8_t responseBuf[5];
@@ -172,7 +172,7 @@ void *runPositionMonitorThread(void *argIgnored) {
 #endif  // ENABLE_HARDWARE
     usleep(10000);  // Update 100x per second (latency-critical).
   }
-#ifdef ENABLE_HARDWARE
+#if ENABLE_HARDWARE
   close(pan_fd);
   close(tilt_fd);
 #endif  // ENABLE_HARDWARE
@@ -183,19 +183,17 @@ void *runPositionMonitorThread(void *argIgnored) {
 
 void *runMotorControlThread(void *argIgnored) {
   while (1) {
-#ifdef ENABLE_HARDWARE
+#if ENABLE_HARDWARE
     Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_pan_speed * 100.0)));
     Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, round(fabs(g_tilt_speed * 100.0)));
-#else
-#if 1
+#else  // !ENABLE_HARDWARE
     int64_t zoom_speed = GET_ZOOM_SPEED();
     int64_t zoom_position = GET_ZOOM_POSITION();
 
     printf("PAN SPEED: %" PRId64 " TILT SPEED: %" PRId64 " PAN POSITION: %" PRId64 " TILT POSITION: %" PRId64
            " ZOOM SPEED: %" PRId64 " ZOOM POSITION: %" PRId64 "\n",
            g_pan_speed, g_tilt_speed, g_last_pan_position, g_last_tilt_position, zoom_speed, zoom_position);
-#endif
-#endif
+#endif  // ENABLE_HARDWARE
     usleep(10000);  // Update 100x per second (latency-critical).
   }
   return NULL;
