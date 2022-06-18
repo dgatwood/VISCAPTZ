@@ -13,6 +13,6 @@
 #define PANASONIC_PTZ_ZOOM_ONLY 1
 #define USE_MOTOR_PAN_AND_TILT 1
 #define ENABLE_HARDWARE 1
-#define USE_FAKE_PTZ 1
+#define USE_FAKE_PTZ 0
 
 #endif  // __CONFIG_H__
