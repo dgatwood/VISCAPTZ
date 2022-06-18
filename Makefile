@@ -1,5 +1,7 @@
 
 CFLAGS=-std=gnu99 -I./motorcontrol
+
+# If not using hardware, remove -lbcm2835
 LDFLAGS=-lpthread -lm -lbcm2835
 
 viscaptz: main.o panasonicptz.o motorptz.o
