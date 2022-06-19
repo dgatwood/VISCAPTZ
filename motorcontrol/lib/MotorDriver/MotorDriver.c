@@ -24,11 +24,8 @@
  */
 void Motor_Init(void)
 {
-    fprintf(stderr, "Calling PCA9685_Init\n");
     PCA9685_Init(0x40);
-    fprintf(stderr, "Calling PCA9685_SetPWMFreq\n");
     PCA9685_SetPWMFreq(100);
-    fprintf(stderr, "Done\n");
 }
 
 /**

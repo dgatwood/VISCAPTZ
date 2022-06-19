@@ -19,13 +19,13 @@
 
 #if ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
-#include "motorcontrol/DEV_Config.h"
-#include "motorcontrol/Debug.h"
-#include "motorcontrol/MotorDriver.h"
-#include "motorcontrol/PCA9685.h"
-#include "motorcontrol/DEV_Config.c"
-#include "motorcontrol/MotorDriver.c"
-#include "motorcontrol/PCA9685.c"
+#include "motorcontrol/lib/Config/DEV_Config.h"
+#include "motorcontrol/lib/Config/Debug.h"
+#include "motorcontrol/lib/MotorDriver/MotorDriver.h"
+#include "motorcontrol/lib/PCA9685/PCA9685.h"
+// #include "motorcontrol/DEV_Config.c"
+// #include "motorcontrol/MotorDriver.c"
+// #include "motorcontrol/PCA9685.c"
 
 #else  // !(ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
 // For printing zoom speed.

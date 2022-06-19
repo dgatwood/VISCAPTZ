@@ -28,7 +28,7 @@
  */
 static void PCA9685_WriteByte(UBYTE reg, UBYTE value)
 {
-    DEV_I2C_WriteByte(reg, value);
+    I2C_Write_Byte(reg, value);
 }
 
 /**
@@ -41,7 +41,7 @@ static void PCA9685_WriteByte(UBYTE reg, UBYTE value)
  */
 static UBYTE PCA9685_ReadByte(UBYTE reg)
 {
-    return DEV_I2C_ReadByte(reg);
+    return I2C_Read_Byte(reg);
 }
 
 /**
@@ -75,11 +75,8 @@ static void PCA9685_SetPWM(UBYTE channel, UWORD on, UWORD off)
  */
 void PCA9685_Init(char addr)
 {
-fprintf(stderr, "Calling DEV_I2C_Init\n");
     DEV_I2C_Init(addr);
-fprintf(stderr, "Calling DEV_I2C_WriteByte\n");
-    DEV_I2C_WriteByte(MODE1, 0x00);
-fprintf(stderr, "Done\n");
+    I2C_Write_Byte(MODE1, 0x00);
 }
 
 /**

@@ -1,11 +1,15 @@
 
-CFLAGS=-std=gnu99 -I./motorcontrol
+CFLAGS=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685
 
 # If not using hardware, remove -lbcm2835
-LDFLAGS=-lpthread -lm -lbcm2835
+LDFLAGS=-lpthread -lm -lbcm2835 -Lmotorcontrol -lmotorcontrol
 
-viscaptz: main.o panasonicptz.o motorptz.o
+viscaptz: main.o panasonicptz.o motorptz.o motorcontrol/libmotorcontrol.so
 	${CC} ${CFLAGS} main.o panasonicptz.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
+
+motorcontrol/libmotorcontrol.so:
+	cd motorcontrol ; make libmotorcontrol.so ; sudo make install
 
 clean:
 	rm *.o viscaptz
+	cd motorcontrol ; make clean
