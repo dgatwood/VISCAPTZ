@@ -1,7 +1,7 @@
 #include "motorptz.h"
 
 #define ENABLE_MOTOR_HARDWARE 1
-#define ENABLE_ENCODER_HARDWARE 0
+#define ENABLE_ENCODER_HARDWARE 1
 
 #include <fcntl.h>
 #include <math.h>
@@ -72,7 +72,7 @@ static volatile int64_t g_last_pan_position = 0;
 static volatile int64_t g_last_tilt_position = 0;
 
 bool motorModuleInit(void) {
-    bool localDebug = motor_enable_debugging || true;
+    bool localDebug = motor_enable_debugging || false;
     if (localDebug) fprintf(stderr, "Initializing motor module\n");
 #if ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
     if (localDebug) fprintf(stderr, "Initializing dev motor module\n");
@@ -124,6 +124,11 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
 #if ENABLE_ENCODER_HARDWARE
 #if USE_CANBUS
 int motorOpenCANSock(void) {
+
+    system("sudo ifconfig can0 down");
+    system("sudo ip link set can0 type can bitrate 500000");
+    system("sudo ifconfig can0 up");
+
     bool localDebug = true;
     if (localDebug) fprintf(stderr, "Opening CANBus socket... ");
     int sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
@@ -232,6 +237,7 @@ void *runPositionMonitorThread(void *argIgnored) {
 #if ENABLE_HARDWARE
   #if USE_CANBUS
     close(sock);
+    system("sudo ifconfig can0 down");
   #else  // !USE_CANBUS
     close(pan_fd);
     close(tilt_fd);
