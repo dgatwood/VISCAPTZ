@@ -351,6 +351,7 @@ bool panaSetTallyState(int tallyState) {
 #pragma mark - URL support
 
 curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
+  bool localDebug = false;
   curl_buffer_t *chunk = malloc(sizeof(curl_buffer_t));;
   chunk->data = malloc(1);
   chunk->len = 0;
@@ -361,8 +362,8 @@ curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
   CURLcode res = curl_easy_perform(handle);
  
   if(res != CURLE_OK) {
-    fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
+    if (localDebug) fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                            curl_easy_strerror(res));
     free(chunk->data);
     free(chunk);
     return NULL;

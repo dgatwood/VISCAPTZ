@@ -82,14 +82,18 @@ void DEV_I2C_Init(char addr)
  */
 void DEV_I2C_WriteByte(UBYTE reg, UBYTE value)
 {
+    fprintf(stderr, "In DEV_I2C_WriteByte\n");
     char ref = 0;
     char buf[2] = {reg, value};
     ref = bcm2835_i2c_write(buf, 2);
     while(ref != 0) {
+        fprintf(stderr, "In loop\n");
         ref = bcm2835_i2c_write(buf, 2);
+        fprintf(stderr, "ref = 0x%x\n", ref);
         if(ref == 0)
             break;
     }
+    fprintf(stderr, "Out of loop\n");
 }
 
 /**

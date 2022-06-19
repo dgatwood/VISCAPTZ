@@ -859,7 +859,7 @@ struct can_frame canBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data
   struct can_frame message;
   message.can_id = can_id;
   message.can_dlc = can_dlc;
-  memcpy(message.data, can_id, sizeof(message.data));
+  memcpy(message.data, data, sizeof(message.data));
   return message;
 }
 
@@ -911,8 +911,8 @@ void updatePanAndTiltPosition(void) {
 //         Response: 0x07 0xXX 0x01 0xDD 0xCC 0xBB 0xAA
 
 
-  uint8_t data[8] = { 0x04, oldCANBusID, 0x01, 0, 0, 0, 0, 0 };
-  struct can_frame message = canBusFrameMake(oldCANBusID, 4, data);
+  uint8_t data[8] = { 0x04, 0x00, 0x01, 0, 0, 0, 0, 0 };
+  struct can_frame message = canBusFrameMake(0x00, 4, data);
 
   if (mcp2515.sendMessage(&message) == MCP2515::ERROR_OK) {
     struct can_frame response;

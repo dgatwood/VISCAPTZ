@@ -75,8 +75,11 @@ static void PCA9685_SetPWM(UBYTE channel, UWORD on, UWORD off)
  */
 void PCA9685_Init(char addr)
 {
+fprintf(stderr, "Calling DEV_I2C_Init\n");
     DEV_I2C_Init(addr);
+fprintf(stderr, "Calling DEV_I2C_WriteByte\n");
     DEV_I2C_WriteByte(MODE1, 0x00);
+fprintf(stderr, "Done\n");
 }
 
 /**

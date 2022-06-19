@@ -4,6 +4,8 @@
 
 #include "constants.h"
 
+void reassign_encoder_device_id(int oldCANBusID, int newCANBusID);
+
 extern bool motorPanTiltPositionEnabled;
 
 bool motorModuleInit(void);

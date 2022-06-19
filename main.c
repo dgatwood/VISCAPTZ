@@ -107,6 +107,17 @@ pthread_t motor_control_thread;
 #pragma mark - Main
 
 int main(int argc, char *argv[]) {
+
+#if USE_CANBUS
+  if (argc > 4) {
+    if (!strcmp(argv[1], "--reassign")) {
+      int oldCANBusID = atoi(argv[2]);
+      int newCANBusID = atoi(argv[3]);
+      reassign_encoder_device_id(oldCANBusID, newCANBusID);
+    }
+  }
+#endif
+
   pthread_create(&network_thread, NULL, runNetworkThread, NULL);
 
   SET_IP_ADDR("127.0.0.1");
