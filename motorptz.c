@@ -17,6 +17,8 @@
 #include "main.h"
 #include "constants.h"
 
+#define ENABLE_STATUS_DEBUGGING 0
+
 #if ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
 #include "motorcontrol/lib/Config/DEV_Config.h"
@@ -27,11 +29,10 @@
 // #include "motorcontrol/MotorDriver.c"
 // #include "motorcontrol/PCA9685.c"
 
-#else  // !(ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
+#endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
+
 // For printing zoom speed.
 #include "panasonicptz.h"
-
-#endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
 #if ENABLE_HARDWARE && USE_CANBUS
 #include <linux/can.h>
@@ -129,7 +130,7 @@ int motorOpenCANSock(void) {
     system("sudo ip link set can0 type can bitrate 500000");
     system("sudo ifconfig can0 up");
 
-    bool localDebug = true;
+    bool localDebug = false;
     if (localDebug) fprintf(stderr, "Opening CANBus socket... ");
     int sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (sock < 0) {
@@ -144,11 +145,6 @@ int motorOpenCANSock(void) {
         perror("ioctl failed");
         return -1;
     }
-
-
-    int recv_own_msgs = 1;
-    setsockopt(sock, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS,
-           &recv_own_msgs, sizeof(recv_own_msgs));
 
     struct sockaddr_can sockaddr;
     sockaddr.can_family = AF_CAN;
@@ -201,7 +197,7 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
 #endif  // USE_CANBUS
 
 void *runPositionMonitorThread(void *argIgnored) {
-    bool localDebug = true;
+    bool localDebug = false;
 #if ENABLE_HARDWARE
   #if USE_CANBUS
     int sock = motorOpenCANSock();
@@ -248,26 +244,18 @@ void *runPositionMonitorThread(void *argIgnored) {
 
 #if USE_CANBUS
 void handleCANFrame(struct can_frame *frame);
-bool sendCANRequestFrame(int sock);
+bool sendCANRequestFrame(int sock, uint8_t deviceID);
 
 bool updatePositionsCANBus(int sock) {
-    bool localDebug = true;
+    bool localDebug = false;
     bool gotRead = false;
-    fd_set readfds; // , writefds;
+    fd_set readfds;
     FD_ZERO(&readfds);
-    // FD_ZERO(&writefds);
-    //FD_SET(sock, &readfds);
-    // FD_SET(sock, &writefds);
+    FD_SET(sock, &readfds);
 
     struct timeval tv;
-#define SLOW
-#ifdef SLOW
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-#else  // !SLOW
     tv.tv_sec = 0;
-    tv.tv_usec = 100000;  // 100 reads per second.
-#endif  //SLOW
+    tv.tv_usec = 100000;  // 10 reads per second.
 
     int retval = select(sock + 1, &readfds, NULL /* &writefds */, NULL, &tv);
     if (retval > 0) {
@@ -291,7 +279,12 @@ bool updatePositionsCANBus(int sock) {
     if (!gotRead) {
         if (localDebug) fprintf(stderr, "Timed out reading CANBus packet.  Requesting data.\n");
         if (localDebug) fprintf(stderr, "Sending data request.\n");
-        if (!sendCANRequestFrame(sock)) {
+        if (!sendCANRequestFrame(sock, panCANBusID)) {
+            if (localDebug) fprintf(stderr, "CANBus packet write failed.\n");
+            close(sock);
+            return false;
+        }
+        if (!sendCANRequestFrame(sock, tiltCANBusID)) {
             if (localDebug) fprintf(stderr, "CANBus packet write failed.\n");
             close(sock);
             return false;
@@ -311,7 +304,7 @@ struct can_frame canBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data
 }
 
 void handleCANFrame(struct can_frame *response) {
-    bool localDebug = true;
+    bool localDebug = false;
     if (localDebug) fprintf(stderr, "Processing CAN frame.\n");
     if (response->data[0] == 0x7 && response->data[2] == 0x1) {
         long value = response->data[3] | (response->data[4] << 8) |
@@ -334,12 +327,14 @@ void handleCANFrame(struct can_frame *response) {
     }
 }
 
-bool sendCANRequestFrame(int sock) {
-    uint8_t deviceID = 0x00;  // Device 0 is broadcast, 1 is encoder.
+bool sendCANRequestFrame(int sock, uint8_t deviceID) {
+    bool localDebug = false;
     uint8_t data[8] = { 0x04, deviceID, 0x01, 0, 0, 0, 0, 0 };
-    struct can_frame message = canBusFrameMake(0x42, 4, data);
+    struct can_frame message = canBusFrameMake(deviceID, 4, data);
 
-fprintf(stderr, "Writing to socket %d frame %d %d\n", sock, message.can_id, message.can_dlc);
+    if (localDebug) {
+        fprintf(stderr, "Writing to socket %d frame %d %d\n", sock, message.can_id, message.can_dlc);
+    }
 
     ssize_t bytesWritten = write(sock, &message, sizeof(message));
     if (bytesWritten != sizeof(message)) {
@@ -354,6 +349,7 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
     uint8_t data[8] = { 0x04, oldCANBusID, 0x02, newCANBusID, 0, 0, 0, 0 };
     struct can_frame message = canBusFrameMake(oldCANBusID, 4, data);
 
+    fprintf(stderr, "Reassigning device %d to %d\n", oldCANBusID, newCANBusID);
     if (write(sock, &message, sizeof(message)) == sizeof(message)) {
         struct can_frame response;
         if (read(sock, &response, sizeof(response)) == sizeof(response)) {
@@ -404,24 +400,32 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
 #pragma mark - Motor control thread
 
 void *runMotorControlThread(void *argIgnored) {
+  bool localDebug = false;
   while (1) {
-#if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
     int scaledPanSpeed = abs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
     int scaledTiltSpeed = abs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
 
+#if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
+    if (localDebug) fprintf(stderr, "Setting motor A speed.\n");
     Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
+    if (localDebug) fprintf(stderr, "Setting motor B speed.\n");
     Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
-#else  // !ENABLE_HARDWARE
+    if (localDebug) fprintf(stderr, "Done.\n");
+#endif  // ENABLE_HARDWARE
+
     int64_t zoom_speed = GET_ZOOM_SPEED();
     int64_t zoom_position = GET_ZOOM_POSITION();
 
-#define DEBUG_MODE 0
-#if DEBUG_MODE
-    printf("PAN SPEED: %" PRId64 " TILT SPEED: %" PRId64 " PAN POSITION: %" PRId64 " TILT POSITION: %" PRId64
-           " ZOOM SPEED: %" PRId64 " ZOOM POSITION: %" PRId64 "\n",
-           g_pan_speed, g_tilt_speed, g_last_pan_position, g_last_tilt_position, zoom_speed, zoom_position);
+#if ENABLE_STATUS_DEBUGGING
+    static int count = 0;
+    if (!(count++ % 50)) {
+        printf("PAN SPEED: %" PRId64 " (%d) TILT SPEED: %" PRId64 " (%d) "
+               "PAN POSITION: %" PRId64 " TILT POSITION: %" PRId64
+               " ZOOM SPEED: %" PRId64 " ZOOM POSITION: %" PRId64 "\n",
+               g_pan_speed, scaledPanSpeed, g_tilt_speed, scaledTiltSpeed,
+               g_last_pan_position, g_last_tilt_position, zoom_speed, zoom_position);
+    }
 #endif
-#endif  // ENABLE_HARDWARE
     usleep(10000);  // Update 100x per second (latency-critical).
   }
   return NULL;

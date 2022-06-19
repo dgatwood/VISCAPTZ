@@ -109,7 +109,7 @@ pthread_t motor_control_thread;
 int main(int argc, char *argv[]) {
 
 #if USE_CANBUS
-  if (argc > 4) {
+  if (argc >= 4) {
     if (!strcmp(argv[1], "--reassign")) {
       int oldCANBusID = atoi(argv[2]);
       int newCANBusID = atoi(argv[3]);
@@ -752,8 +752,8 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 // stick, abort any in-progress move immediately.
                 if (!moveInProgress() || panSpeed != 0 || tiltSpeed != 0) {
                     cancelRecallIfNeeded("Pan/tilt command received");
-                    setAxisSpeed(axis_identifier_pan, panSpeed);
-                    setAxisSpeed(axis_identifier_tilt, tiltSpeed);
+                    setAxisSpeed(axis_identifier_pan, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed));
+                    setAxisSpeed(axis_identifier_tilt, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed));
                 }
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
