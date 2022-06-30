@@ -4,7 +4,7 @@ CFLAGS=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -
 # If not using hardware, remove -lbcm2835
 LDFLAGS=-lpthread -lm -lbcm2835 -Lmotorcontrol -lmotorcontrol
 
-viscaptz: main.o panasonicptz.o motorptz.o motorcontrol/libmotorcontrol.so
+viscaptz: main.o panasonicptz.o motorptz.o motorcontrol/libmotorcontrol.so *.h
 	${CC} ${CFLAGS} main.o panasonicptz.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
 
 motorcontrol/libmotorcontrol.so:

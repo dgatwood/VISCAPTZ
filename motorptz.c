@@ -406,9 +406,9 @@ void *runMotorControlThread(void *argIgnored) {
     int scaledTiltSpeed = abs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
 
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
-    if (localDebug) fprintf(stderr, "Setting motor A speed.\n");
+    if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
     Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
-    if (localDebug) fprintf(stderr, "Setting motor B speed.\n");
+    if (localDebug) fprintf(stderr, "Setting motor B speed to %d.\n", scaledTiltSpeed);
     Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
     if (localDebug) fprintf(stderr, "Done.\n");
 #endif  // ENABLE_HARDWARE

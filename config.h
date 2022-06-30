@@ -20,6 +20,13 @@
 #define panCANBusID 1
 #define tiltCANBusID 2
 
+// The minimum speed used for panning or tilting programmatically.
+#define MIN_PAN_TILT_SPEED 100
+
+// Set to 1 if recall moves the motors in the wrong direction.
+#define INVERT_PAN_AXIS 0
+#define INVERT_TILT_AXIS 1
+
 // For RS485 encoders.
 #define SERIAL_DEV_FILE_FOR_TILT "/dev/char/serial/uart0"
 #define SERIAL_DEV_FILE_FOR_PAN "/dev/char/serial/uart1"

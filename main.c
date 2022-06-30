@@ -77,7 +77,7 @@ bool absolutePositioningSupportedForAxis(axis_identifier_t axis);
 void handleRecallUpdates(void);
 int64_t getAxisPosition(axis_identifier_t axis);
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed);
-bool setAxisSpeed(axis_identifier_t axis, int64_t position);
+bool setAxisSpeed(axis_identifier_t axis, int64_t position, bool debug);
 void cancelRecallIfNeeded(char *context);
 
 visca_response_t *failedVISCAResponse(void);
@@ -189,6 +189,8 @@ int actionProgress(int64_t startPosition, int64_t curPosition, int64_t endPositi
   int64_t total = llabs(endPosition - startPosition);
 
   if (total == 0) {
+    fprintf(stderr, "End position (%" PRId64 ") = start position (%" PRId64 ").  Doing nothing.\n",
+            startPosition, endPosition);
     return 1000;
   }
 
@@ -231,8 +233,9 @@ int actionProgress(int64_t startPosition, int64_t curPosition, int64_t endPositi
 ///                             of the total move length).
 int computeSpeed(int progress) {
     if (progress < 100 || progress > 900) {
-        // For now, we evenly ramp up to 10% and down from 90%.  This is *NOT* ideal,
-        // particularly given that we get zoom position updates only once per second.
+        // For now, we evenly ramp up to full speed at 10% progress and down starting at 90%.
+        // This is *NOT* ideal, particularly if we use P2 protocol and get zoom position updates
+        // only once per second.
         int distance_to_nearest_endpoint = (progress >= 900) ? (1000 - progress) : progress;
 
         // With vertical acccuracy of ± .1% at the two endpoints (i.e. 0.001 at the bottom,
@@ -274,7 +277,7 @@ bool moveInProgress(void) {
 }
 
 void handleRecallUpdates(void) {
-  bool localDebug = false;
+  int localDebug = 1;
 
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
     if (gAxisMoveInProgress[axis]) {
@@ -284,6 +287,13 @@ void handleRecallUpdates(void) {
 
       // Compute how far into the motion we are (with a range of 0 to 1,000).
       int direction = (gAxisMoveTargetPosition[axis] > gAxisMoveStartPosition[axis]) ? 1 : -1;
+      fprintf(stderr, "Axis %d direction %d\n", axis, direction);
+      if ((axis == axis_identifier_pan) && INVERT_PAN_AXIS) {
+        direction = -direction;
+      } else if ((axis == axis_identifier_tilt) && INVERT_TILT_AXIS) {
+        direction = -direction;
+      }
+      fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
       int64_t axisPosition = getAxisPosition(axis);
       int panProgress = actionProgress(gAxisMoveStartPosition[axis], axisPosition,
                                        gAxisMoveTargetPosition[axis], gAxisPreviousPosition[axis],
@@ -295,13 +305,15 @@ void handleRecallUpdates(void) {
             fprintf(stderr, "AXIS %d MOTION COMPLETE\n", axis);
         }
         gAxisMoveInProgress[axis] = false;
-        setAxisSpeed(axis, 0);
+        setAxisSpeed(axis, 0, false);
       } else {      
-        // Scale based on max speed out of 24 (VISCA percentage) and scale to a range of -511 to 511.
+        // Scale based on max speed out of 24 (VISCA percentage) and scale to a range of
+        // -1000 to 1000 (core speed).
         int axis_scale = getAxisScale(axis);
-        setAxisSpeed(axis, computeSpeed(panProgress) * direction);
+        int speed = MAX(computeSpeed(panProgress), MIN_PAN_TILT_SPEED);
+        setAxisSpeed(axis, speed * direction, localDebug);
       }
-    } else if (localDebug) {
+    } else if (localDebug > 1) {
       fprintf(stderr, "NOT UPDATING AXIS %d: NOT IN MOTION\n", axis);
     }
   }
@@ -361,7 +373,12 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
     return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed);
 }
 
-bool setAxisSpeed(axis_identifier_t axis, int64_t speed) {
+bool setAxisSpeed(axis_identifier_t axis, int64_t speed, bool debug) {
+  if (debug) {
+    if (gAxisLastMoveSpeed[axis] != speed) {
+      fprintf(stderr, "CHANGED AXIS %d from %" PRId64 " to %" PRId64 "\n", gAxisLastMoveSpeed[axis], speed);
+    }
+  }
   gAxisLastMoveSpeed[axis] = speed;
   switch(axis) {
     case axis_identifier_pan:
@@ -387,9 +404,15 @@ bool absolutePositioningSupportedForAxis(axis_identifier_t axis) {
 }
 
 void cancelRecallIfNeeded(char *context) {
-  fprintf(stderr, "RECALL CANCELLED (%s)\n", context);
+  bool didCancel = false;
   for (axis_identifier_t axis = axis_identifier_pan; axis < NUM_AXES; axis++) {
+    if (gAxisMoveInProgress[axis]) {
+      didCancel = true;
+    }
     gAxisMoveInProgress[axis] = false;
+  }
+  if (didCancel) {
+    fprintf(stderr, "RECALL CANCELLED (%s)\n", context);
   }
 }
 
@@ -654,7 +677,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 // stick, abort any in-progress move immediately.
                 if (!moveInProgress() || zoomSpeed != 0) {
                     cancelRecallIfNeeded("Zoom command received");
-                    setAxisSpeed(axis_identifier_zoom, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed));
+                    setAxisSpeed(axis_identifier_zoom, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed), false);
                 }
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;
@@ -752,8 +775,8 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 // stick, abort any in-progress move immediately.
                 if (!moveInProgress() || panSpeed != 0 || tiltSpeed != 0) {
                     cancelRecallIfNeeded("Pan/tilt command received");
-                    setAxisSpeed(axis_identifier_pan, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed));
-                    setAxisSpeed(axis_identifier_tilt, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed));
+                    setAxisSpeed(axis_identifier_pan, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed), false);
+                    setAxisSpeed(axis_identifier_tilt, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed), false);
                 }
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
@@ -858,7 +881,12 @@ bool savePreset(int presetNumber) {
         FILE *fp = fopen(presetFilename(presetNumber), "w");
         fwrite((void *)&preset, sizeof(preset), 1, fp);
         fclose(fp);
-        fprintf(stderr, "Saving preset %d\n", presetNumber);
+        fprintf(stderr, "Saving preset %d (pan=%" PRId64 ", tilt=%" PRId64
+                        ", zoom=%" PRId64 "\n",
+                presetNumber,
+                preset.panPosition,
+                preset.tiltPosition,
+                preset.zoomPosition);
     } else {
         fprintf(stderr, "Failed to save preset %d\n", presetNumber);
     }
