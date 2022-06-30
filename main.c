@@ -600,15 +600,15 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
     case 0x09:
       switch(command[2]) {
         case 0x7e:
-          if (command[3] == 0x01 && command[4] == 0x0a && command[6] == 0xff) {
+          if (command[3] == 0x01 && command[4] == 0x0a) {
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
             int tallyState = GET_TALLY_STATE();
             visca_response_t *response = NULL;
-            if (command[5] == 0x00) {
-              // 8x 09 7E 01 0A 00 FF -> y0 50 0p FF
-              response = tallyEnabledResponse(tallyState);
-            } else if (command[5] == 0x01) {
+            if (command[5] == 0x01 && command[6] == 0xFF) {
               // 8x 09 7E 01 0A 01 FF -> y0 50 0p FF
+              response = tallyEnabledResponse(tallyState);
+            } else if (command[5] == 0xFF) {
+              // 8x 09 7E 01 0A FF -> y0 50 0p FF
               response = tallyModeResponse(tallyState);
             } else {
               break;
@@ -627,6 +627,30 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
   // Zoom position inquiry: 8x 09 04 47 FF -> y0 50 0p 0q 0r 0s FF ; pqrs -> 0x0000.0x40000
 
   return false;
+}
+
+bool setTallyOff() {
+#ifdef SET_TALLY_STATE
+  return SET_TALLY_STATE(kTallyStateOff);
+#else
+  return false;
+#endif
+}
+
+bool setTallyRed() {
+#ifdef SET_TALLY_STATE
+  return SET_TALLY_STATE(kTallyStateRed);
+#else
+  return false;
+#endif
+}
+
+bool setTallyGreen() {
+#ifdef SET_TALLY_STATE
+  return SET_TALLY_STATE(kTallyStateGreen);
+#else
+  return false;
+#endif
 }
 
 void setResponseArray(visca_response_t *response, uint8_t *array, uint8_t count) {
@@ -840,12 +864,70 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 break;
             }
           break;
+
+        case 0x7E: // Tally
+          if (command[3] == 0x01 && command[4] == 0x0A) {
+            if (command[5] == 0x00 && command[7] == 0xFF) {
+              // 0x81 01 7E 01 0A 00 0p FF : Tally: p=2: on p=3: off.
+              //                             OR p=0: off, p=1: green, p=2: red, p=4: blue.
+              switch(command[6]) {
+                case 0:
+                case 3:
+                  if (!setTallyOff()) {
+                    return false;
+                  }
+                  break;
+                case 2:
+                  if (!setTallyRed()) {
+                    return false;
+                  }
+                  break;
+                case 1:
+                case 4:
+                  if (!setTallyGreen()) {
+                    return false;
+                  }
+                  break;
+                default:
+                  return false;
+              }
+              while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
+                return true;
+            } else if (command[5] == 0x00 && command[7] == 0xFF) {
+              // 0x81 01 7E 01 0A 01 0p FF : Tally: 0=off 4=low 5=high red 6=high green 7=disable power light.
+              switch(command[6]) {
+                case 0:
+                  if (!setTallyOff()) {
+                    return false;
+                  }
+                  break;
+                case 4:
+                case 5:
+                  if (!setTallyRed()) {
+                    return false;
+                  }
+                  break;
+                case 6:
+                  if (!setTallyGreen()) {
+                    return false;
+                  }
+                  break;
+                default:
+                  return false;
+              }
+              while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
+                return true;
+            }
+          }
         default:
           break;
       }
     case 0x0A: // Unimplemented
       // 0x81 0a 01 03 10 ff : AF calibration.
+
+      // PTZOptics tally protocol
       // 0x81 0a 02 02 0p ff : Tally: p=1: flashing; p=2: solid; p=3: normal.
+
       break;
     case 0x0B: // Unimplemented
       // 0x81 0b 01 xx ff : Tally: 01 = high; 02 = medium; 03 = low; 04 = off.
