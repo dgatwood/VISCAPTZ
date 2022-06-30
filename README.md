@@ -59,11 +59,46 @@ aluminum, but for now, the PETG is doing the job.
 Status:
 -------
 
-Using simulated hardware, the software is responding to VISCA pan, tilt, and
-zoom commands.  I've tested both manual drive commands and saving/loading
-presets.
+This software can now properly drive both motors and read the position
+values from both CAN encoders, and can reprogram the CAN encoders to change
+their IDs.
 
-The next step is to actually hook up hardware and figure out all the things
-that stop working when I do.  But I decided to go ahead and release this
-early so that if folks want to play with it using different hardware, they
-can start looking at it.
+The next step is to install the gears on the encoders so that I can do
+real-world testing of the absolute positioning capabilities and do whatever
+motor speed tuning is necessary to make it behave sensibly.
+
+After that tuning is done, the only remaining piece of functionality is
+a thread to obtain tally light information from OBS (via OBS-Websocket) or
+Tricaster software (by polling) and push that tally light state to the camera.
+
+Installation:
+-------------
+
+First, add the following bits to your /boot/config.txt file:
+
+    # Waveshare Motor Driver Hat
+    dtparam=i2c_arm=on
+
+    # Waveshare RS485 CAN Hat
+    dtoverlay=mcp2515-can0,oscillator=12000000,interrupt=25,spimaxfrequency=2000000
+    dtparam=spi=on
+
+Next, install current versions of the bcm2835 code and WiringPi if your versions
+are older.  The versions that come in Buster are not usable.  I didn't feel like
+updating my base image to Bullseye, so I have no idea if these steps are needed
+in that version.  To install them, type:
+
+    wget http://www.airspayce.com/mikem/bcm2835/bcm2835-1.70.tar.gz
+    tar zxvf bcm2835-1.70.tar.gz
+    cd bcm2835-1.70/
+    sudo ./configure
+    sudo make && sudo make check && sudo make install
+
+    wget https://project-downloads.drogon.net/wiringpi-latest.deb
+    sudo dpkg -i wiringpi-latest.deb
+
+Finally, the Panasonic support requires libcurl.  To install it, type:
+
+    sudo apt-get install libcurl4-openssl-dev
+
+Then just `make` and `./viscaptz`.
