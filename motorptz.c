@@ -160,6 +160,7 @@ int motorOpenCANSock(void) {
 }
 
 bool updatePositionsCANBus(int sock);
+void resetCenterPositionsCANBus(int sock);
 
 #else  // !USE_CANBUS
 
@@ -192,7 +193,8 @@ int motorOpenSerialDev(char *path) {
   return fd;
 }
 
-void updatePositionsSerial(int pan_fd, int tilt_fd) {
+void updatePositionsSerial(int pan_fd, int tilt_fd);
+void resetCenterPositionsSerial(int tilt_fd, int pan_fd);
 
 #endif  // USE_CANBUS
 
@@ -211,6 +213,18 @@ void *runPositionMonitorThread(void *argIgnored) {
     }
   #endif  // USE_CANBUS
 #endif  // ENABLE_HARDWARE
+
+  // During calibration, we set the current position to be the midpoint of the encoders,
+  // to minimize the chances of going off-scale low/high, because this software makes
+  // no attempt at understanding wraparound right now.
+  if (gCalibrationMode) {
+  #if USE_CANBUS
+    resetCenterPositionsCANBus(sock);
+  #else
+    resetCenterPositionsSerial(tilt_fd);
+    resetCenterPositionsSerial(pan_fd);
+  #endif
+  }
 
   // Read the position.
   while (1) {
@@ -310,20 +324,19 @@ void handleCANFrame(struct can_frame *response) {
         long value = response->data[3] | (response->data[4] << 8) |
                      (response->data[5] << 16) | (response->data[6] << 24);
         if (response->data[1] == panCANBusID) {
-            if (localDebug) fprintf(stderr, "Got pan: %d.\n", value);
+            if (localDebug) fprintf(stderr, "Got pan: %ld.\n", value);
             g_last_pan_position = value;
         } else if (response->data[1] == tiltCANBusID) {
-            if (localDebug) fprintf(stderr, "Got tilt: %d.\n", value);
+            if (localDebug) fprintf(stderr, "Got tilt: %ld.\n", value);
             g_last_tilt_position = value;
         } else {
             if (localDebug) fprintf(stderr, "Received message from unknown CAN bus ID %d", response->data[1]);
         }
     } else {
-        char buf[120];
-        fprintf(stderr, "Unknown response: %02x %02x %02x %02x %02x %02x %02x %02x from device %ld with length code %d\n",
+        fprintf(stderr, "Unknown response: %02x %02x %02x %02x %02x %02x %02x %02x from device %lu with length code %d\n",
                         response->data[0], response->data[1], response->data[2], response->data[3],
                         response->data[4], response->data[5], response->data[6], response->data[7],
-                        response->can_id, response->can_dlc);
+                        (unsigned long)response->can_id, response->can_dlc);
     }
 }
 
@@ -371,6 +384,37 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
     }
 }
 
+void resetCenterPositionOfCANBusEncoder(int sock, int CANBusID) {
+    uint8_t data[8] = { 0x04, CANBusID, 0x0C, 0x01, 0, 0, 0, 0 };
+    struct can_frame message = canBusFrameMake(CANBusID, 4, data);
+
+    fprintf(stderr, "Setting the midpint of the encoder to the current position.\n");
+    if (write(sock, &message, sizeof(message)) == sizeof(message)) {
+        struct can_frame response;
+        if (read(sock, &response, sizeof(response)) == sizeof(response)) {
+            if (response.data[0] == 0x4 && response.data[1] == CANBusID &&
+                response.data[2] == 0xC && response.data[3] == 0) {
+                    fprintf(stderr, "Reset successful.");
+            } else {
+                fprintf(stderr, "Reset failed with error %d\n", response.data[3]);
+                exit(1);
+            }
+        } else {
+            fprintf(stderr, "Reset failed (socket read).\n");
+            exit(1);
+        }
+    } else {
+        fprintf(stderr, "Reset failed (socket write).\n");
+        exit(1);
+    }
+}
+
+void resetCenterPositionsCANBus(int sock) {
+  resetCenterPositionOfCANBusEncoder(sock, panCANBusID);
+  resetCenterPositionOfCANBusEncoder(sock, tiltCANBusID);
+}
+
+
 #else  // !USE_CANBUS
 void updatePositionsSerial(int pan_fd, int tilt_fd) {
     static const uint8_t requestBuf[] =
@@ -391,6 +435,25 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
 
     g_last_tilt_position = tilt_position;
 }
+
+void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
+    // Register 0x000E: Write 0x0001.  (Function support code 0x06)
+    // [Device ID = 1] 06 00 01 00 0E [CRC high] [CRC low]
+
+    static const uint8_t requestBuf[] = { 0x01, 0x06, 0x00, 0x01, 0x00, 0x0E, 0xCE, 0x59 };
+    const uint8_t responseBuf[5];
+
+    write(pan_fd, requestBuf, sizeof(requestBuf));
+    read(pan_fd, (void *)responseBuf, sizeof(responseBuf));
+    assert(responseBuf[0] == 1);
+    assert(responseBuf[1] == 0x10);
+
+    write(tilt_fd, requestBuf, sizeof(requestBuf));
+    read(tilt_fd, (void *)responseBuf, sizeof(responseBuf));
+    assert(responseBuf[0] == 1);
+    assert(responseBuf[1] == 0x10);
+}
+
 #endif  // USE_CANBUS
 #else  // !ENABLE_ENCODER_HARDWARE
 void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
@@ -413,10 +476,10 @@ void *runMotorControlThread(void *argIgnored) {
     if (localDebug) fprintf(stderr, "Done.\n");
 #endif  // ENABLE_HARDWARE
 
+#if ENABLE_STATUS_DEBUGGING
     int64_t zoom_speed = GET_ZOOM_SPEED();
     int64_t zoom_position = GET_ZOOM_POSITION();
 
-#if ENABLE_STATUS_DEBUGGING
     static int count = 0;
     if (!(count++ % 50)) {
         printf("PAN SPEED: %" PRId64 " (%d) TILT SPEED: %" PRId64 " (%d) "

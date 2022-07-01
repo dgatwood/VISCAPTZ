@@ -106,12 +106,21 @@ void *runMotorControlThread(void *argIgnored);
 
 pthread_t motor_control_thread;
 
+bool gCalibrationMode = false;
+
+void do_calibration(void);
+
 #pragma mark - Main
 
 int main(int argc, char *argv[]) {
 
   run_startup_tests();
 
+  if (argc >= 2) {
+    if (!strcmp(argv[1], "--calibrate")) {
+      gCalibrationMode = true;
+    }
+  }
 #if USE_CANBUS
   if (argc >= 4) {
     if (!strcmp(argv[1], "--reassign")) {
@@ -136,6 +145,10 @@ int main(int argc, char *argv[]) {
   }
 
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
+
+  if (gCalibrationMode) {
+    do_calibration();
+  }
 
   // Spin this thread forever for now.
   while (1) {
@@ -310,18 +323,6 @@ int computeSpeed(int progress) {
     }
 }
 
-int getAxisScale(axis_identifier_t axis) {
-    switch(axis) {
-        case axis_identifier_pan:
-            return SCALE_CORE;
-        case axis_identifier_tilt:
-            return SCALE_CORE;
-        case axis_identifier_zoom:
-            return SCALE_CORE;
-    }
-    return SCALE_CORE;
-}
-
 bool moveInProgress(void) {
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
     if (gAxisMoveInProgress[axis]) {
@@ -333,6 +334,17 @@ bool moveInProgress(void) {
 
 void handleRecallUpdates(void) {
   int localDebug = 1;
+
+  // Do not attempt to recall positions in calibration mode!
+  if (gCalibrationMode) {
+    for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
+       if (gAxisMoveInProgress[axis]) {
+         fprintf(stderr, "Ignoring recall while in calibration mode.\n");
+         gAxisMoveInProgress[axis] = 0;
+       }
+    }
+    return;
+  }
 
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
     if (gAxisMoveInProgress[axis]) {
@@ -364,7 +376,6 @@ void handleRecallUpdates(void) {
       } else {      
         // Scale based on max speed out of 24 (VISCA percentage) and scale to a range of
         // -1000 to 1000 (core speed).
-        int axis_scale = getAxisScale(axis);
         int speed = MAX(computeSpeed(panProgress), MIN_PAN_TILT_SPEED);
         setAxisSpeed(axis, speed * direction, localDebug);
       }
@@ -431,7 +442,7 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
 bool setAxisSpeed(axis_identifier_t axis, int64_t speed, bool debug) {
   if (debug) {
     if (gAxisLastMoveSpeed[axis] != speed) {
-      fprintf(stderr, "CHANGED AXIS %d from %" PRId64 " to %" PRId64 "\n", gAxisLastMoveSpeed[axis], speed);
+      fprintf(stderr, "CHANGED AXIS %d from %" PRId64 " to %" PRId64 "\n", axis, gAxisLastMoveSpeed[axis], speed);
     }
   }
   gAxisLastMoveSpeed[axis] = speed;
@@ -1076,6 +1087,68 @@ bool recallPreset(int presetNumber) {
     return retval && retval2;
 }
 
+double timeStamp(void);
+
+void do_calibration(void) {
+  int64_t lastPosition[NUM_AXES];
+  int64_t maxPosition[NUM_AXES];
+  int64_t minPosition[NUM_AXES];
+  bool lastMoveWasPositive[NUM_AXES];  // Motor forwards should be right/down
+  bool lastMoveWasPositiveAtEncoder[NUM_AXES];  // Last move increased encoder position.
+  bool axisHasMoved[NUM_AXES];
+
+  bzero(&axisHasMoved, sizeof(axisHasMoved));
+  bzero(&lastMoveWasPositive, sizeof(lastMoveWasPositive));
+  bzero(&lastMoveWasPositiveAtEncoder, sizeof(lastMoveWasPositiveAtEncoder));
+
+  for (axis_identifier_t axis = 0; axis < NUM_AXES; axis++) {
+    int64_t value = getAxisPosition(axis);
+    lastPosition[axis] = value;
+    maxPosition[axis] = value;
+    minPosition[axis] = value;
+  }
+
+  // After both pan and tilt axes have moved AND the gimbal has been idle for at
+  // least 10 seconds, stop calibrating.
+  double lastMoveTime = timeStamp();
+  while (!axisHasMoved[axis_identifier_pan] || !axisHasMoved[axis_identifier_tilt] ||
+          (timeStamp() - lastMoveTime) < 10) {
+    for (axis_identifier_t axis = 0; axis < NUM_AXES; axis++) {
+      int64_t value = getAxisPosition(axis);
+      if (lastPosition[axis] != value) {
+        lastMoveTime = timeStamp();
+        axisHasMoved[axis] = true;
+        if (lastPosition[axis] > value) {
+          lastMoveWasPositiveAtEncoder[axis] = true;
+        } else {
+          lastMoveWasPositiveAtEncoder[axis] = false;
+        }
+        lastPosition[axis] = value;
+      }
+      if (maxPosition[axis] > value) {
+        maxPosition[axis] = value;
+      }
+      if (minPosition[axis] < value) {
+        minPosition[axis] = value;
+      }
+
+      // Ignore tiny bits of motion to avoid the risk of self-centering
+      // joysticks going slightly too far.
+      if (gAxisLastMoveSpeed[axis] > 10) {
+        lastMoveWasPositive[axis] = true;
+      } else if (gAxisLastMoveSpeed[axis] < -10) {
+        lastMoveWasPositive[axis] = false;
+      }
+      usleep(10000);  // Run 100 times per second.
+    }
+  }
+}
+
+double timeStamp(void) {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0);
+}
 
 void run_startup_tests(void) {
   char *bogusValue = getConfigKey("nonexistentKey");
@@ -1099,4 +1172,3 @@ void run_startup_tests(void) {
   value2 = getConfigKey("key2");
   assert(!strcmp(value2, "value4"));
 }
-

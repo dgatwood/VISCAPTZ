@@ -2,6 +2,9 @@
 
 #pragma mark - Base implementation functions, callable from modules.
 
+// True if we are in calibration mode.
+bool gCalibrationMode;
+
 int scaleSpeed(int speed, int fromScale, int toScale);
 
 int debugGetTallyState(void);
