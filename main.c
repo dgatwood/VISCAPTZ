@@ -246,7 +246,58 @@ int computeSpeed(int progress) {
         // 1 / (1 + e^-(((x - 50)*7 / 50)) gives us a curve from 0 to 100 (one tenth the
         //                                 progress period).
         // 1 / (1 + e^-(7x/50 - 7)) is simplified.
-        // 1 / (1 + e^(-7x/50 + 7) is fully simplified.
+        // 1 / (1 + e^(7 - (7x/50))) is fully simplified.
+        //
+        // In the future, this will move to a time-based curve, rather than a distance-based
+        // curve.  The explanation below tells how this will happen.
+        //
+        // The integral of this is -(1/7)((-50 * ln (1+e^(7-(7x /50))))-7x+350).
+        // Evaluated from 0 to 100, this gives us 50.0065104747 - 0.00651047466,
+        // or exactly an area of 50 under the curve.  So the s-curves average 50%
+        // across their duration.
+        //
+        // This means that the average speed across the entire time range from 0 to 1000
+        // is ((max_speed * 800) + (0.5 * max_speed * 200)) / 1000.  We can simplify this
+        // to 0.9 * max_speed.
+        //
+        // So if we know that we want a motion to take 10 seconds (for example), and if
+        // that motion is 5000 units of distance, it needs to move 500 units per second,
+        // on average.  Since we know that the average speed of the move, including the
+        // two curves, will be only 0.9 times the speed that the motor moves during the
+        // middle 80% of the move, that means that the peak speed during the middle 80%
+        // should be 10/9ths of 500, or about 555.55.
+        //
+        // With that, we can calculate the exact fraction of maximum speed that the
+        // motors should run.
+        //
+        // However, motors are nonlinear.  They don't move at all at low power, and
+        // their speed isn't exactly linear in the duty cycle.  To compute the actual
+        // output levels correctly, we need to do a calibration stage.  Here's how that
+        // will work:
+        //
+        // 1.  Run ./viscaptz --calibrate
+        // 2.  Quickly figure out which way the pan control moves the camera, and
+        //     which way the tilt moves the camera.
+        // 3.  Move the camera to the leftmost position that you're comfortable
+        //     using, followed by the rightmost position.
+        // 4.  Move the camera to the maximum upwards position that you're comfortable
+        //     using, followed by the maximum downwards position.
+        // 5.  Wait ten seconds without moving the camera.  The software will interpet
+        //     the last horizontal move direction to be right, and the last vertical
+        //     move direction to be down, and will invert the motion on that axis as
+        //     needed to ensure that VISCA left/right/up/down moves go in the right
+        //     direction.
+        // 6.  The camera will then pan towards the left at progressively increasing
+        //     speeds, computing the number of positions per second at each speed,
+        //     rewinding to the right when it hits the left edge.
+        // 7.  The camera will perform a similiar calibration for the tilt.
+        // 8.  The camera will perform a similiar calibration for the zoom.
+        //
+        // The result will be a table of positions-per-second values for each speed
+        // value.  At run time, the app might convert this into a balanced binary tree
+        // (if performance necessitates it) to more quickly generate the ideal actual
+        // core speed value (from 0 to 1000) to achieve the desired theoretical core
+        // speed value.
         double exponent = 7.0 - ((7.0 * distance_to_nearest_endpoint) / 50.0);
         double speedFromProgress = 1 / (1 + pow(M_E, exponent));
         return round(speedFromProgress * 1000.0);
