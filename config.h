@@ -9,6 +9,8 @@
 // User-tuneable parameters
 // ---------------------------------------------------------------------
 
+#define CONFIG_FILE_PATH "/home/pi/viscaptz.conf"
+
 #define USE_PANASONIC_PTZ 1
 #define PANASONIC_PTZ_ZOOM_ONLY 1
 #define USE_MOTOR_PAN_AND_TILT 1

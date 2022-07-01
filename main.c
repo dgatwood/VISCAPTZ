@@ -6,30 +6,30 @@
 // #include <string>
 // #include <thread>
 
+#include "configurator.h"
 #include "constants.h"
 #include "fakeptz.h"
 #include "motorptz.h"
 #include "panasonicptz.h"
 
+#include <arpa/inet.h>
+#include <assert.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <math.h>
+#include <pthread.h>
+#include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/param.h>
-#include <dlfcn.h>
-
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <errno.h>
-
-#include <pthread.h>
+#include <unistd.h>
 
 static int kAxisStallThreshold = 100;
 
@@ -66,6 +66,8 @@ static int64_t gAxisPreviousPosition[NUM_AXES];
 static int gAxisStalls[NUM_AXES];
 
 int debugPanAndTilt = 0; // kDebugModePan;// kDebugModeZoom;  // Bitmap from debugMode.
+
+void run_startup_tests(void);
 
 pthread_t network_thread;
 void *runPTZThread(void *argIgnored);
@@ -107,6 +109,8 @@ pthread_t motor_control_thread;
 #pragma mark - Main
 
 int main(int argc, char *argv[]) {
+
+  run_startup_tests();
 
 #if USE_CANBUS
   if (argc >= 4) {
@@ -943,7 +947,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                   return false;
               }
               while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
-                return true;
+              return true;
             } else if (command[5] == 0x00 && command[7] == 0xFF) {
               // 0x81 01 7E 01 0A 01 0p FF : Tally: 0=off 4=low 5=high red 6=high green 7=disable power light.
               switch(command[6]) {
@@ -967,7 +971,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                   return false;
               }
               while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
-                return true;
+              return true;
             }
           }
         default:
@@ -1071,3 +1075,28 @@ bool recallPreset(int presetNumber) {
 
     return retval && retval2;
 }
+
+
+void run_startup_tests(void) {
+  char *bogusValue = getConfigKey("nonexistentKey");
+  assert(bogusValue == NULL);
+
+  assert(setConfigKey("key1", "value1"));
+  assert(setConfigKey("key2", "value2"));
+
+  char *value1 = getConfigKey("key1");
+  assert(!strcmp(value1, "value1"));
+
+  char *value2 = getConfigKey("key2");
+  assert(!strcmp(value2, "value2"));
+
+  assert(setConfigKey("key1", "value3"));
+  value1 = getConfigKey("key1");
+  assert(!strcmp(value1, "value3"));
+  assert(!strcmp(value2, "value2"));
+
+  assert(setConfigKey("key2", "value4"));
+  value2 = getConfigKey("key2");
+  assert(!strcmp(value2, "value4"));
+}
+
