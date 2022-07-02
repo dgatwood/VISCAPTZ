@@ -1108,6 +1108,7 @@ bool recallPreset(int presetNumber) {
 #pragma mark - Calibration
 
 double timeStamp(void);
+bool resetCalibration(void);
 
 void do_calibration(void) {
   int localDebug = 1;
@@ -1125,6 +1126,8 @@ void do_calibration(void) {
   if (localDebug) {
     fprintf(stderr, "Resetting metrics.\n");
   }
+
+  resetCalibration();
 
   // Wait a whole second to ensure everything is up and running.
   usleep(2000000);
@@ -1172,24 +1175,24 @@ void do_calibration(void) {
       if (maxPosition[axis] > value) {
         maxPosition[axis] = value;
         if (localDebug) {
-          fprintf(stderr, "Axis %d new max: %" PRId64 "\n", axis, value);
+          fprintf(stderr, "Axis %d new max: %" PRId64 "\n", axis, maxPosition[axis]);
         }
       }
       if (minPosition[axis] < value) {
         minPosition[axis] = value;
         if (localDebug) {
-          fprintf(stderr, "Axis %d new min: %" PRId64 "\n", axis, value);
+          fprintf(stderr, "Axis %d new min: %" PRId64 "\n", axis, minPosition[axis]);
         }
       }
 
       // Ignore tiny bits of motion to avoid the risk of self-centering
       // joysticks going slightly too far.
-      if (gAxisLastMoveSpeed[axis] > 10) {
+      if (gAxisLastMoveSpeed[axis] > 100) {
         if (localDebug) {
           fprintf(stderr, "Axis %d moved positively at motor\n", axis);
         }
         lastMoveWasPositive[axis] = true;
-      } else if (gAxisLastMoveSpeed[axis] < -10) {
+      } else if (gAxisLastMoveSpeed[axis] < -100) {
         lastMoveWasPositive[axis] = false;
         if (localDebug) {
           fprintf(stderr, "Axis %d moved negatively at motor\n", axis);
@@ -1215,8 +1218,8 @@ void do_calibration(void) {
   setConfigKeyBool("pan_axis_motor_reversed", lastMoveWasPositive[axis_identifier_pan]);
   setConfigKeyBool("tilt_axis_motor_reversed", lastMoveWasPositive[axis_identifier_tilt]);
 
-  setConfigKeyBool("pan_axis_encoder_reversed", lastMoveWasPositiveAtEncoder[axis_identifier_pan]);
-  setConfigKeyBool("tilt_axis_encoder_reversed", lastMoveWasPositiveAtEncoder[axis_identifier_tilt]);
+  setConfigKeyBool("pan_axis_encoder_reversed", !lastMoveWasPositiveAtEncoder[axis_identifier_pan]);
+  setConfigKeyBool("tilt_axis_encoder_reversed", !lastMoveWasPositiveAtEncoder[axis_identifier_tilt]);
 
   // If the last move resulted in encoder values increasing, then:
   //
@@ -1233,6 +1236,16 @@ void do_calibration(void) {
       minPosition[axis_identifier_tilt] : maxPosition[axis_identifier_tilt]);
   setConfigKeyInteger("tilt_limit_down", lastMoveWasPositiveAtEncoder[axis_identifier_tilt] ?
       maxPosition[axis_identifier_tilt] : minPosition[axis_identifier_tilt]);
+
+  fprintf(stderr, "Pan limit left: %" PRId64 "\n", leftPanLimit());
+  fprintf(stderr, "Pan limit right: %" PRId64 "\n", rightPanLimit());
+  fprintf(stderr, "Pan motor reversed: %s\n", panMotorReversed() ? "YES" : "NO");
+  fprintf(stderr, "Pan encoder reversed: %s\n\n", panEncoderReversed() ? "YES" : "NO");
+
+  fprintf(stderr, "Tilt limit up: %" PRId64 "\n", topTiltLimit());
+  fprintf(stderr, "Tilt limit down: %" PRId64 "\n", bottomTiltLimit());
+  fprintf(stderr, "Tilt motor reversed: %s\n", tiltMotorReversed() ? "YES" : "NO");
+  fprintf(stderr, "Tilt encoder reversed: %s\n\n", tiltEncoderReversed() ? "YES" : "NO");
 
   if (localDebug) {
     fprintf(stderr, "Calibrating motor module.\n");
@@ -1405,10 +1418,10 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
   }
 
   for (int32_t speed = min_speed; speed <= max_speed; speed++) {
-
-    int driveSpeed = reverse ? speed : -speed;
+    // No need to invert the drive direction.  The motor driver should already be
+    // handling that.
     data[speed - min_speed] =
-        calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, driveSpeed);
+        calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, speed);
   }
   if (localDebug) {
     fprintf(stderr, "Done collecting data for axis %d\n", axis);
@@ -1487,6 +1500,15 @@ bool writeCalibrationDataForAxis(axis_identifier_t axis, int64_t *calibrationDat
 
 #pragma mark - Pan and tilt direction information.
 
+bool resetCalibration(void) {
+  bool retval = true;
+  retval = setConfigKeyBool("pan_axis_motor_reversed", false) && retval;
+  retval = setConfigKeyBool("tilt_axis_motor_reversed", false) && retval;
+  retval = setConfigKeyBool("pan_axis_encoder_reversed", false) && retval;
+  retval = setConfigKeyBool("tilt_axis_encoder_reversed", false) && retval;
+  return retval;
+}
+
 bool panMotorReversed(void) {
   return getConfigKeyBool("pan_axis_motor_reversed");
 }
@@ -1543,6 +1565,11 @@ void run_startup_tests(void) {
   assert(setConfigKey("key2", "value4"));
   value2 = getConfigKey("key2");
   assert(!strcmp(value2, "value4"));
+
+  srand(time(NULL));
+  int value = rand();
+  assert(setConfigKeyInteger("randomValue", value));
+  assert(getConfigKeyInteger("randomValue") == value);
 
   int64_t fakeData[] = { 0, 1, 2, 3 };
   assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)));

@@ -510,9 +510,9 @@ void motorModuleCalibrate(void) {
   int64_t bottomLimit = bottomTiltLimit();
 
   int64_t *panCalibrationData = calibrationDataForMoveAlongAxis(
-      axis_identifier_pan, rightLimit, leftLimit, 0, PAN_TILT_SCALE_HARDWARE);
+      axis_identifier_pan, leftLimit, rightLimit, 0, PAN_TILT_SCALE_HARDWARE);
   int64_t *tiltCalibrationData = calibrationDataForMoveAlongAxis(
-      axis_identifier_tilt, bottomLimit, topLimit, 0, PAN_TILT_SCALE_HARDWARE);
+      axis_identifier_tilt, topLimit, bottomLimit, 0, PAN_TILT_SCALE_HARDWARE);
 
   writeCalibrationDataForAxis(axis_identifier_pan, panCalibrationData, PAN_TILT_SCALE_HARDWARE + 1);
   writeCalibrationDataForAxis(axis_identifier_tilt, tiltCalibrationData, PAN_TILT_SCALE_HARDWARE + 1);

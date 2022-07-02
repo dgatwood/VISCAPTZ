@@ -27,7 +27,8 @@
 
 // Set to 1 if recall moves the motors in the wrong direction.
 #define INVERT_PAN_AXIS 0
-#define INVERT_TILT_AXIS 1
+// #define INVERT_TILT_AXIS 1
+#define INVERT_TILT_AXIS 0
 
 // For RS485 encoders.
 #define SERIAL_DEV_FILE_FOR_TILT "/dev/char/serial/uart0"
