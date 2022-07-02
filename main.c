@@ -114,6 +114,7 @@ pthread_t motor_control_thread;
 bool gCalibrationMode = false;
 bool gCalibrationModeQuick = false;
 bool gCalibrationModeVISCADisabled = false;
+bool gRecenter = false;
 
 bool resetCalibration(void);
 void do_calibration(void);
@@ -138,6 +139,8 @@ int main(int argc, char *argv[]) {
       // panning and tilting at the beginning.
       gCalibrationMode = true;
       gCalibrationModeQuick = true;
+    } else if (!strcmp(argv[1], "--recenter")) {
+      gRecenter = true;
     }
   }
 #if USE_CANBUS

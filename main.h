@@ -7,6 +7,7 @@
 // True if we are in calibration mode.
 extern bool gCalibrationMode;
 extern bool gCalibrationModeQuick;
+extern bool gRecenter;
 
 /**
  * Returns an array where position 0 is the number of positions
