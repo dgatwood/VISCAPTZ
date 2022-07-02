@@ -5,7 +5,8 @@
 #pragma mark - Base implementation functions, callable from modules.
 
 // True if we are in calibration mode.
-bool gCalibrationMode;
+extern bool gCalibrationMode;
+extern bool gCalibrationModeQuick;
 
 /**
  * Returns an array where position 0 is the number of positions

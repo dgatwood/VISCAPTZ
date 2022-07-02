@@ -22,8 +22,9 @@
 #define panCANBusID 1
 #define tiltCANBusID 2
 
-// The minimum speed used for panning or tilting programmatically.
-#define MIN_PAN_TILT_SPEED 50
+// The minimum speed used for panning or tilting programmatically
+// when we don't have calibration data.
+#define MIN_PAN_TILT_SPEED 150
 
 // Set to 1 if recall moves the motors in the wrong direction.
 #define INVERT_PAN_AXIS 0

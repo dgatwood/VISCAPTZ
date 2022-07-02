@@ -220,7 +220,7 @@ void *runPositionMonitorThread(void *argIgnored) {
   // During calibration, we set the current position to be the midpoint of the encoders,
   // to minimize the chances of going off-scale low/high, because this software makes
   // no attempt at understanding wraparound right now.
-  if (gCalibrationMode) {
+  if (gCalibrationMode && !gCalibrationModeQuick) {
   #if USE_CANBUS
     resetCenterPositionsCANBus(sock);
   #else
