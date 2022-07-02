@@ -550,34 +550,6 @@ void cancelRecallIfNeeded(char *context) {
   }
 }
 
-#if 0
-// I'm pretty sure this is a mistake.
-bool calibrationSetAxisPosition(axis_identifier_t axis, int64_t position, int64_t maxSpeed) {
-  if (!absolutePositioningSupportedForAxis(axis)) {
-    fprintf(stderr, "Absolute positioning not supported.\n");
-    return false;
-  }
-  switch(axis) {
-    case axis_identifier_pan:
-    {
-      int64_t tiltPosition = getAxisPosition(axis_identifier_tilt);
-      setPanTiltPosition(position, maxSpeed, tiltPosition, maxSpeed);
-      return true;
-    }
-    case axis_identifier_tilt:
-    {
-      int64_t panPosition = getAxisPosition(axis_identifier_pan);
-      setPanTiltPosition(panPosition, maxSpeed, position, maxSpeed);
-      return true;
-    }
-    case axis_identifier_zoom:
-      setZoomPosition(position, maxSpeed);
-      return true;
-  }
-  return false;
-}
-#endif
-
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed) {
   bool localDebug = false;
   if (localDebug) {
