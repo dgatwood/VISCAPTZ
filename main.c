@@ -579,7 +579,7 @@ bool calibrationSetAxisPosition(axis_identifier_t axis, int64_t position, int64_
 #endif
 
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed) {
-  bool localDebug = true;
+  bool localDebug = false;
   if (localDebug) {
     fprintf(stderr, "setAxisPositionIncrementally\n");
   }
@@ -1459,7 +1459,7 @@ bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, i
 
 int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     int64_t startPosition, int64_t endPosition, int speed, float dutyCycle) {
-  bool localDebug = true;
+  bool localDebug = false;
   int attempts = 0;
   int64_t motionStartPosition = 0;
   double startTime = 0;
@@ -1536,7 +1536,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int64_t endPosition,
                                      int32_t min_speed,
                                      int32_t max_speed) {
-  bool localDebug = true;
+  bool localDebug = false;
   if (localDebug) {
     fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
   }

@@ -509,7 +509,7 @@ void motorModuleCalibrate(void) {
   int64_t topLimit = topTiltLimit();
   int64_t bottomLimit = bottomTiltLimit();
 
-  fprintf(stderr, "Calibrating motors.  This takes about 40 minutes.\n");
+  fprintf(stderr, "Calibrating pan and tilt motors.  This takes about 40 minutes.\n");
 
   int64_t *panCalibrationData = calibrationDataForMoveAlongAxis(
       axis_identifier_pan, leftLimit, rightLimit, 0, PAN_TILT_SCALE_HARDWARE);

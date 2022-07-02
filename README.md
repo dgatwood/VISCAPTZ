@@ -80,9 +80,13 @@ code generates a table of motor speed to encoder speed mappings that will
 eventually be used when recalling absolute positions.  However, the code
 to use those tables is not yet in place.
 
-After that tuning is done, the only remaining piece of functionality is
-a thread to obtain tally light information from OBS (via OBS-Websocket) or
-Tricaster software (by polling) and push that tally light state to the camera.
+After that, at some future date when I have access to the Panasonic
+camera again, I need to verify that the code works as expected against
+the real hardware.
+
+Beyond that, the only remaining missing piece of functionality is a thread
+to obtain tally light information from OBS (via OBS-Websocket) or Tricaster
+software (by polling) and push that tally light state to the camera.
 
 
 Installation:
@@ -185,3 +189,14 @@ typing:
 
 It might be worth always recentering every time you run the software, just to
 minimize the risk of misbehavior.
+
+
+Zoom Configuration:
+-------------------
+
+Because the zoom support also requires calibration to work properly, when you
+change cameras, you need to recalibrate the zoom portion.  To do this, type:
+
+    ./viscaptz --zoomcalibrate
+
+This saves about forty minutes calibrating the pan and tilt motors.

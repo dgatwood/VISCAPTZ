@@ -439,6 +439,8 @@ void waitForZoomStop(void) {
 void panaModuleCalibrate(void) {
   bool localDebug = false;
 
+  fprintf(stderr, "Calibrating zoom motors.  This takes about 20 minutes.\n");
+
   // Zoom all the way out.
   panaSetZoomSpeed(-ZOOM_SCALE_HARDWARE, true);
   waitForZoomStop();
