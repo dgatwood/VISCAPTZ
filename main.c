@@ -1480,7 +1480,7 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
 
     // Run the motors for a while before computing the speed.
     float dutyCycleMultiplier = (dutyCycle < .25) ? 2 : (dutyCycle < .50) ? 1.5 : 1;
-    int delay = ((inMotion || movedTooFast) ? 100000 : 500000) * dutyCycleMultiplier;
+    int delay = ((inMotion || movedTooFast) ? 100000 : 200000) * dutyCycleMultiplier;
 
     if (spinAxis(axis, delay, startPosition, endPosition, direction)) {
       motionStartPosition = getAxisPosition(axis);
@@ -1543,62 +1543,96 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     float dutyCycle = (speed - min_speed) / (float)(max_speed - min_speed);
 
     bool done = false;
-    int64_t positionsPerSecond[5];
+
+#define NUM_SAMPLES 10
+#define MIN_SAMPLES 4
+
+    int64_t positionsPerSecond[NUM_SAMPLES];
     int64_t positionsPerSecondAverage = 0;
     while (!done) {
       // No need to invert the drive direction.  The motor driver should already be
       // handling that.
       int64_t min = 0, max = 0;
-      for (int i = 0 ; i < 5; i++) {
-        positionsPerSecond[i] =
+      int64_t sameValue = -1;
+      for (int i = 0 ; i < NUM_SAMPLES; i++) {
+        int64_t value =
             calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, speed, dutyCycle);
+        positionsPerSecond[i] = value;
         if (i == 0) {
-          min = positionsPerSecond[i];
-          max = positionsPerSecond[i];
-        } else if (positionsPerSecond[i] > max) {
-          max = positionsPerSecond[i];
-        } else if (positionsPerSecond[i] < min) {
-          min = positionsPerSecond[i];
+          sameValue = value;
+          min = value;
+          max = value;
+        } else if (value > max) {
+          max = value;
+        } else if (value < min) {
+          min = value;
         }
         fprintf(stderr, "Positions per second at speed %d [%d]: %" PRId64 "\n",
                 speed, i, positionsPerSecond[i]);
-      }
-      if (min == max) {
-        positionsPerSecondAverage = min;
-        done = true;
-      } else {
-        int64_t alltotal = 0;
-        int64_t total = 0;
-        int count = 0;
-        int64_t tempmin = min, tempmax = max;
-        int64_t newmin = -1, newmax = -1;
-        for (int i = 0 ; i < 5; i++) {
-          int64_t value = positionsPerSecond[i];
 
-          alltotal += value;
-          if (value == tempmin) {
-            tempmin = -1;
-            continue;
-          }
-          if (value == tempmax) {
-            tempmax = -1;
-            continue;
-          }
-          total += value;
-          if (newmin == -1 || value < newmin) {
-            newmin = value;
-          }
-          if (newmax == -1 || value > newmax) {
-            newmax = value;
-          }
-          count++;
-        }
-        positionsPerSecondAverage = round((double)total / count);
-
-        double error = (double)newmax - newmin;
-        double errorPercent = error / newmax;
-        if (error <= 2 || errorPercent < .1) {
+        // If we get four identical values immediately (common at slow speeds, when
+        // not moving), don't bother getting more values.
+        if (value == sameValue && i == (MIN_SAMPLES - 1)) {
+          // We got MIN_SAMPLES with identical values.  Bail early.
           done = true;
+          break;
+        } else if (value != sameValue) {
+          sameValue = -1;
+        }
+      }
+      if (!done) {
+        if (min == max) {
+          positionsPerSecondAverage = min;
+          done = true;
+        } else {
+          int64_t alltotal = 0;
+          int64_t total = 0;
+          int count = 0;
+          // int64_t tempmin = min, tempmax = max;
+          int64_t newmin = -1, newmax = -1;
+          for (int i = 0 ; i < NUM_SAMPLES; i++) {
+            int64_t value = positionsPerSecond[i];
+            alltotal += value;
+          }
+          double mean = (double)alltotal / NUM_SAMPLES;
+          double sumOfSquares = 0;
+          for (int i = 0 ; i < NUM_SAMPLES; i++) {
+            int64_t value = positionsPerSecond[i];
+            double deviation = value - mean;
+            sumOfSquares += (deviation * deviation);
+          }
+          double standardDeviation = sqrt(sumOfSquares / NUM_SAMPLES);
+          for (int i = 0 ; i < NUM_SAMPLES; i++) {
+            int64_t value = positionsPerSecond[i];
+
+            if (abs(value - mean) > standardDeviation) {
+              fprintf(stderr, "Discarding outlier %" PRId64 ".\n", value);
+              continue;
+            }
+            // if (value == tempmin) {
+              // tempmin = -1;
+              // continue;
+            // }
+            // if (value == tempmax) {
+              // tempmax = -1;
+              // continue;
+            // }
+            total += value;
+            if (newmin == -1 || value < newmin) {
+              newmin = value;
+            }
+            if (newmax == -1 || value > newmax) {
+              newmax = value;
+            }
+            count++;
+          }
+          positionsPerSecondAverage = round((double)total / count);
+  
+          double error = (double)newmax - newmin;
+          double errorPercent = error / newmax;
+          if (error <= 2 || errorPercent < .1) {
+            done = true;
+          }
         }
       }
     }
