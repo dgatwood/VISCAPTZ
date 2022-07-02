@@ -33,6 +33,15 @@
 #include <unistd.h>
 
 static int kAxisStallThreshold = 100;
+const char *kPanMotorReversedKey = "pan_axis_motor_reversed";
+const char *kTiltMotorReversedKey = "tilt_axis_motor_reversed";
+const char *kPanEncoderReversedKey = "pan_axis_encoder_reversed";
+const char *kTiltEncoderReversedKey = "tilt_axis_encoder_reversed";
+const char *kPanLimitLeftKey = "pan_limit_left";
+const char *kPanLimitRightKey = "pan_limit_right";
+const char *kTiltLimitTopKey = "tilt_limit_up";
+const char *kTiltLimitBottomKey = "tilt_limit_down";
+
 
 #pragma mark - Structures and prototypes
 
@@ -103,7 +112,9 @@ void *runMotorControlThread(void *argIgnored);
 pthread_t motor_control_thread;
 
 bool gCalibrationMode = false;
+bool gCalibrationModeVISCADisabled = false;
 
+bool resetCalibration(void);
 void do_calibration(void);
 
 #pragma mark - Main
@@ -115,6 +126,11 @@ int main(int argc, char *argv[]) {
   if (argc >= 2) {
     if (!strcmp(argv[1], "--calibrate")) {
       gCalibrationMode = true;
+
+      // Immediately wipe out calibration data before initializing modules,
+      // to ensure that the motor driver does not load any of the old
+      // calibration data when we initialize it below.
+      resetCalibration();
     }
   }
 #if USE_CANBUS
@@ -334,18 +350,7 @@ bool moveInProgress(void) {
 }
 
 void handleRecallUpdates(void) {
-  int localDebug = 1;
-
-  // Do not attempt to recall positions in calibration mode!
-  if (gCalibrationMode) {
-    for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
-       if (gAxisMoveInProgress[axis]) {
-         fprintf(stderr, "Ignoring recall while in calibration mode.\n");
-         gAxisMoveInProgress[axis] = 0;
-       }
-    }
-    return;
-  }
+  int localDebug = 0;
 
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
     if (gAxisMoveInProgress[axis]) {
@@ -355,14 +360,39 @@ void handleRecallUpdates(void) {
 
       // Compute how far into the motion we are (with a range of 0 to 1,000).
       int direction = (gAxisMoveTargetPosition[axis] > gAxisMoveStartPosition[axis]) ? 1 : -1;
-      fprintf(stderr, "Axis %d direction %d\n", axis, direction);
-
-      if ((axis == axis_identifier_pan) && panEncoderReversed()) {
-        direction = -direction;
-      } else if ((axis == axis_identifier_tilt) && tiltEncoderReversed()) {
-        direction = -direction;
+      if (localDebug) {
+        fprintf(stderr, "Axis %d direction %d\n", axis, direction);
       }
-      fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
+
+      // Left/up are positive for the motor.  Right/down are negative.
+      //
+      // Normal encoder:   Higher values are left.  So a higher value (left of current) means
+      //                   positive motor speeds
+      // Reversed encoder: Higher values are right.  So a higher value (right of current) means
+      //                   negative motor speeds.
+      if ((axis == axis_identifier_pan) && panEncoderReversed()) {
+        if (localDebug) {
+          fprintf(stderr, "Axis %d reversed\n", axis);
+        }
+        direction = -direction;
+        if (localDebug) {
+          fprintf(stderr, "Axis %d direction now %d\n", axis, direction);
+        }
+      } else if ((axis == axis_identifier_tilt) && tiltEncoderReversed()) {
+        if (localDebug) {
+          fprintf(stderr, "Axis %d reversed\n", axis);
+        }
+        direction = -direction;
+        if (localDebug) {
+          fprintf(stderr, "Axis %d direction now %d\n", axis, direction);
+        }
+      } else if (localDebug) {
+        fprintf(stderr, "Axis %d not reversed.\n", axis);
+      }
+
+      if (localDebug) {
+        fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
+      }
       int64_t axisPosition = getAxisPosition(axis);
       int panProgress = actionProgress(gAxisMoveStartPosition[axis], axisPosition,
                                        gAxisMoveTargetPosition[axis], gAxisPreviousPosition[axis],
@@ -380,6 +410,10 @@ void handleRecallUpdates(void) {
         // -1000 to 1000 (core speed).
         int speed = MAX(computeSpeed(panProgress), MIN_PAN_TILT_SPEED);
         setAxisSpeed(axis, speed * direction, localDebug);
+        if (localDebug) {
+            fprintf(stderr, "AXIS %d SPEED NOW %d * %d (%d)\n",
+                    axis, speed, direction, speed * direction);
+        }
       }
     } else if (localDebug > 1) {
       fprintf(stderr, "NOT UPDATING AXIS %d: NOT IN MOTION\n", axis);
@@ -459,14 +493,20 @@ bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, boo
   }
 
   bool reversed = (axis == axis_identifier_pan) ? panMotorReversed() : tiltMotorReversed();
-  gAxisLastMoveSpeed[axis] = reversed ? -speed : speed;
+  if (debug) {
+    fprintf(stderr, "Reverse motor direction for axis %d: %s\n", axis, reversed ? "YES" : "NO");
+  }
+
+  gAxisLastMoveSpeed[axis] = speed;
+
+  int64_t speedReversedIfNeeded = reversed ? -speed : speed;
   switch(axis) {
     case axis_identifier_pan:
-        return SET_PAN_TILT_SPEED(speed, gAxisLastMoveSpeed[axis_identifier_tilt], isRaw);
+        return SET_PAN_TILT_SPEED(speedReversedIfNeeded, gAxisLastMoveSpeed[axis_identifier_tilt], isRaw);
     case axis_identifier_tilt:
-        return SET_PAN_TILT_SPEED(gAxisLastMoveSpeed[axis_identifier_pan], speed, isRaw);
+        return SET_PAN_TILT_SPEED(gAxisLastMoveSpeed[axis_identifier_pan], speedReversedIfNeeded, isRaw);
     case axis_identifier_zoom:
-        return SET_ZOOM_SPEED(speed, isRaw);
+        return SET_ZOOM_SPEED(speedReversedIfNeeded, isRaw);
   }
   return false;
 }
@@ -496,8 +536,36 @@ void cancelRecallIfNeeded(char *context) {
   }
 }
 
+#if 0
+// I'm pretty sure this is a mistake.
+bool calibrationSetAxisPosition(axis_identifier_t axis, int64_t position, int64_t maxSpeed) {
+  if (!absolutePositioningSupportedForAxis(axis)) {
+    fprintf(stderr, "Absolute positioning not supported.\n");
+    return false;
+  }
+  switch(axis) {
+    case axis_identifier_pan:
+    {
+      int64_t tiltPosition = getAxisPosition(axis_identifier_tilt);
+      setPanTiltPosition(position, maxSpeed, tiltPosition, maxSpeed);
+      return true;
+    }
+    case axis_identifier_tilt:
+    {
+      int64_t panPosition = getAxisPosition(axis_identifier_pan);
+      setPanTiltPosition(panPosition, maxSpeed, position, maxSpeed);
+      return true;
+    }
+    case axis_identifier_zoom:
+      setZoomPosition(position, maxSpeed);
+      return true;
+  }
+  return false;
+}
+#endif
+
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed) {
-  bool localDebug = true;
+  bool localDebug = false;
   if (localDebug) {
     fprintf(stderr, "setAxisPositionIncrementally\n");
   }
@@ -746,6 +814,10 @@ bool recallPreset(int presetNumber);
 
 bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
 
+  if (gCalibrationModeVISCADisabled) {
+    return false;
+  }
+
   // fprintf(stderr, "COMMAND\n");
   // All VISCA commands start with 0x8x, where x is the camera number.  For IP, always 1.
   if(command[0] != 0x81) return false;
@@ -809,6 +881,12 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
               case 0x3C: // Flickerless settings.
                 break;
               case 0x3F: // Store/restore presets.
+                 // Do not attempt to use absolute positioning while in calibration mode!
+                 if (gCalibrationMode) {
+                     fprintf(stderr, "Ignoring preset store/recall while in calibration mode.\n");
+                     return false;
+                 }
+
                 if (command[6] == 0xFF) {
                   int presetNumber = command[5];
                   switch(command[4]) {
@@ -831,6 +909,12 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
               case 0x47: // Absolute zoom.
 #if ZOOM_POSITION_SUPPORTED
 {
+                 // Do not attempt to use absolute positioning while in calibration mode!
+                 if (gCalibrationMode) {
+                     fprintf(stderr, "Ignoring absolute zoom while in calibration mode.\n");
+                     return false;
+                 }
+
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 uint32_t position = ((command[4] & 0xf) << 12) | ((command[5] & 0xf) << 8) |
                                     ((command[6] & 0xf) << 4) | (command[7] & 0xf);
@@ -868,6 +952,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 int16_t tiltSpeed = command[5];
                 uint8_t panCommand = command[6];
                 uint8_t tiltCommand = command[7];
+                // 2 is right.  Right is negative.
                 if (panCommand == 2) panSpeed = -panSpeed;
                 else if (panCommand == 3) panSpeed = 0;
                 if (tiltCommand == 2) tiltSpeed = -tiltSpeed;
@@ -888,6 +973,12 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 }
               case 0x02: // Pan/tilt absolute
 {
+                 // Do not attempt to use absolute positioning while in calibration mode!
+                 if (gCalibrationMode) {
+                     fprintf(stderr, "Ignoring absolute pan/tilt while in calibration mode.\n");
+                     return false;
+                 }
+
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 int16_t panSpeed = command[4];
                 int16_t tiltSpeed = command[5];
@@ -909,6 +1000,12 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 }
               case 0x03: // Pan/tilt relative
 {
+                 // Do not attempt to use relative positioning while in calibration mode!
+                 if (gCalibrationMode) {
+                     fprintf(stderr, "Ignoring relative pan/tilt while in calibration mode.\n");
+                     return false;
+                 }
+
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 int16_t panSpeed = command[4];
                 int16_t tiltSpeed = command[5];
@@ -1066,6 +1163,12 @@ int getVISCAZoomSpeedFromTallyState(void) {
 }
 
 bool recallPreset(int presetNumber) {
+    // Do not attempt to recall positions in calibration mode!
+    if (gCalibrationMode) {
+        fprintf(stderr, "Ignoring recall while in calibration mode.\n");
+        return false;
+    }
+
     preset_t preset;
     bzero(&preset, sizeof(preset));  // Zero the structure in case it grows.
 
@@ -1108,15 +1211,14 @@ bool recallPreset(int presetNumber) {
 #pragma mark - Calibration
 
 double timeStamp(void);
-bool resetCalibration(void);
 
 void do_calibration(void) {
-  int localDebug = 1;
+  int localDebug = 0;
   int64_t lastPosition[NUM_AXES];
   int64_t maxPosition[NUM_AXES];
   int64_t minPosition[NUM_AXES];
-  bool lastMoveWasPositive[NUM_AXES];  // Motor forwards should be right/down
-  bool lastMoveWasPositiveAtEncoder[NUM_AXES];  // Last move increased encoder position.
+  bool lastMoveWasPositive[NUM_AXES];  // If true, positive values moved right/down.
+  bool lastMoveWasPositiveAtEncoder[NUM_AXES];  // If true, last move increased encoder position.
   bool axisHasMoved[NUM_AXES];
 
   bzero(&axisHasMoved, sizeof(axisHasMoved));
@@ -1126,8 +1228,6 @@ void do_calibration(void) {
   if (localDebug) {
     fprintf(stderr, "Resetting metrics.\n");
   }
-
-  resetCalibration();
 
   // Wait a whole second to ensure everything is up and running.
   usleep(2000000);
@@ -1155,11 +1255,13 @@ void do_calibration(void) {
 
       // See if the position has moved (by enough to matter).
       int64_t value = getAxisPosition(axis);
+      bool axisMoved = false;
       if (abs(lastPosition[axis] - value) > 5) {
         lastMoveTime = timeStamp();
         axisHasMoved[axis] = true;
+        axisMoved = true;
 
-        if (lastPosition[axis] > value) {
+        if (value > lastPosition[axis]) {
           lastMoveWasPositiveAtEncoder[axis] = true;
           if (localDebug) {
             fprintf(stderr, "Axis %d moved positively at encoder\n", axis);
@@ -1172,13 +1274,13 @@ void do_calibration(void) {
         }
         lastPosition[axis] = value;
       }
-      if (maxPosition[axis] > value) {
+      if (value > maxPosition[axis]) {
         maxPosition[axis] = value;
         if (localDebug) {
           fprintf(stderr, "Axis %d new max: %" PRId64 "\n", axis, maxPosition[axis]);
         }
       }
-      if (minPosition[axis] < value) {
+      if (value < minPosition[axis]) {
         minPosition[axis] = value;
         if (localDebug) {
           fprintf(stderr, "Axis %d new min: %" PRId64 "\n", axis, minPosition[axis]);
@@ -1187,12 +1289,12 @@ void do_calibration(void) {
 
       // Ignore tiny bits of motion to avoid the risk of self-centering
       // joysticks going slightly too far.
-      if (gAxisLastMoveSpeed[axis] > 100) {
+      if (gAxisLastMoveSpeed[axis] > 100 && axisMoved) {
         if (localDebug) {
           fprintf(stderr, "Axis %d moved positively at motor\n", axis);
         }
         lastMoveWasPositive[axis] = true;
-      } else if (gAxisLastMoveSpeed[axis] < -100) {
+      } else if (gAxisLastMoveSpeed[axis] < -100 && axisMoved) {
         lastMoveWasPositive[axis] = false;
         if (localDebug) {
           fprintf(stderr, "Axis %d moved negatively at motor\n", axis);
@@ -1215,26 +1317,26 @@ void do_calibration(void) {
   // Negative motion values should move down and to the right.  If the last move (which
   // should have been to the right or down) was a positive value, then that axis is
   // backwards, and motor speeds should be reversed.
-  setConfigKeyBool("pan_axis_motor_reversed", lastMoveWasPositive[axis_identifier_pan]);
-  setConfigKeyBool("tilt_axis_motor_reversed", lastMoveWasPositive[axis_identifier_tilt]);
+  setConfigKeyBool(kPanMotorReversedKey, lastMoveWasPositive[axis_identifier_pan]);
+  setConfigKeyBool(kTiltMotorReversedKey, lastMoveWasPositive[axis_identifier_tilt]);
 
-  setConfigKeyBool("pan_axis_encoder_reversed", !lastMoveWasPositiveAtEncoder[axis_identifier_pan]);
-  setConfigKeyBool("tilt_axis_encoder_reversed", !lastMoveWasPositiveAtEncoder[axis_identifier_tilt]);
+  setConfigKeyBool(kPanEncoderReversedKey, lastMoveWasPositiveAtEncoder[axis_identifier_pan]);
+  setConfigKeyBool(kTiltEncoderReversedKey, lastMoveWasPositiveAtEncoder[axis_identifier_tilt]);
 
-  // If the last move resulted in encoder values increasing, then:
+  // If the last move (right/down) resulted in encoder values increasing, then:
   //
   // Right is maximum encoder value if last move was increasing, else minimum.
   // Down is maximum encoder value if last move was increasing, else minimum.
   // left is minimum encoder value if last move was increasing, else maximum.
   // Up is minimum encoder value if last move was increasing, else maximum.
 
-  setConfigKeyInteger("pan_limit_left", lastMoveWasPositiveAtEncoder[axis_identifier_pan] ?
+  setConfigKeyInteger(kPanLimitLeftKey, lastMoveWasPositiveAtEncoder[axis_identifier_pan] ?
       minPosition[axis_identifier_pan] : maxPosition[axis_identifier_pan]);
-  setConfigKeyInteger("pan_limit_right", lastMoveWasPositiveAtEncoder[axis_identifier_pan] ?
+  setConfigKeyInteger(kPanLimitRightKey, lastMoveWasPositiveAtEncoder[axis_identifier_pan] ?
       maxPosition[axis_identifier_pan] : minPosition[axis_identifier_pan]);
-  setConfigKeyInteger("tilt_limit_up", lastMoveWasPositiveAtEncoder[axis_identifier_tilt] ?
+  setConfigKeyInteger(kTiltLimitTopKey, lastMoveWasPositiveAtEncoder[axis_identifier_tilt] ?
       minPosition[axis_identifier_tilt] : maxPosition[axis_identifier_tilt]);
-  setConfigKeyInteger("tilt_limit_down", lastMoveWasPositiveAtEncoder[axis_identifier_tilt] ?
+  setConfigKeyInteger(kTiltLimitBottomKey, lastMoveWasPositiveAtEncoder[axis_identifier_tilt] ?
       maxPosition[axis_identifier_tilt] : minPosition[axis_identifier_tilt]);
 
   fprintf(stderr, "Pan limit left: %" PRId64 "\n", leftPanLimit());
@@ -1247,6 +1349,7 @@ void do_calibration(void) {
   fprintf(stderr, "Tilt motor reversed: %s\n", tiltMotorReversed() ? "YES" : "NO");
   fprintf(stderr, "Tilt encoder reversed: %s\n\n", tiltEncoderReversed() ? "YES" : "NO");
 
+  gCalibrationModeVISCADisabled = true;
   if (localDebug) {
     fprintf(stderr, "Calibrating motor module.\n");
   }
@@ -1262,6 +1365,8 @@ void do_calibration(void) {
   if (localDebug) {
     fprintf(stderr, "Out of loop.  Writing configuration.\n");
   }
+  gCalibrationModeVISCADisabled = false;
+  gCalibrationMode = false;
 }
 
 double timeStamp(void) {
@@ -1287,7 +1392,7 @@ bool pastEnd(int64_t currentPosition, int64_t startPosition, int64_t endPosition
 }
 
 bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, int64_t endPosition) {
-  bool localDebug = true;
+  bool localDebug = false;
 
   if (localDebug) {
     fprintf(stderr, "Spinning axis %d for %d microseconds.\n", axis, microseconds);
@@ -1320,7 +1425,7 @@ bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, i
 
 int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     int64_t startPosition, int64_t endPosition, int speed) {
-  bool localDebug = true;
+  bool localDebug = false;
   int attempts = 0;
   int64_t motionStartPosition = 0;
   double startTime = 0;
@@ -1334,7 +1439,8 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
   bool movedTooFast = false;
 
   if (localDebug) {
-    fprintf(stderr, "Obtaining calibration value for axis %d speed %d\n", axis, speed);
+    fprintf(stderr, "Obtaining calibration value for axis %d speed %d (start=%" PRId64
+                    ", end=%" PRId64 "\n", axis, speed, startPosition, endPosition);
   }
 
   while (attempts++ < 5) {
@@ -1350,10 +1456,14 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     if (localDebug) {
       fprintf(stderr, "Setting axis %d to speed %d\n", axis, speed);
     }
-    setAxisSpeedRaw(axis, speed, false);
+    // Set the axis speed using the "raw" function so that there is no scaling involved.  This
+    // avoids any precision loss caused by converting from motor speeds to core speeds and back
+    // without having to run the motor at all 1,000 core speeds.
+    setAxisSpeedRaw(axis, -speed, false);
 
     // Run the motors for 0.1 seconds or 0.5 seconds.
-    if (spinAxis(axis, (inMotion || movedTooFast) ? 100000 : 500000, startPosition, endPosition)) {
+    int delay = (inMotion || movedTooFast) ? 100000 : 500000;
+    if (spinAxis(axis, delay, startPosition, endPosition)) {
       motionStartPosition = getAxisPosition(axis);
       startTime = timeStamp();
       if (spinAxis(axis, 1000000, startPosition, endPosition)) {
@@ -1393,7 +1503,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int64_t endPosition,
                                      int32_t min_speed,
                                      int32_t max_speed) {
-  bool localDebug = true;
+  bool localDebug = false;
   if (localDebug) {
     fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
   }
@@ -1406,23 +1516,13 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     fprintf(stderr, "Finished initial move.\n");
   }
 
-  bool reverse = false;
-  if (axis == axis_identifier_pan) {
-    reverse = panMotorReversed();
-  } else if (axis == axis_identifier_tilt) {
-    reverse = tiltMotorReversed();
-  }
-
-  if (localDebug) {
-    fprintf(stderr, "Reverse motor direction: %s\n", reverse ? "YES" : "NO");
-  }
-
   for (int32_t speed = min_speed; speed <= max_speed; speed++) {
     // No need to invert the drive direction.  The motor driver should already be
     // handling that.
     data[speed - min_speed] =
         calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, speed);
   }
+  setAxisSpeedRaw(axis, 0, false);
   if (localDebug) {
     fprintf(stderr, "Done collecting data for axis %d\n", axis);
   }
@@ -1502,43 +1602,47 @@ bool writeCalibrationDataForAxis(axis_identifier_t axis, int64_t *calibrationDat
 
 bool resetCalibration(void) {
   bool retval = true;
-  retval = setConfigKeyBool("pan_axis_motor_reversed", false) && retval;
-  retval = setConfigKeyBool("tilt_axis_motor_reversed", false) && retval;
-  retval = setConfigKeyBool("pan_axis_encoder_reversed", false) && retval;
-  retval = setConfigKeyBool("tilt_axis_encoder_reversed", false) && retval;
+  retval = removeConfigKey(kPanMotorReversedKey) && retval;
+  retval = removeConfigKey(kTiltMotorReversedKey) && retval;
+  retval = removeConfigKey(kPanEncoderReversedKey) && retval;
+  retval = removeConfigKey(kTiltEncoderReversedKey) && retval;
+  retval = removeConfigKey(kPanLimitLeftKey) && retval;
+  retval = removeConfigKey(kPanLimitRightKey) && retval;
+  retval = removeConfigKey(kTiltLimitTopKey) && retval;
+  retval = removeConfigKey(kTiltLimitBottomKey) && retval;
   return retval;
 }
 
 bool panMotorReversed(void) {
-  return getConfigKeyBool("pan_axis_motor_reversed");
+  return getConfigKeyBool(kPanMotorReversedKey);
 }
 
 bool tiltMotorReversed(void) {
-  return getConfigKeyBool("tilt_axis_motor_reversed");
+  return getConfigKeyBool(kTiltMotorReversedKey);
 }
 
 bool panEncoderReversed(void) {
-  return INVERT_PAN_AXIS || getConfigKeyBool("pan_axis_encoder_reversed");
+  return getConfigKeyBool(kPanEncoderReversedKey);
 }
 
 bool tiltEncoderReversed(void) {
-  return INVERT_TILT_AXIS || getConfigKeyBool("tilt_axis_encoder_reversed");
+  return getConfigKeyBool(kTiltEncoderReversedKey);
 }
 
 int64_t leftPanLimit(void) {
-  return getConfigKeyInteger("pan_limit_left");
+  return getConfigKeyInteger(kPanLimitLeftKey);
 }
 
 int64_t rightPanLimit(void) {
-  return getConfigKeyInteger("pan_limit_right");
+  return getConfigKeyInteger(kPanLimitRightKey);
 }
 
 int64_t topTiltLimit(void) {
-  return getConfigKeyInteger("tilt_limit_up");
+  return getConfigKeyInteger(kTiltLimitTopKey);
 }
 
 int64_t bottomTiltLimit(void) {
-  return getConfigKeyInteger("tilt_limit_down");
+  return getConfigKeyInteger(kTiltLimitBottomKey);
 }
 
 
