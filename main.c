@@ -165,7 +165,7 @@ int main(int argc, char *argv[]) {
     do_calibration();
   }
 
-  fprintf(stderr, "Spinning forever.\n");
+  fprintf(stderr, "Ready for VISCA commands.\n");
 
   // Spin this thread forever for now.
   while (1) {
