@@ -142,9 +142,14 @@ int main(int argc, char *argv[]) {
 
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
 
+  fprintf(stderr, "Created threads.\n");
+
   if (gCalibrationMode) {
+    fprintf(stderr, "Starting calibration.\n");
     do_calibration();
   }
+
+  fprintf(stderr, "Spinning forever.\n");
 
   // Spin this thread forever for now.
   while (1) {
@@ -351,9 +356,10 @@ void handleRecallUpdates(void) {
       // Compute how far into the motion we are (with a range of 0 to 1,000).
       int direction = (gAxisMoveTargetPosition[axis] > gAxisMoveStartPosition[axis]) ? 1 : -1;
       fprintf(stderr, "Axis %d direction %d\n", axis, direction);
-      if ((axis == axis_identifier_pan) && INVERT_PAN_AXIS) {
+
+      if ((axis == axis_identifier_pan) && panEncoderReversed()) {
         direction = -direction;
-      } else if ((axis == axis_identifier_tilt) && INVERT_TILT_AXIS) {
+      } else if ((axis == axis_identifier_tilt) && tiltEncoderReversed()) {
         direction = -direction;
       }
       fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
@@ -451,7 +457,9 @@ bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, boo
       fprintf(stderr, "CHANGED AXIS %d from %" PRId64 " to %" PRId64 "\n", axis, gAxisLastMoveSpeed[axis], speed);
     }
   }
-  gAxisLastMoveSpeed[axis] = speed;
+
+  bool reversed = (axis == axis_identifier_pan) ? panMotorReversed() : tiltMotorReversed();
+  gAxisLastMoveSpeed[axis] = reversed ? -speed : speed;
   switch(axis) {
     case axis_identifier_pan:
         return SET_PAN_TILT_SPEED(speed, gAxisLastMoveSpeed[axis_identifier_tilt], isRaw);
@@ -1102,6 +1110,7 @@ bool recallPreset(int presetNumber) {
 double timeStamp(void);
 
 void do_calibration(void) {
+  int localDebug = 1;
   int64_t lastPosition[NUM_AXES];
   int64_t maxPosition[NUM_AXES];
   int64_t minPosition[NUM_AXES];
@@ -1113,6 +1122,13 @@ void do_calibration(void) {
   bzero(&lastMoveWasPositive, sizeof(lastMoveWasPositive));
   bzero(&lastMoveWasPositiveAtEncoder, sizeof(lastMoveWasPositiveAtEncoder));
 
+  if (localDebug) {
+    fprintf(stderr, "Resetting metrics.\n");
+  }
+
+  // Wait a whole second to ensure everything is up and running.
+  usleep(2000000);
+
   for (axis_identifier_t axis = axis_identifier_pan; axis <= axis_identifier_tilt; axis++) {
     int64_t value = getAxisPosition(axis);
     lastPosition[axis] = value;
@@ -1120,39 +1136,77 @@ void do_calibration(void) {
     minPosition[axis] = value;
   }
 
+  if (localDebug) {
+    fprintf(stderr, "Pan maximally left, then right, then tilt maximally up, then down\n");
+  }
+
   // After both pan and tilt axes have moved AND the gimbal has been idle for at
   // least 10 seconds, stop calibrating.
   double lastMoveTime = timeStamp();
   while (!axisHasMoved[axis_identifier_pan] || !axisHasMoved[axis_identifier_tilt] ||
           (timeStamp() - lastMoveTime) < 10) {
-    for (axis_identifier_t axis = 0; axis_identifier_pan < axis_identifier_tilt; axis++) {
+    for (axis_identifier_t axis = 0; axis <= axis_identifier_tilt; axis++) {
+      if (localDebug > 1) {
+        fprintf(stderr, "Processing axis %d\n", axis);
+      }
+
+      // See if the position has moved (by enough to matter).
       int64_t value = getAxisPosition(axis);
-      if (lastPosition[axis] != value) {
+      if (abs(lastPosition[axis] - value) > 5) {
         lastMoveTime = timeStamp();
         axisHasMoved[axis] = true;
+
         if (lastPosition[axis] > value) {
           lastMoveWasPositiveAtEncoder[axis] = true;
+          if (localDebug) {
+            fprintf(stderr, "Axis %d moved positively at encoder\n", axis);
+          }
         } else {
           lastMoveWasPositiveAtEncoder[axis] = false;
+          if (localDebug) {
+            fprintf(stderr, "Axis %d moved negatively at encoder\n", axis);
+          }
         }
         lastPosition[axis] = value;
       }
       if (maxPosition[axis] > value) {
         maxPosition[axis] = value;
+        if (localDebug) {
+          fprintf(stderr, "Axis %d new max: %" PRId64 "\n", axis, value);
+        }
       }
       if (minPosition[axis] < value) {
         minPosition[axis] = value;
+        if (localDebug) {
+          fprintf(stderr, "Axis %d new min: %" PRId64 "\n", axis, value);
+        }
       }
 
       // Ignore tiny bits of motion to avoid the risk of self-centering
       // joysticks going slightly too far.
       if (gAxisLastMoveSpeed[axis] > 10) {
+        if (localDebug) {
+          fprintf(stderr, "Axis %d moved positively at motor\n", axis);
+        }
         lastMoveWasPositive[axis] = true;
       } else if (gAxisLastMoveSpeed[axis] < -10) {
         lastMoveWasPositive[axis] = false;
+        if (localDebug) {
+          fprintf(stderr, "Axis %d moved negatively at motor\n", axis);
+        }
       }
       usleep(10000);  // Run 100 times per second.
     }
+    if (localDebug > 1) {
+      fprintf(stderr, "Loop check: panMoved: %s tiltMoved: %s time: %lf\n",
+              axisHasMoved[axis_identifier_pan] ? "YES" : "NO",
+              axisHasMoved[axis_identifier_tilt] ? "YES" : "NO",
+              (timeStamp() - lastMoveTime));
+    }
+  }
+
+  if (localDebug) {
+    fprintf(stderr, "Out of loop.  Writing configuration.\n");
   }
 
   // Negative motion values should move down and to the right.  If the last move (which
@@ -1180,8 +1234,21 @@ void do_calibration(void) {
   setConfigKeyInteger("tilt_limit_down", lastMoveWasPositiveAtEncoder[axis_identifier_tilt] ?
       maxPosition[axis_identifier_tilt] : minPosition[axis_identifier_tilt]);
 
+  if (localDebug) {
+    fprintf(stderr, "Calibrating motor module.\n");
+  }
+
   motorModuleCalibrate();
+
+  if (localDebug) {
+    fprintf(stderr, "Calibrating panasonic module.\n");
+  }
+
   panaModuleCalibrate();
+
+  if (localDebug) {
+    fprintf(stderr, "Out of loop.  Writing configuration.\n");
+  }
 }
 
 double timeStamp(void) {
@@ -1207,12 +1274,23 @@ bool pastEnd(int64_t currentPosition, int64_t startPosition, int64_t endPosition
 }
 
 bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, int64_t endPosition) {
+  bool localDebug = true;
+
+  if (localDebug) {
+    fprintf(stderr, "Spinning axis %d for %d microseconds.\n", axis, microseconds);
+  }
+
   double startTime = timeStamp();
   double interval = (double)microseconds / USEC_PER_SEC;
   double endTime = startTime;
   while (true) {
     int64_t currentPosition = getAxisPosition(axis);
-    if (pastEnd(currentPosition, startPosition, endPosition)) return false;
+    if (pastEnd(currentPosition, startPosition, endPosition)) {
+      if (localDebug) {
+        fprintf(stderr, "Failed spinning (out of bounds)\n");
+      }
+      return false;
+    }
 
     endTime = timeStamp();
     if (endTime >= (startTime + interval)) {
@@ -1220,11 +1298,16 @@ bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, i
     }
     usleep(10000);  // Wake up 100x per second or so.
   }
+  if (localDebug) {
+    fprintf(stderr, "Done spinning\n");
+  }
+
   return true;
 }
 
 int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     int64_t startPosition, int64_t endPosition, int speed) {
+  bool localDebug = true;
   int attempts = 0;
   int64_t motionStartPosition = 0;
   double startTime = 0;
@@ -1237,13 +1320,23 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
   // If we don't get values because a half second moves too far, set to true.
   bool movedTooFast = false;
 
+  if (localDebug) {
+    fprintf(stderr, "Obtaining calibration value for axis %d speed %d\n", axis, speed);
+  }
+
   while (attempts++ < 5) {
     int64_t currentPosition = getAxisPosition(axis);
-    if (pastEnd(currentPosition, startPosition, endPosition)) {
+    if (pastEnd(currentPosition, startPosition, endPosition) || !inMotion) {
+      if (localDebug) {
+        fprintf(stderr, "Moving axis %d to starting position %" PRId64 "\n", axis, startPosition);
+      }
       setAxisPositionIncrementally(axis, startPosition, SCALE_CORE);  // Move as quickly as possible.
       waitForAxisMove(axis);
     }
 
+    if (localDebug) {
+      fprintf(stderr, "Setting axis %d to speed %d\n", axis, speed);
+    }
     setAxisSpeedRaw(axis, speed, false);
 
     // Run the motors for 0.1 seconds or 0.5 seconds.
@@ -1251,13 +1344,20 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
       motionStartPosition = getAxisPosition(axis);
       startTime = timeStamp();
       if (spinAxis(axis, 1000000, startPosition, endPosition)) {
+        if (localDebug) {
+          fprintf(stderr, "Got speed data.\n");
+        }
         break;
       }
     } else if (attempts > 2) {
+      if (localDebug) {
+        fprintf(stderr, "Moved too fast.\n");
+      }
       movedTooFast = true;
     }
-    setAxisPositionIncrementally(axis, startPosition, SCALE_CORE);  // Move as quickly as possible.
-    waitForAxisMove(axis);
+    if (localDebug) {
+      fprintf(stderr, "Reached end position.  Will reposition and try again.\n");
+    }
     inMotion = false;
     attempts++;
   }
@@ -1268,7 +1368,11 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
   double duration = endTime - startTime;
 
   inMotion = true;
-  return (int64_t)((double)distance / duration);
+  double distancePerSecond = (int64_t)((double)distance / duration);
+  if (localDebug) {
+    fprintf(stderr, "Returning distance per second %lf\n", distancePerSecond);
+  }
+  return distancePerSecond;
 }
 
 int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
@@ -1276,22 +1380,40 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int64_t endPosition,
                                      int32_t min_speed,
                                      int32_t max_speed) {
+  bool localDebug = true;
+  if (localDebug) {
+    fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
+  }
+
   int64_t *data = (int64_t *)malloc(sizeof(int64_t) * (max_speed - min_speed + 1));
   setAxisPositionIncrementally(axis, startPosition, SCALE_CORE);  // Move as quickly as possible.
   waitForAxisMove(axis);
 
+  if (localDebug) {
+    fprintf(stderr, "Finished initial move.\n");
+  }
+
+  bool reverse = false;
+  if (axis == axis_identifier_pan) {
+    reverse = panMotorReversed();
+  } else if (axis == axis_identifier_tilt) {
+    reverse = tiltMotorReversed();
+  }
+
+  if (localDebug) {
+    fprintf(stderr, "Reverse motor direction: %s\n", reverse ? "YES" : "NO");
+  }
+
   for (int32_t speed = min_speed; speed <= max_speed; speed++) {
-    bool reverse = false;
-    if (axis == axis_identifier_pan) {
-      reverse = panMotorReversed();
-    } else if (axis == axis_identifier_tilt) {
-      reverse = tiltMotorReversed();
-    }
 
     int driveSpeed = reverse ? speed : -speed;
     data[speed - min_speed] =
         calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, driveSpeed);
   }
+  if (localDebug) {
+    fprintf(stderr, "Done collecting data for axis %d\n", axis);
+  }
+
   return data;
 }
 
@@ -1374,11 +1496,11 @@ bool tiltMotorReversed(void) {
 }
 
 bool panEncoderReversed(void) {
-  return getConfigKeyBool("pan_axis_encoder_reversed");
+  return INVERT_PAN_AXIS || getConfigKeyBool("pan_axis_encoder_reversed");
 }
 
 bool tiltEncoderReversed(void) {
-  return getConfigKeyBool("tilt_axis_encoder_reversed");
+  return INVERT_TILT_AXIS || getConfigKeyBool("tilt_axis_encoder_reversed");
 }
 
 int64_t leftPanLimit(void) {

@@ -397,7 +397,7 @@ void resetCenterPositionOfCANBusEncoder(int sock, int CANBusID) {
         if (read(sock, &response, sizeof(response)) == sizeof(response)) {
             if (response.data[0] == 0x4 && response.data[1] == CANBusID &&
                 response.data[2] == 0xC && response.data[3] == 0) {
-                    fprintf(stderr, "Reset successful.");
+                    fprintf(stderr, "Reset successful.\n");
             } else {
                 fprintf(stderr, "Reset failed with error %d\n", response.data[3]);
                 exit(1);
