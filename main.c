@@ -41,6 +41,9 @@ const char *kPanLimitLeftKey = "pan_limit_left";
 const char *kPanLimitRightKey = "pan_limit_right";
 const char *kTiltLimitTopKey = "tilt_limit_up";
 const char *kTiltLimitBottomKey = "tilt_limit_down";
+const char *kZoomInLimitKey = "zoom_in_limit";
+const char *kZoomOutLimitKey = "zoom_out_limit";
+const char *kZoomEncoderReversedKey = "zoom_encoder_reversed";
 
 
 #pragma mark - Structures and prototypes
@@ -113,6 +116,7 @@ pthread_t motor_control_thread;
 
 bool gCalibrationMode = false;
 bool gCalibrationModeQuick = false;
+bool gCalibrationModeZoomOnly = false;
 bool gCalibrationModeVISCADisabled = false;
 bool gRecenter = false;
 
@@ -139,6 +143,12 @@ int main(int argc, char *argv[]) {
       // panning and tilting at the beginning.
       gCalibrationMode = true;
       gCalibrationModeQuick = true;
+    } else if (!strcmp(argv[1], "--zoomcalibrate")) {
+      // Reruns the zoom calibration while leaving the pan and tilt alone.
+      // Use when switching cameras.
+      gCalibrationMode = true;
+      gCalibrationModeQuick = true;
+      gCalibrationModeZoomOnly = true;
     } else if (!strcmp(argv[1], "--recenter")) {
       gRecenter = true;
     }
@@ -155,7 +165,7 @@ int main(int argc, char *argv[]) {
 
   pthread_create(&network_thread, NULL, runNetworkThread, NULL);
 
-  SET_IP_ADDR("127.0.0.1");
+  SET_IP_ADDR(CAMERA_IP);
 
   if (!motorModuleInit()) {
     fprintf(stderr, "Motor module init failed.  Bailing.\n");
@@ -380,15 +390,9 @@ void handleRecallUpdates(void) {
       //                   positive motor speeds
       // Reversed encoder: Higher values are right.  So a higher value (right of current) means
       //                   negative motor speeds.
-      if ((axis == axis_identifier_pan) && panEncoderReversed()) {
-        if (localDebug) {
-          fprintf(stderr, "Axis %d reversed\n", axis);
-        }
-        direction = -direction;
-        if (localDebug) {
-          fprintf(stderr, "Axis %d direction now %d\n", axis, direction);
-        }
-      } else if ((axis == axis_identifier_tilt) && tiltEncoderReversed()) {
+      if ((axis == axis_identifier_pan && panEncoderReversed()) ||
+          (axis == axis_identifier_tilt && tiltEncoderReversed()) ||
+          (axis == axis_identifier_zoom && zoomEncoderReversed())) {
         if (localDebug) {
           fprintf(stderr, "Axis %d reversed\n", axis);
         }
@@ -575,7 +579,7 @@ bool calibrationSetAxisPosition(axis_identifier_t axis, int64_t position, int64_
 #endif
 
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed) {
-  bool localDebug = false;
+  bool localDebug = true;
   if (localDebug) {
     fprintf(stderr, "setAxisPositionIncrementally\n");
   }
@@ -1369,11 +1373,14 @@ void do_calibration(void) {
   fprintf(stderr, "Tilt encoder reversed: %s\n\n", tiltEncoderReversed() ? "YES" : "NO");
 
   gCalibrationModeVISCADisabled = true;
-  if (localDebug) {
-    fprintf(stderr, "Calibrating motor module.\n");
-  }
 
-  motorModuleCalibrate();
+  if (!gCalibrationModeZoomOnly) {
+    if (localDebug) {
+      fprintf(stderr, "Calibrating motor module.\n");
+    }
+
+    motorModuleCalibrate();
+  }
 
   if (localDebug) {
     fprintf(stderr, "Calibrating panasonic module.\n");
@@ -1452,7 +1459,7 @@ bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, i
 
 int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     int64_t startPosition, int64_t endPosition, int speed, float dutyCycle) {
-  bool localDebug = false;
+  bool localDebug = true;
   int attempts = 0;
   int64_t motionStartPosition = 0;
   double startTime = 0;
@@ -1474,7 +1481,7 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
 
   while (attempts++ < 5) {
     if (localDebug) {
-      fprintf(stderr, "Setting axis %d to speed %d\n", axis, speed);
+      fprintf(stderr, "Setting axis %d to speed %d direction %d\n", axis, speed, direction);
     }
     // Set the axis speed using the "raw" function so that there is no scaling involved.  This
     // avoids any precision loss caused by converting from motor speeds to core speeds and back
@@ -1529,7 +1536,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int64_t endPosition,
                                      int32_t min_speed,
                                      int32_t max_speed) {
-  bool localDebug = false;
+  bool localDebug = true;
   if (localDebug) {
     fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
   }
@@ -1773,6 +1780,30 @@ int64_t topTiltLimit(void) {
 
 int64_t bottomTiltLimit(void) {
   return getConfigKeyInteger(kTiltLimitBottomKey);
+}
+
+int64_t setZoomInLimit(int64_t limit) {
+  return setConfigKeyInteger(kZoomInLimitKey, limit);
+}
+
+int64_t setZoomOutLimit(int64_t limit) {
+  return setConfigKeyInteger(kZoomOutLimitKey, limit);
+}
+
+int64_t setZoomEncoderReversed(bool isReversed) {
+  return setConfigKeyBool(kZoomEncoderReversedKey, isReversed);
+}
+
+int64_t zoomInLimit(void) {
+  return getConfigKeyInteger(kZoomInLimitKey);
+}
+
+int64_t zoomOutLimit(void) {
+  return getConfigKeyInteger(kZoomOutLimitKey);
+}
+
+int64_t zoomEncoderReversed(void) {
+  return getConfigKeyInteger(kZoomEncoderReversedKey);
 }
 
 

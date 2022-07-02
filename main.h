@@ -38,6 +38,12 @@ int64_t leftPanLimit(void);
 int64_t rightPanLimit(void);
 int64_t topTiltLimit(void);
 int64_t bottomTiltLimit(void);
+int64_t zoomInLimit(void);
+int64_t zoomOutLimit(void);
+int64_t zoomEncoderReversed(void);
+int64_t setZoomInLimit(int64_t limit);
+int64_t setZoomOutLimit(int64_t limit);
+int64_t setZoomEncoderReversed(bool isReversed);
 
 int scaleSpeed(int speed, int fromScale, int toScale);
 

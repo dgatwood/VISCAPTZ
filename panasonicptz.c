@@ -206,6 +206,11 @@ char *sendCommand(const char *group, const char *command, char *values[],
 
     asprintf(&URL, "http://%s/cgi-bin/aw_%s?cmd=%s%s&res=1",
              g_cameraIPAddr, group, encoded_command, valueString);
+
+    if (localDebug) {
+        fprintf(stderr, "Fetching URL: %s\n", URL);
+    }
+
     curl_buffer_t *data = fetchURLWithCURL(URL, curlQueryHandle);
 
     char *retval = NULL;
@@ -218,7 +223,11 @@ char *sendCommand(const char *group, const char *command, char *values[],
                 data->data, command, responsePrefix);
       }
       freeURLBuffer(data);
+    } else if (localDebug) {
+        fprintf(stderr, "URL fetch returned NULL\n");
     }
+
+
 
     free(encoded_command);
     free(valueString);
@@ -289,6 +298,7 @@ int64_t panaGetZoomPosition(void) {
         if (localDebug) fprintf(stderr, "Zoom position: %" PRId64 "\n", last_zoom_position);
         free(response);
     }
+    if (localDebug) fprintf(stderr, "Did not get response from CGI.  Returning last value.\n");
     return last_zoom_position;
 }
 
@@ -399,6 +409,60 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
 
 #pragma mark - Calibration
 
+void waitForZoomStop(void) {
+  bool localDebug = false;
+  int64_t lastPosition = panaGetZoomPosition();
+  int stoppedCount = 0;
+
+  if (localDebug) {
+    fprintf(stderr, "Initial position: %" PRId64 "\n", lastPosition);
+  }
+
+  // If no motion for a second, we're done.
+  while (stoppedCount < 5) {
+    int64_t currentPosition = panaGetZoomPosition();
+
+    if (localDebug) {
+      fprintf(stderr, "Current position: %" PRId64 "\n", currentPosition);
+    }
+
+    if (currentPosition == lastPosition) {
+      stoppedCount++;
+    } else {
+      stoppedCount = 0;
+    }
+    lastPosition = currentPosition;
+    usleep(200000);
+  }
+}
+
 void panaModuleCalibrate(void) {
+  bool localDebug = false;
+
+  // Zoom all the way out.
+  panaSetZoomSpeed(-ZOOM_SCALE_HARDWARE, true);
+  waitForZoomStop();
+  int64_t minimumZoom = panaGetZoomPosition();
+
+  if (localDebug) {
+    fprintf(stderr, "Minimum zoom: %" PRId64 "\n", minimumZoom);
+  }
+  
+  panaSetZoomSpeed(ZOOM_SCALE_HARDWARE, true);
+  waitForZoomStop();
+  int64_t maximumZoom = panaGetZoomPosition();
+
+  if (localDebug) {
+    fprintf(stderr, "Maximum zoom: %" PRId64 "\n", maximumZoom);
+  }
+  
+  setZoomOutLimit(minimumZoom);
+  setZoomInLimit(minimumZoom);
+  setZoomEncoderReversed(true);
+
+  int64_t *zoomCalibrationData = calibrationDataForMoveAlongAxis(
+      axis_identifier_zoom, maximumZoom, minimumZoom, 0, ZOOM_SCALE_HARDWARE);
+
+  writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE + 1);
 
 }

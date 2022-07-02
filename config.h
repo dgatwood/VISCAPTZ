@@ -9,6 +9,8 @@
 // User-tuneable parameters
 // ---------------------------------------------------------------------
 
+#define CAMERA_IP "192.168.1.63"
+
 #define CONFIG_FILE_PATH "/home/pi/viscaptz.conf"
 
 #define USE_PANASONIC_PTZ 1
