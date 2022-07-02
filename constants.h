@@ -4,6 +4,10 @@
 #define __GNU_SOURCE  // Bizarrely required for asprintf in Linux.
 #define __STDC_WANT_LIB_EXT2__ 1  // Bizarrely required for asprintf in Linux.
 
+#ifndef USEC_PER_SEC
+#define USEC_PER_SEC 1000000
+#endif
+
 typedef enum {
   kDebugModePan = 0x1,
   kDebugModeTilt = 0x2,
@@ -29,6 +33,12 @@ enum {
 #define ZOOM_SCALE_VISCA  8
 
 #define SCALE_CORE    1000
+
+typedef enum {
+  axis_identifier_pan = 0,
+  axis_identifier_tilt = 1,
+  axis_identifier_zoom = 2,
+} axis_identifier_t;
 
 // Not quite a constant, but used everywhere, and set once in main().
 extern int debugPanAndTilt;

@@ -5,10 +5,11 @@
 #include "constants.h"
 
 bool panaModuleInit(void);
+void panaModuleCalibrate(void);
 bool panaModuleTeardown(void);
 bool panaSetIPAddress(char *address);
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed);
-bool panaSetZoomSpeed(int64_t speed);
+bool panaSetZoomSpeed(int64_t speed, bool isRaw);
 bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
 int64_t panaGetZoomPosition(void);
 int64_t panaGetZoomSpeed(void);
@@ -31,7 +32,7 @@ bool panaSetTallyState(int tallyState);
     #define GET_ZOOM_POSITION() panaGetZoomPosition()
     #define GET_ZOOM_SPEED() panaGetZoomSpeed()
     #define ZOOM_POSITION_SUPPORTED true
-    #define SET_ZOOM_SPEED(speed) panaSetZoomSpeed(speed)
+    #define SET_ZOOM_SPEED(speed, isRaw) panaSetZoomSpeed(speed, isRaw)
 
     // Possible future options: LANC max is 8 (officially 0-7 plus "stopped").
     #define ZOOM_SCALE_HARDWARE 49
@@ -50,18 +51,13 @@ bool panaSetTallyState(int tallyState);
     #if !PANASONIC_PTZ_ZOOM_ONLY
         #define GET_PAN_TILT_POSITION(panPositionRef, tiltPositionRef) \
             panaGetPanTiltPosition(panPositionRef, tiltPositionRef)
-        #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed) panaSetPanSpeed(panSpeed, tiltSpeed)
+        #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed, isRaw) \
+            panaSetPanSpeed(panSpeed, tiltSpeed, isRaw)
         #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed) 
             panaSetPanTiltPosition(panPosition, panSpeed, tiltPosition, tiltSpeed)
         #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
         #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
         #define PAN_AND_TILT_POSITION_SUPPORTED true
-
-        // No idea if these values have any truth because I have no camera with pan and tilt.
-        // This should be the total difference between the minmum and maximum values that the
-        // camera actually returns as positions.
-        #define PAN_RANGE`0xffff
-        #define TILT_RANGE`0xffff
 
         // Panasonic defines the range as 0 to 99.
         #define PAN_TILT_SCALE_HARDWARE 49

@@ -1,5 +1,5 @@
 
-CFLAGS=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -Wall -Wno-unknown-pragmas
+CFLAGS=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -Wall -Wno-unknown-pragmas -g -O0
 
 # If not using hardware, remove -lbcm2835
 LDFLAGS=-lpthread -lm -lbcm2835 -Lmotorcontrol -lmotorcontrol

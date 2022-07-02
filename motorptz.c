@@ -72,6 +72,8 @@ static volatile int64_t g_tilt_speed = 0;
 static volatile int64_t g_last_pan_position = 0;
 static volatile int64_t g_last_tilt_position = 0;
 
+static volatile bool g_pan_tilt_raw = false;
+
 bool motorModuleInit(void) {
     bool localDebug = motor_enable_debugging || false;
     if (localDebug) fprintf(stderr, "Initializing motor module\n");
@@ -104,7 +106,8 @@ bool motorSetIPAddress(char *address) {
   return true;
 }
 
-bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed) {
+bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
+  g_pan_tilt_raw = isRaw;
   g_pan_speed = panSpeed;
   g_tilt_speed = tiltSpeed;
   return true;
@@ -465,8 +468,12 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
 void *runMotorControlThread(void *argIgnored) {
   bool localDebug = false;
   while (1) {
-    int scaledPanSpeed = abs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
-    int scaledTiltSpeed = abs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
+    int scaledPanSpeed = g_pan_tilt_raw ?
+        abs(g_pan_speed) :
+        abs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
+    int scaledTiltSpeed = g_pan_tilt_raw ?
+        abs(g_tilt_speed) :
+        abs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
 
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
     if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
@@ -492,4 +499,21 @@ void *runMotorControlThread(void *argIgnored) {
     usleep(10000);  // Update 100x per second (latency-critical).
   }
   return NULL;
+}
+
+#pragma mark - Calibration
+
+void motorModuleCalibrate(void) {
+  int64_t leftLimit = leftPanLimit();
+  int64_t rightLimit = rightPanLimit();
+  int64_t topLimit = topTiltLimit();
+  int64_t bottomLimit = bottomTiltLimit();
+
+  int64_t *panCalibrationData = calibrationDataForMoveAlongAxis(
+      axis_identifier_pan, rightLimit, leftLimit, 0, PAN_TILT_SCALE_HARDWARE);
+  int64_t *tiltCalibrationData = calibrationDataForMoveAlongAxis(
+      axis_identifier_tilt, bottomLimit, topLimit, 0, PAN_TILT_SCALE_HARDWARE);
+
+  writeCalibrationDataForAxis(axis_identifier_pan, panCalibrationData, PAN_TILT_SCALE_HARDWARE + 1);
+  writeCalibrationDataForAxis(axis_identifier_tilt, tiltCalibrationData, PAN_TILT_SCALE_HARDWARE + 1);
 }

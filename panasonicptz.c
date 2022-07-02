@@ -47,10 +47,6 @@ char *sendCommand(const char *group, const char *command, char *values[],
 
 #pragma mark - Panasonic implementation
 
-static CURL *tallyQueryHandle = NULL;
-static CURL *zoomPositionQueryHandle = NULL;
-static CURL *zoomSpeedSetHandle = NULL;
-
 static char *g_cameraIPAddr = NULL;
 
 bool panaModuleInit(void) {
@@ -129,8 +125,9 @@ void freeMulti(char **array, ssize_t count) {
 }
 
 #if !PANASONIC_PTZ_ZOOM_ONLY
-bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed) {
-    int scaledTiltSpeed = scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE);
+bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
+    int scaledTiltSpeed =
+        isRaw ? tiltSpeed : scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE);
 
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_zoom_position = 0;
@@ -192,12 +189,15 @@ char *sendCommand(const char *group, const char *command, char *values[],
     curl_easy_setopt(curlQueryHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 
     char *encoded_command = curl_easy_escape(curlQueryHandle, command, 0);
-    // fprintf(stderr, "Command: \"%s\" encoded command: \"%s\"\n", command, encoded_command);
-
     bool localDebug = pana_enable_debugging || false;
+
+    if (localDebug) {
+        fprintf(stderr, "Command: \"%s\" encoded command: \"%s\"\n", command, encoded_command);
+    }
+
     char *URL = NULL;
     char *valueString = NULL;
-    asprintf(&valueString, "");
+    asprintf(&valueString, "%s", "");
     for (int i = 0 ; i < numValues; i++) {
         char *temp = valueString;
         asprintf(&valueString, "%s%s", temp, values[i]);
@@ -236,11 +236,12 @@ int64_t panaGetZoomSpeed(void) {
     return last_zoom_speed;
 }
 
-bool panaSetZoomSpeed(int64_t speed) {
+bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     bool localDebug = false;
     last_zoom_speed = speed;
 
-    int intSpeed = scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE) + 50;
+    int intSpeed =
+        isRaw ? (speed + 50) : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE) + 50;
     char *intSpeedString = panaIntString(intSpeed, 2, false);
 
     if (localDebug) {
@@ -394,4 +395,10 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
   chunk->data[chunk->len] = 0;
  
   return totalSize;
+}
+
+#pragma mark - Calibration
+
+void panaModuleCalibrate(void) {
+
 }
