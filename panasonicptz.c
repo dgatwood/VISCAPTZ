@@ -48,6 +48,18 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix);
 
+#if USE_PANASONIC_PTZ
+  int64_t *pana_zoom_data = NULL;
+  int32_t *pana_zoom_scaled_data = NULL;
+
+  #if !PANASONIC_PTZ_ZOOM_ONLY
+    int64_t *pana_pan_data = NULL;
+    int32_t *pana_pan_scaled_data = NULL;
+    int64_t *pana_tilt_data = NULL;
+    int32_t *pana_tilt_scaled_data = NULL;
+  #endif  // !PANASONIC_PTZ_ZOOM_ONLY
+#endif  // USE_PANASONIC_PTZ
+
 #pragma mark - Panasonic implementation
 
 static char *g_cameraIPAddr = NULL;
@@ -72,7 +84,38 @@ bool panaModuleInit(void) {
 #else
     if (pana_enable_debugging) fprintf(stderr, "Panasonic module init skipped\n");
 #endif
-    return true;
+    return panaModuleReload();
+}
+
+bool panaModuleReload(void) {
+  #if USE_PANASONIC_PTZ
+    int maxSpeed = 0;
+    pana_zoom_data =
+        readCalibrationDataForAxis(axis_identifier_zoom, &maxSpeed);
+    if (maxSpeed == ZOOM_SCALE_HARDWARE) {
+        pana_zoom_scaled_data =
+            convertSpeedValues(pana_zoom_data, ZOOM_SCALE_HARDWARE);
+    }
+
+
+    #if !PANASONIC_PTZ_ZOOM_ONLY
+      int maxSpeed = 0;
+      pana_pan_data =
+          readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
+      if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
+          pana_pan_scaled_data =
+              convertSpeedValues(pana_pan_data, PAN_TILT_SCALE_HARDWARE);
+      }
+
+      pana_tilt_data =
+          readCalibrationDataForAxis(axis_identifier_tilt, &maxSpeed);
+      if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
+          pana_tilt_scaled_data =
+              convertSpeedValues(pana_tilt_data, PAN_TILT_SCALE_HARDWARE);
+      }
+    #endif  // !PANASONIC_PTZ_ZOOM_ONLY
+  #endif  // USE_PANASONIC_PTZ
+  return true;
 }
 
 bool panaModuleTeardown(void) {
@@ -473,8 +516,7 @@ void panaModuleCalibrate(void) {
   int64_t *zoomCalibrationData = calibrationDataForMoveAlongAxis(
       axis_identifier_zoom, maximumZoom, minimumZoom, 0, ZOOM_SCALE_HARDWARE);
 
-  writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE + 1);
-
+  writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE);
 }
 
 // For now, return NULL.  Values are 0..1000, so int32_t only.

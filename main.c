@@ -311,8 +311,8 @@ int computeSpeed(int progress) {
         // across their duration.
         //
         // This means that the average speed across the entire time range from 0 to 1000
-        // is ((max_speed * 800) + (0.5 * max_speed * 200)) / 1000.  We can simplify this
-        // to 0.9 * max_speed.
+        // is ((maxSpeed * 800) + (0.5 * maxSpeed * 200)) / 1000.  We can simplify this
+        // to 0.9 * maxSpeed.
         //
         // So if we know that we want a motion to take 10 seconds (for example), and if
         // that motion is 5000 units of distance, it needs to move 500 units per second,
@@ -445,9 +445,9 @@ double absceil(double value) {
 // equally sized groups of numbers on the output size or input groups onto
 // single output values, depending on direction.
 //
-// If scaleData is non-NULL, it is assumed to be a set of values that
-// are equal to the raw scale value for that motor speed divided by
-// the raw scale value for the fastest motor position times 1,000.
+// If scaleData is non-NULL, it is assumed to be a set of values
+// returned by a call to the convertSpeedValues function on the
+// raw calibration results for a given axis.
 //
 // Thus, each value represents the core scale value that most closely
 // approximates that speed in the target scale.  Any zero-speed values
@@ -457,7 +457,71 @@ double absceil(double value) {
 // If fromScale is not the core scale, the value is first converted
 // to that scale.
 int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
-  return absceil((speed * 1.0 * toScale) / fromScale);
+  if (scaleData == NULL) {
+    return absceil((speed * 1.0 * toScale) / fromScale);
+  }
+
+  // Fast path for no motion.
+  if (speed == 0) {
+    return 0;
+  }
+
+  // If the input scale is anything other than SCALE_CORE,
+  // first convert it to that scale so that it is in the
+  // same scale as scaleData.
+  if (fromScale != SCALE_CORE) {
+    speed = scaleSpeed(speed, fromScale, SCALE_CORE, NULL);
+  }
+
+  // Find the lowest speed that is at least as large as the
+  // target speed.
+  for (int i = 0; i <= toScale; i++) {
+    if (scaleData[i] == speed) {
+      return i;
+    } else if (scaleData[i] > speed) {
+      // The native speed at `i` is the smallest speed
+      // greater than the target core speed.  If the
+      // native speed that's one slower than this speed
+      // provides no motion, return native speed `i`
+      // because we never want to stop the motor for
+      // a nonzero value.  (It is the responsibility of
+      // the VISCA sender/controller to not send out
+      // junk values if the stick is near the center,
+      // not the responsiblity of the VISCA interpreter/
+      // motor controller.)
+      if (scaleData[i - 1] == 0) {
+        return i;
+      }
+      // Both the current native speed value and the
+      // native speed value below this one are nonzero.
+      // Return i or i-1, whichever is closer, but not
+      // if the speed value at i-1 is zero.
+      int distanceBelow = speed - scaleData[i-1];
+      int distanceAbove = scaleData[i] - speed;
+      return (distanceAbove < distanceBelow) ? i : i-1;
+    }
+  }
+  // If we ran off the end, return the maximum speed.
+  return toScale;
+}
+
+int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed) {
+  assert(maxSpeed > 0);
+
+  // Compute the size of the last scale step between the fastest
+  // value and the slowest value and add that to the maximum value
+  // so that we slightly stretch the number of values that map
+  // onto a core speed of 1,000.
+  int64_t last_scale_step_size =
+      speedValues[maxSpeed] - speedValues[maxSpeed - 1];
+  int64_t scale_max =
+      speedValues[maxSpeed] + (last_scale_step_size / 2);
+  int32_t *outputValues =
+      (int32_t *)malloc((maxSpeed + 1) * sizeof(int32_t));
+  for (int i = 0; i <= maxSpeed; i++) {
+      outputValues[i] = speedValues[i] / scale_max;
+  }
+  return outputValues;
 }
 
 int64_t scaleVISCAPanTiltSpeedToCoreSpeed(int speed) {
@@ -1388,6 +1452,16 @@ void do_calibration(void) {
   }
   gCalibrationModeVISCADisabled = false;
   gCalibrationMode = false;
+
+  if (motorModuleReload()) {
+    fprintf(stderr, "Panasonic module reload failed.  Bailing.\n");
+    exit(1);
+  }
+
+  if (panaModuleReload()) {
+    fprintf(stderr, "Panasonic module reload failed.  Bailing.\n");
+    exit(1);
+  }
 }
 
 double timeStamp(void) {
@@ -1529,14 +1603,14 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
 int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int64_t startPosition,
                                      int64_t endPosition,
-                                     int32_t min_speed,
-                                     int32_t max_speed) {
+                                     int32_t minSpeed,
+                                     int32_t maxSpeed) {
   bool localDebug = false;
   if (localDebug) {
     fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
   }
 
-  int64_t *data = (int64_t *)malloc(sizeof(int64_t) * (max_speed - min_speed + 1));
+  int64_t *data = (int64_t *)malloc(sizeof(int64_t) * (maxSpeed - minSpeed + 1));
   setAxisPositionIncrementally(axis, startPosition, SCALE_CORE);  // Move as quickly as possible.
   waitForAxisMove(axis);
 
@@ -1544,8 +1618,8 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     fprintf(stderr, "Finished initial move.\n");
   }
 
-  for (int32_t speed = min_speed; speed <= max_speed; speed++) {
-    float dutyCycle = (speed - min_speed) / (float)(max_speed - min_speed);
+  for (int32_t speed = minSpeed; speed <= maxSpeed; speed++) {
+    float dutyCycle = (speed - minSpeed) / (float)(maxSpeed - minSpeed);
 
     bool done = false;
 
@@ -1642,7 +1716,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
       }
     }
 
-    int index = speed - min_speed;
+    int index = speed - minSpeed;
     data[index] = positionsPerSecondAverage;
     fprintf(stderr, "Positions per second at speed %d: %" PRId64 "\n",
             index, positionsPerSecondAverage);
@@ -1677,7 +1751,7 @@ const char *calibrationDataKeyNameForAxis(axis_identifier_t axis) {
 }
 
 int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
-                                    int *length) {
+                                    int *maxSpeed) {
   char *rawCalibrationData = getConfigKey(calibrationDataKeyNameForAxis(axis));
   if (rawCalibrationData == NULL) {
     return NULL;
@@ -1710,16 +1784,17 @@ int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
   }
 
   free(rawCalibrationData);
-  if (length) {
-    *length = count;
+  if (maxSpeed) {
+    // Return the last index.
+    *maxSpeed = count - 1;
   }
   return data;
 }
 
-bool writeCalibrationDataForAxis(axis_identifier_t axis, int64_t *calibrationData, int length) {
+bool writeCalibrationDataForAxis(axis_identifier_t axis, int64_t *calibrationData, int maxSpeed) {
   char *stringData = NULL;
   asprintf(&stringData, "%s", "");
-  for (int i = 0; i < length; i++) {
+  for (int i = 0; i <= maxSpeed; i++) {
     char *previousStringData = stringData;
     asprintf(&stringData, "%s %" PRId64, previousStringData, calibrationData[i]);
     free(previousStringData);
@@ -1834,11 +1909,11 @@ void run_startup_tests(void) {
   int64_t fakeData[] = { 0, 1, 2, 3 };
   assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)));
 
-  int length;
-  int64_t *fakeData2 = readCalibrationDataForAxis(30, &length);
-  assert(length == 4);
+  int maxSpeed = 0;
+  int64_t *fakeData2 = readCalibrationDataForAxis(30, &maxSpeed);
+  assert(maxSpeed == 3);
 
-  for (int i=0; i < 4; i++) {
+  for (int i=0; i <= maxSpeed; i++) {
     assert(fakeData[i] == fakeData2[i]);
   }
 }

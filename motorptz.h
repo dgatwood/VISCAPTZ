@@ -9,6 +9,7 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID);
 extern bool motorPanTiltPositionEnabled;
 
 bool motorModuleInit(void);
+bool motorModuleReload(void);
 void motorModuleCalibrate(void);
 bool motorSetIPAddress(char *address);
 bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);

@@ -11,23 +11,51 @@ extern bool gRecenter;
 
 /**
  * Returns an array where position 0 is the number of positions
- * moved in one second at min_speed, position 1 is at min_speed + 1,
+ * moved in one second at minSpeed, position 1 is at minSpeed + 1,
  * and so on.  The caller is responsible for freeing the array.
  */
 int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                          int64_t startPosition,
                                          int64_t endPosition,
-                                         int32_t min_speed,
-                                         int32_t max_speed);
+                                         int32_t minSpeed,
+                                         int32_t maxSpeed);
 
 /** Reads the calibration data from the configurator. */
 int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
-                                    int *length);
+                                    int *maxSpeed);
 
 /** Writes the calibration data to the configurator. */
 bool writeCalibrationDataForAxis(axis_identifier_t axis,
                                  int64_t *calibrationData,
                                  int length);
+
+/**
+ * Converts an array of raw scale values into a scaled array.
+ *
+ * Each of the input speed values represents the number of
+ * encoder positions that the motor on a given axis moves
+ * in one second.
+ *
+ * Each of the output speed values represents roughly the
+ * core speed that corresponds to that native (physical)
+ * speed value, computed by dividing the input value by
+ * the largest input value and multiplying by 1,000.
+ *
+ * This adds a small episilon to the largest value so that
+ * core values slightly below 1,000 will map on to the
+ * maximum value.
+ *
+ * This function returns an array allocated with malloc.
+ * it must be freed by the caller when no longer needed.
+ *
+ * @param speedValues An array of raw data from a previous
+ *                    `calibrationDataForMoveAlongAxis` call.
+ * @param maxSpeed    The maximum speed in the array (i.e.
+ *                    one more than the number of items in
+ *                    the array --- typically the value of
+ *                    a *_SCALE_HARDWARE constant.
+ */
+int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed);
 
 bool panMotorReversed(void);
 bool tiltMotorReversed(void);

@@ -76,6 +76,13 @@ static volatile int64_t g_last_tilt_position = 0;
 
 static volatile bool g_pan_tilt_raw = false;
 
+#if USE_MOTOR_PAN_AND_TILT
+  int64_t *motor_pan_data = NULL;
+  int32_t *motor_pan_scaled_data = NULL;
+  int64_t *motor_tilt_data = NULL;
+  int32_t *motor_tilt_scaled_data = NULL;
+#endif  // USE_MOTOR_PAN_AND_TILT
+
 // For now, return NULL.  Values are 0..1000, so int32_t only.
 int32_t *motorPanTiltMilliscale(void) {
   return NULL;
@@ -102,6 +109,26 @@ bool motorModuleInit(void) {
 #endif
 
   if (localDebug) fprintf(stderr, "Motor module init done\n");
+  return motorModuleReload();
+}
+
+bool motorModuleReload(void) {
+  #if USE_MOTOR_PAN_AND_TILT
+    int maxSpeed = 0;
+    motor_pan_data =
+        readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
+    if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
+        motor_pan_scaled_data =
+            convertSpeedValues(motor_pan_data, PAN_TILT_SCALE_HARDWARE);
+    }
+
+    motor_tilt_data =
+        readCalibrationDataForAxis(axis_identifier_tilt, &maxSpeed);
+    if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
+        motor_tilt_scaled_data =
+            convertSpeedValues(motor_tilt_data, PAN_TILT_SCALE_HARDWARE);
+    }
+  #endif  // USE_MOTOR_PAN_AND_TILT
   return true;
 }
 
@@ -475,7 +502,9 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
 #pragma mark - Motor control thread
 
 void *runMotorControlThread(void *argIgnored) {
+#if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
   bool localDebug = false;
+#endif
   while (1) {
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
     int scaledPanSpeed = g_pan_tilt_raw ?
@@ -527,8 +556,8 @@ void motorModuleCalibrate(void) {
   int64_t *tiltCalibrationData = calibrationDataForMoveAlongAxis(
       axis_identifier_tilt, topLimit, bottomLimit, 0, PAN_TILT_SCALE_HARDWARE);
 
-  writeCalibrationDataForAxis(axis_identifier_pan, panCalibrationData, PAN_TILT_SCALE_HARDWARE + 1);
-  writeCalibrationDataForAxis(axis_identifier_tilt, tiltCalibrationData, PAN_TILT_SCALE_HARDWARE + 1);
+  writeCalibrationDataForAxis(axis_identifier_pan, panCalibrationData, PAN_TILT_SCALE_HARDWARE);
+  writeCalibrationDataForAxis(axis_identifier_tilt, tiltCalibrationData, PAN_TILT_SCALE_HARDWARE);
 
   fprintf(stderr, "Done calibrating motors.\n");
 }

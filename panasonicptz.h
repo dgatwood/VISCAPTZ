@@ -5,6 +5,7 @@
 #include "constants.h"
 
 bool panaModuleInit(void);
+bool panaModuleReload(void);
 void panaModuleCalibrate(void);
 bool panaModuleTeardown(void);
 bool panaSetIPAddress(char *address);
