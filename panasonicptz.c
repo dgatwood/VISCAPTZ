@@ -90,16 +90,24 @@ bool panaModuleInit(void) {
 bool panaModuleReload(void) {
   #if USE_PANASONIC_PTZ
     int maxSpeed = 0;
+    bool localDebug = false;
     pana_zoom_data =
         readCalibrationDataForAxis(axis_identifier_zoom, &maxSpeed);
     if (maxSpeed == ZOOM_SCALE_HARDWARE) {
         pana_zoom_scaled_data =
             convertSpeedValues(pana_zoom_data, ZOOM_SCALE_HARDWARE);
+        if (localDebug) {
+          for (int i=0;i<ZOOM_SCALE_HARDWARE;i++) {
+            fprintf(stderr, "%d: raw: %" PRId64 "\n", i, pana_zoom_data[i]);
+            fprintf(stderr, "%d: scaled: %d\n", i, pana_zoom_scaled_data[i]);
+          }
+        }
+    } else {
+        fprintf(stderr, "Ignoring calibration data because the scale (%d) is incorrect.\n",
+                maxSpeed);
     }
 
-
     #if !PANASONIC_PTZ_ZOOM_ONLY
-      int maxSpeed = 0;
       pana_pan_data =
           readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
       if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
