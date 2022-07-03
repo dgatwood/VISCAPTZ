@@ -519,7 +519,7 @@ int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed) {
   int32_t *outputValues =
       (int32_t *)malloc((maxSpeed + 1) * sizeof(int32_t));
   for (int i = 0; i <= maxSpeed; i++) {
-      outputValues[i] = speedValues[i] / scale_max;
+      outputValues[i] = speedValues[i] * 1000 / scale_max;
   }
   return outputValues;
 }
@@ -1906,8 +1906,8 @@ void run_startup_tests(void) {
   assert(setConfigKeyInteger("randomValue", value));
   assert(getConfigKeyInteger("randomValue") == value);
 
-  int64_t fakeData[] = { 0, 1, 2, 3 };
-  assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)));
+  int64_t fakeData[] = { 0, 10, 20, 30 };
+  assert(writeCalibrationDataForAxis(30, fakeData, (sizeof(fakeData) / sizeof(int64_t)) - 1));
 
   int maxSpeed = 0;
   int64_t *fakeData2 = readCalibrationDataForAxis(30, &maxSpeed);
@@ -1915,5 +1915,13 @@ void run_startup_tests(void) {
 
   for (int i=0; i <= maxSpeed; i++) {
     assert(fakeData[i] == fakeData2[i]);
+  }
+
+  int32_t *translatedData = convertSpeedValues(fakeData, 3);
+  int32_t expectedResuls[] = { 0, 285, 571, 857 };
+  assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)));
+
+  for (int i=0; i <= maxSpeed; i++) {
+    assert(translatedData[i] == expectedResuls[i]);
   }
 }
