@@ -3,6 +3,7 @@
 #define ENABLE_MOTOR_HARDWARE 1
 #define ENABLE_ENCODER_HARDWARE 1
 
+#include <assert.h>
 #include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
@@ -11,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -73,6 +75,11 @@ static volatile int64_t g_last_pan_position = 0;
 static volatile int64_t g_last_tilt_position = 0;
 
 static volatile bool g_pan_tilt_raw = false;
+
+// For now, return NULL.  Values are 0..1000, so int32_t only.
+int32_t *motorPanTiltMilliscale(void) {
+  return NULL;
+}
 
 bool motorModuleInit(void) {
     bool localDebug = motor_enable_debugging || false;
@@ -202,8 +209,8 @@ void resetCenterPositionsSerial(int tilt_fd, int pan_fd);
 #endif  // USE_CANBUS
 
 void *runPositionMonitorThread(void *argIgnored) {
-    bool localDebug = false;
 #if ENABLE_HARDWARE
+    bool localDebug = false;
   #if USE_CANBUS
     int sock = motorOpenCANSock();
   #else  // !USE_CANBUS
@@ -221,12 +228,14 @@ void *runPositionMonitorThread(void *argIgnored) {
   // to minimize the chances of going off-scale low/high, because this software makes
   // no attempt at understanding wraparound right now.
   if (gRecenter || (gCalibrationMode && !gCalibrationModeQuick)) {
+#if ENABLE_HARDWARE
   #if USE_CANBUS
     resetCenterPositionsCANBus(sock);
-  #else
-    resetCenterPositionsSerial(tilt_fd);
+  #else  // !USE_CANBUS
+    resetCenterPositionsSerial(tilt_fd, pan_fd);
     resetCenterPositionsSerial(pan_fd);
-  #endif
+  #endif  // USE_CANBUS
+#endif  // ENABLE_HARDWARE
   }
 
   // Read the position.
@@ -468,14 +477,16 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
 void *runMotorControlThread(void *argIgnored) {
   bool localDebug = false;
   while (1) {
-    int scaledPanSpeed = g_pan_tilt_raw ?
-        abs(g_pan_speed) :
-        abs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
-    int scaledTiltSpeed = g_pan_tilt_raw ?
-        abs(g_tilt_speed) :
-        abs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE));
-
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
+    int scaledPanSpeed = g_pan_tilt_raw ?
+        llabs(g_pan_speed) :
+        llabs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                         motorPanTiltMilliscale()));
+    int scaledTiltSpeed = g_pan_tilt_raw ?
+        llabs(g_tilt_speed) :
+        llabs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                         motorPanTiltMilliscale()));
+
     if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
     Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
     if (localDebug) fprintf(stderr, "Setting motor B speed to %d.\n", scaledTiltSpeed);

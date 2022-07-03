@@ -1,5 +1,8 @@
 #include "panasonicptz.h"
 
+int32_t *panaZoomMilliscale(void);
+int32_t *panaPanTiltMilliscale(void);
+
 #include <fcntl.h>
 #include <math.h>
 #include <stdbool.h>
@@ -126,12 +129,16 @@ void freeMulti(char **array, ssize_t count) {
 
 #if !PANASONIC_PTZ_ZOOM_ONLY
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
+    int scaledPanSpeed =
+        isRaw ? panSpeed : scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                                       panaPanTiltMilliscale());
     int scaledTiltSpeed =
-        isRaw ? tiltSpeed : scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE);
+        isRaw ? tiltSpeed : scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                                       panaPanTiltMilliscale());
 
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_zoom_position = 0;
-    char *values[2] = { panaIntString(panSpeed, 3, true), panaIntString(scaledTiltSpeed, 3, true) };
+    char *values[2] = { panaIntString(scaledPanSpeed, 3, true), panaIntString(scaledTiltSpeed, 3, true) };
     char *response = sendCommand("ptz", "#PTS", values, 2, "gz");
     bool retval = false;
     if (response != NULL) {
@@ -148,8 +155,8 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
     // Panasonic's documentation makes no sense, so this is probably wrong,
     // and I don't have the hardware required to try it, so this should be
     // considered entirely unsupported.  Why don't these use PAN_TILT_SCALE_HARDWARE?
-    int convertedPanSpeed = scaleSpeed(panSpeed, SCALE_CORE, 0x1D) - 1;    // Speeds are 0 through 0x1D?
-    int convertedTiltSpeed = scaleSpeed(tiltSpeed, SCALE_CORE, 3) - 1;  // Speeds are 0, 1, or 2?
+    int convertedPanSpeed = scaleSpeed(panSpeed, SCALE_CORE, 0x1D, NULL) - 1;    // Speeds are 0 through 0x1D?
+    int convertedTiltSpeed = scaleSpeed(tiltSpeed, SCALE_CORE, 3, NULL) - 1;  // Speeds are 0, 1, or 2?
 
     char *values[4] = {
         panaIntString(panPosition, 4, true),
@@ -250,7 +257,8 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     last_zoom_speed = speed;
 
     int intSpeed =
-        isRaw ? (speed + 50) : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE) + 50;
+        isRaw ? (speed + 50) : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE,
+                                          panaZoomMilliscale()) + 50;
     char *intSpeedString = panaIntString(intSpeed, 2, false);
 
     if (localDebug) {
@@ -467,4 +475,14 @@ void panaModuleCalibrate(void) {
 
   writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE + 1);
 
+}
+
+// For now, return NULL.  Values are 0..1000, so int32_t only.
+int32_t *panaZoomMilliscale(void) {
+  return NULL;
+}
+
+// For now, return NULL.  Values are 0..1000, so int32_t only.
+int32_t *panaPanTiltMilliscale(void) {
+  return NULL;
 }

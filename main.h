@@ -45,7 +45,24 @@ int64_t setZoomInLimit(int64_t limit);
 int64_t setZoomOutLimit(int64_t limit);
 int64_t setZoomEncoderReversed(bool isReversed);
 
-int scaleSpeed(int speed, int fromScale, int toScale);
+// Scales a speed from a scale of 0..fromScale to 0..toScale.
+//
+// If scaleData is NULL, 0 is 0, and all other input values map onto
+// equally sized groups of numbers on the output size or input groups onto
+// single output values, depending on direction.
+//
+// If scaleData is non-NULL, it is assumed to be a set of values that
+// are equal to the raw scale value for that motor speed divided by
+// the raw scale value for the fastest motor position times 1,000.
+//
+// Thus, each value represents the core scale value that most closely
+// approximates that speed in the target scale.  Any zero-speed values
+// are skipped and replaced by the first nonzero value.  This isn't
+// exactly right mathematically, but it is as close as is physically
+// possible given motors' tendency to stall out at low speeds.
+// If fromScale is not the core scale, the value is first converted
+// to that scale.
+int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData);
 
 int debugGetTallyState(void);
 bool debugSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);

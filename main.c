@@ -439,18 +439,34 @@ double absceil(double value) {
   return (value > 0) ? ceil(value) : floor(value);
 }
 
-// 0 should be 0.  All other values should be equiproportional.
-int scaleSpeed(int speed, int fromScale, int toScale) {
+// Scales a speed from a scale of 0..fromScale to 0..toScale.
+//
+// If scaleData is NULL, 0 is 0, and all other input values map onto
+// equally sized groups of numbers on the output size or input groups onto
+// single output values, depending on direction.
+//
+// If scaleData is non-NULL, it is assumed to be a set of values that
+// are equal to the raw scale value for that motor speed divided by
+// the raw scale value for the fastest motor position times 1,000.
+//
+// Thus, each value represents the core scale value that most closely
+// approximates that speed in the target scale.  Any zero-speed values
+// are skipped and replaced by the first nonzero value.  This isn't
+// exactly right mathematically, but it is as close as is physically
+// possible given motors' tendency to stall out at low speeds.
+// If fromScale is not the core scale, the value is first converted
+// to that scale.
+int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
   return absceil((speed * 1.0 * toScale) / fromScale);
 }
 
 int64_t scaleVISCAPanTiltSpeedToCoreSpeed(int speed) {
-  return scaleSpeed(speed, PAN_SCALE_VISCA, SCALE_CORE);
+  return scaleSpeed(speed, PAN_SCALE_VISCA, SCALE_CORE, NULL);
 }
 
 int64_t scaleVISCAZoomSpeedToCoreSpeed(int speed) {
   // fprintf(stderr, "VISCA speed %d\n", speed);
-  return scaleSpeed(speed, ZOOM_SCALE_VISCA, SCALE_CORE);
+  return scaleSpeed(speed, ZOOM_SCALE_VISCA, SCALE_CORE, NULL);
 }
 
 int64_t getAxisPosition(axis_identifier_t axis) {
@@ -459,12 +475,19 @@ int64_t getAxisPosition(axis_identifier_t axis) {
     case axis_identifier_tilt:
     {
         int64_t panPosition, tiltPosition;
+#if PAN_AND_TILT_POSITION_SUPPORTED
         if (GET_PAN_TILT_POSITION(&panPosition, &tiltPosition)) {
             return (axis == axis_identifier_pan) ? panPosition : tiltPosition;
         }
+#endif
+        break;
     }
     case axis_identifier_zoom:
+#if ZOOM_POSITION_SUPPORTED
         return GET_ZOOM_POSITION();
+#else
+        break;
+#endif
   }
   return 0;
 }
@@ -1248,7 +1271,7 @@ void do_calibration(void) {
         // See if the position has moved (by enough to matter).
         int64_t value = getAxisPosition(axis);
         bool axisMoved = false;
-        if (abs(lastPosition[axis] - value) > 5) {
+        if (llabs(lastPosition[axis] - value) > 5) {
           lastMoveTime = timeStamp();
           axisHasMoved[axis] = true;
           axisMoved = true;
@@ -1492,7 +1515,7 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
   motionEndPosition = getAxisPosition(axis);
   endTime = timeStamp();
 
-  int64_t distance = abs(motionEndPosition - motionStartPosition);
+  int64_t distance = llabs(motionEndPosition - motionStartPosition);
   double duration = endTime - startTime;
 
   inMotion = true;
@@ -1587,7 +1610,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
           for (int i = 0 ; i < NUM_SAMPLES; i++) {
             int64_t value = positionsPerSecond[i];
 
-            if (abs(value - mean) > standardDeviation) {
+            if (fabs(value - mean) > standardDeviation) {
               fprintf(stderr, "Discarding outlier %" PRId64 ".\n", value);
               continue;
             }

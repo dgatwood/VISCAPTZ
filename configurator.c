@@ -137,7 +137,7 @@ bool setConfigKey(const char *key, const char *value) {
       }
       found = true;
     } else {
-      error = error || (fprintf(fq, buf) == -1);
+      error = error || (fprintf(fq, "%s", buf) == -1);
     }
   }
   if (!found) {
