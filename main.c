@@ -1924,4 +1924,24 @@ void run_startup_tests(void) {
   for (int i=0; i <= maxSpeed; i++) {
     assert(translatedData[i] == expectedResuls[i]);
   }
+
+  uint64_t source1000Values[] = {
+    0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000
+  };
+  uint64_t source100Values[] = {
+    0,  10,  20,  30,  40,  50,  60,  70,  80,  90,  100
+  };
+  uint64_t expectedValues[] = {
+    0,   1,   1,   1,   1,   2,   2,   2,   3,   3,    3
+  };
+
+  // Verify the results for inputs at SCALE_CORE.
+  for (int i = 0; i < (sizeof(source1000Values) / sizeof(source1000Values[0])); i++) {
+    assert(scaleSpeed(source1000Values[i], SCALE_CORE, maxSpeed, translatedData) == expectedValues[i]);
+  }
+
+  // Verify the results for inputs at an arbitrary scale.
+  for (int i = 0; i < (sizeof(source100Values) / sizeof(source100Values[0])); i++) {
+    assert(scaleSpeed(source100Values[i], 100, maxSpeed, translatedData) == expectedValues[i]);
+  }
 }
