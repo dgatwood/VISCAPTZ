@@ -75,14 +75,18 @@ also provides support for reprogramming the CAN encoders to change
 their IDs (which is necessary to do the first time you use them,
 because they default to the same ID).
 
-The next step is to fine-tune the absolute positioning.  Currently, this
-code generates a table of motor speed to encoder speed mappings that will
-eventually be used when recalling absolute positions.  However, the code
-to use those tables is not yet in place.
+This code also takes advantage of motor speed calibration data collected
+on first launch, which allows it to fairly precisely control the speed
+of the motors in a nice s-curve.  This code has been tested only against
+fake hardware, however, so its behavior is not guaranteed.  If for some
+reason it does not work when run on actual hardware, you can go back to
+the old behavior by setting the value of EXPERIMENTAL_TIME_PROGRESS to
+zero (0) in config.h.
 
-After that, at some future date when I have access to the Panasonic
-camera again, I need to verify that the code works as expected against
-the real hardware.
+After I am able to test the code on the actual pan and tilt hardware
+again, I'll do any final tuning on that.  Then, at some future date
+when I have access to the Panasonic camera again, I need to verify
+that the code works as expected against the real camera hardware.
 
 Beyond that, the only remaining missing piece of functionality is a thread
 to obtain tally light information from OBS (via OBS-Websocket) or Tricaster
