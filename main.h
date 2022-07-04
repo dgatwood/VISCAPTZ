@@ -57,21 +57,29 @@ bool writeCalibrationDataForAxis(axis_identifier_t axis,
  */
 int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed);
 
+/**
+ * Returns the first nonzero value in the provided calibration data, or 0 if data is nil
+ * or all zeroes.
+ */
+int64_t minimumPositionsPerSecondForData(int64_t *calibrationData, int maximumSpeed);
+
 bool panMotorReversed(void);
 bool tiltMotorReversed(void);
 bool panEncoderReversed(void);
 bool tiltEncoderReversed(void);
+int64_t zoomEncoderReversed(void);
+int64_t setZoomEncoderReversed(bool isReversed);
 
 int64_t leftPanLimit(void);
 int64_t rightPanLimit(void);
+
 int64_t topTiltLimit(void);
 int64_t bottomTiltLimit(void);
+
 int64_t zoomInLimit(void);
 int64_t zoomOutLimit(void);
-int64_t zoomEncoderReversed(void);
 int64_t setZoomInLimit(int64_t limit);
 int64_t setZoomOutLimit(int64_t limit);
-int64_t setZoomEncoderReversed(bool isReversed);
 
 // Scales a speed from a scale of 0..fromScale to 0..toScale.
 //

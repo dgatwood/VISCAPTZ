@@ -1,11 +1,3 @@
-// #include <csignal>
-// #include <cstddef>
-// #include <cstdio>
-// #include <atomic>
-// #include <chrono>
-// #include <string>
-// #include <thread>
-
 #include "configurator.h"
 #include "constants.h"
 #include "fakeptz.h"
@@ -32,6 +24,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+static int kUnusedPosition = 0;  // Tells programmers that a value in a move call is unused.
 static int kAxisStallThreshold = 100;
 const char *kPanMotorReversedKey = "pan_axis_motor_reversed";
 const char *kTiltMotorReversedKey = "tilt_axis_motor_reversed";
@@ -44,6 +37,12 @@ const char *kTiltLimitBottomKey = "tilt_limit_down";
 const char *kZoomInLimitKey = "zoom_in_limit";
 const char *kZoomOutLimitKey = "zoom_out_limit";
 const char *kZoomEncoderReversedKey = "zoom_encoder_reversed";
+
+typedef enum {
+  kFlagMovePan = 0x1,             //! Use the pan axis position.
+  kFlagMoveTilt = 0x2,            //! Use the tilt axis position.
+  kFlagMoveZoom = 0x4,            //! Use the zooom axis position.
+} moveModeFlags;
 
 
 #pragma mark - Structures and prototypes
@@ -70,6 +69,8 @@ static int64_t gAxisMoveTargetPosition[NUM_AXES];
 static int64_t gAxisMoveMaxSpeed[NUM_AXES];
 static int64_t gAxisLastMoveSpeed[NUM_AXES];
 static int64_t gAxisPreviousPosition[NUM_AXES];
+static double gAxisDuration[NUM_AXES];
+static double gAxisStartTime[NUM_AXES];
 static int gAxisStalls[NUM_AXES];
 
 int debugPanAndTilt = 0; // kDebugModePan;// kDebugModeZoom;  // Bitmap from debugMode.
@@ -85,10 +86,23 @@ int getVISCAZoomSpeedFromTallyState(void);
 bool absolutePositioningSupportedForAxis(axis_identifier_t axis);
 void handleRecallUpdates(void);
 int64_t getAxisPosition(axis_identifier_t axis);
-bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed);
+bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration);
 bool setAxisSpeed(axis_identifier_t axis, int64_t position, bool debug);
 bool setAxisSpeedRaw(axis_identifier_t axis, int64_t speed, bool debug);
 void cancelRecallIfNeeded(char *context);
+double timeStamp(void);
+double durationForMove(moveModeFlags flags, uint64_t panPosition, uint64_t tiltPosition, uint64_t zoomPosition);
+
+bool gRecallSpeedSet = false;
+int gVISCARecallSpeed = 0;
+void setRecallSpeedVISCA(int value);
+double currentRecallTime(void);
+
+// Legal preset values are in the range 0..255, but the code doesn't check, so use higher numbers for
+// internal tests, etc.
+bool savePreset(int presetNumber);
+bool recallPreset(int presetNumber);
+
 
 visca_response_t *failedVISCAResponse(void);
 visca_response_t *enqueuedVISCAResponse(void);
@@ -122,6 +136,7 @@ bool gRecenter = false;
 
 bool resetCalibration(void);
 void do_calibration(void);
+
 
 #pragma mark - Main
 
@@ -186,6 +201,44 @@ int main(int argc, char *argv[]) {
   }
 
   fprintf(stderr, "Ready for VISCA commands.\n");
+
+#if 1
+  // Temporary test code.
+
+  fprintf(stderr, "Moving pan axis.\n");
+
+  const int interval = 1000000;  // 1 second.
+
+  setAxisSpeed(axis_identifier_pan, 1000, false);
+  usleep(interval);  // Move for a while.
+  setAxisSpeed(axis_identifier_pan, 0, false);
+
+  fprintf(stderr, "Moving tilt axis.\n");
+
+  setAxisSpeed(axis_identifier_tilt, 1000, false);
+  usleep(interval);  // Move for a while.
+  setAxisSpeed(axis_identifier_tilt, 0, false);
+
+  fprintf(stderr, "Storing preset.\n");
+  savePreset(500);
+
+  fprintf(stderr, "Moving pan axis back.\n");
+
+  setAxisSpeed(axis_identifier_pan, -1000, false);
+  usleep(interval);  // Move for a while.
+  setAxisSpeed(axis_identifier_pan, 0, false);
+
+  fprintf(stderr, "Moving tilt axis back.\n");
+
+  setAxisSpeed(axis_identifier_tilt, -1000, false);
+  usleep(interval);  // Move for a while.
+  setAxisSpeed(axis_identifier_tilt, 0, false);
+
+  fprintf(stderr, "Recalling preset.\n");
+  recallPreset(500);
+
+  fprintf(stderr, "Done temporary move code.\n");
+#endif
 
   // Spin this thread forever for now.
   while (1) {
@@ -408,9 +461,30 @@ void handleRecallUpdates(void) {
         fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
       }
       int64_t axisPosition = getAxisPosition(axis);
-      int panProgress = actionProgress(gAxisMoveStartPosition[axis], axisPosition,
-                                       gAxisMoveTargetPosition[axis], gAxisPreviousPosition[axis],
-                                       &gAxisStalls[axis]);
+      int panProgressByPosition = actionProgress(gAxisMoveStartPosition[axis], axisPosition,
+                                                 gAxisMoveTargetPosition[axis], gAxisPreviousPosition[axis],
+                                                 &gAxisStalls[axis]);
+#if EXPERIMENTAL_TIME_PROGRESS
+      double currentTime = timeStamp();
+      double remainingTime = currentTime - gAxisStartTime[axis];
+      double duration = gAxisDuration[axis];
+      bool usingPositionBasedProgress = (duration == 0);
+      int panProgressByTime = usingPositionBasedProgress ? 0 : (1000.0 * remainingTime ) / duration;
+      int panProgress = usingPositionBasedProgress ? panProgressByPosition : panProgressByTime;
+
+      if (usingPositionBasedProgress && localDebug) {
+        fprintf(stderr, "WARNING: NO DURATION AVAILABLE FOR RECALL COMMAND.\n");
+      } else if (localDebug) {
+        fprintf(stderr, "START: %lf END: %lf CURRENT: %lf REMAINING: %lf\n"
+                        "DURATION: %lf PROGRESS: %d\n",
+                gAxisStartTime[axis], gAxisStartTime[axis] + duration,
+                currentTime, remainingTime,
+                duration, panProgressByTime);
+     }
+#else
+      bool usingPositionBasedProgress = true;
+      int panProgress = panProgressByPosition;
+#endif
       gAxisPreviousPosition[axis] = axisPosition;
 
       if (panProgress == 1000) {
@@ -422,7 +496,9 @@ void handleRecallUpdates(void) {
       } else {      
         // Scale based on max speed out of 24 (VISCA percentage) and scale to a range of
         // -1000 to 1000 (core speed).
-        int speed = MAX(computeSpeed(panProgress), MIN_PAN_TILT_SPEED);
+        int speed = usingPositionBasedProgress ?
+            MAX(computeSpeed(panProgress), MIN_PAN_TILT_SPEED) :
+            computeSpeed(panProgress);
         setAxisSpeed(axis, speed * direction, localDebug);
         if (localDebug) {
             fprintf(stderr, "AXIS %d SPEED NOW %d * %d (%d)\n",
@@ -466,19 +542,22 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
     return 0;
   }
 
+  int absSpeed = abs(speed);
+  int sign = (speed < 0) ? -1 : 1;
+
   // If the input scale is anything other than SCALE_CORE,
   // first convert it to that scale so that it is in the
   // same scale as scaleData.
   if (fromScale != SCALE_CORE) {
-    speed = scaleSpeed(speed, fromScale, SCALE_CORE, NULL);
+    absSpeed = scaleSpeed(absSpeed, fromScale, SCALE_CORE, NULL);
   }
 
   // Find the lowest speed that is at least as large as the
   // target speed.
   for (int i = 0; i <= toScale; i++) {
-    if (scaleData[i] == speed) {
-      return i;
-    } else if (scaleData[i] > speed) {
+    if (scaleData[i] == absSpeed) {
+      return i * sign;
+    } else if (scaleData[i] > absSpeed) {
       // The native speed at `i` is the smallest speed
       // greater than the target core speed.  If the
       // native speed that's one slower than this speed
@@ -490,19 +569,19 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       // not the responsiblity of the VISCA interpreter/
       // motor controller.)
       if (scaleData[i - 1] == 0) {
-        return i;
+        return i * sign;
       }
       // Both the current native speed value and the
       // native speed value below this one are nonzero.
       // Return i or i-1, whichever is closer, but not
       // if the speed value at i-1 is zero.
-      int distanceBelow = speed - scaleData[i-1];
-      int distanceAbove = scaleData[i] - speed;
-      return (distanceAbove < distanceBelow) ? i : i-1;
+      int distanceBelow = absSpeed - scaleData[i-1];
+      int distanceAbove = scaleData[i] - absSpeed;
+      return ((distanceAbove < distanceBelow) ? i : i-1) * sign;
     }
   }
   // If we ran off the end, return the maximum speed.
-  return toScale;
+  return toScale * sign;
 }
 
 int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed) {
@@ -556,13 +635,24 @@ int64_t getAxisPosition(axis_identifier_t axis) {
   return 0;
 }
 
-bool setZoomPosition(int64_t position, int64_t speed) {
+bool setZoomPosition(int64_t position, int64_t speed, double duration) {
     fprintf(stderr, "@@@ setZoomPosition: %" PRId64 " Speed: %" PRId64 "\n", position, speed);
-    return SET_ZOOM_POSITION(position, speed);
+
+    if (duration == 0) {
+        duration = durationForMove(kFlagMoveZoom, kUnusedPosition, kUnusedPosition, position);
+    }
+
+    return SET_ZOOM_POSITION(position, speed, duration);
 }
 
 bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
-                        int64_t tiltPosition, int64_t tiltSpeed) {
+                        int64_t tiltPosition, int64_t tiltSpeed, double duration) {
+    bool localDebug = false;
+
+    if (duration == 0 && localDebug) {
+        fprintf(stderr, "WARNING: NO DURATION AVAILABLE FOR PAN/TILT SET COMMAND.\n");
+    }
+
     fprintf(stderr, "@@@ setPanTiltPosition: Pan position %" PRId64 " speed %" PRId64 "\n"
                     "                        Tilt position %" PRId64 " speed %" PRId64 "\n",
                     panPosition, panSpeed, tiltPosition, tiltSpeed);
@@ -573,7 +663,189 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
         return false;
     }
 
-    return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed);
+    if (duration == 0) {
+        duration = durationForMove(kFlagMovePan | kFlagMoveTilt, panPosition, tiltPosition, kUnusedPosition);
+    }
+
+    return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, duration);
+}
+
+double fastestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position);
+double slowestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position);
+
+/**
+ * Computes the move duration for a move to panPosition/tiltPosition/zoomPosition or some subset
+ * thereof (controlled by flags).
+ *
+ * By default, this returns the value of currentRecallTime(), but only if every axis can move that
+ * quickly or slowly.
+ *
+ * If it is not possible to make both axes reach the destination simultaneously because of speed
+ * differences, this will return the longer of the possible durations, and one axis will just finish
+ * sooner.
+ */
+double durationForMove(moveModeFlags flags, uint64_t panPosition, uint64_t tiltPosition, uint64_t zoomPosition) {
+  bool localDebug = true;
+
+  double recallTime = currentRecallTime();
+
+  if (localDebug) {
+    fprintf(stderr, "Default duration for move: %lf\n", recallTime);
+  }
+
+  // First, make sure the ideal dureation is not too fast for any axis.
+  if (flags & kFlagMovePan) {
+    double timeAtMaximumSpeed = fastestMoveForAxisToPosition(axis_identifier_pan, panPosition);
+    if (timeAtMaximumSpeed == 0) {
+      if (localDebug) {
+        fprintf(stderr, "Maximum speed for pan axis not available.  Returning 0.\n");
+      }
+      return 0;
+    }
+    recallTime = MAX(recallTime, timeAtMaximumSpeed);
+    if (localDebug) {
+      fprintf(stderr, "Fastest duration for move (pan): %lf.  Now %lf.\n", timeAtMaximumSpeed,
+              recallTime);
+    }
+  }
+  if (flags & kFlagMoveTilt) {
+    double timeAtMaximumSpeed = fastestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
+    if (timeAtMaximumSpeed == 0) {
+      if (localDebug) {
+        fprintf(stderr, "Maximum speed for tilt axis not available.  Returning 0.\n");
+      }
+      return 0;
+    }
+    recallTime = MAX(recallTime, timeAtMaximumSpeed);
+    if (localDebug) {
+      fprintf(stderr, "Fastest duration for move (tilt): %lf.  Now %lf.\n", timeAtMaximumSpeed,
+              recallTime);
+    }
+  }
+  if (flags & kFlagMoveZoom) {
+    double timeAtMaximumSpeed = fastestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
+    if (timeAtMaximumSpeed == 0) {
+      if (localDebug) {
+        fprintf(stderr, "Maximum speed for zoom axis not available.  Returning 0.\n");
+      }
+      return 0;
+    }
+    recallTime = MAX(recallTime, timeAtMaximumSpeed);
+    if (localDebug) {
+      fprintf(stderr, "Fastest duration for move (zoom): %lf.  Now %lf.\n", timeAtMaximumSpeed,
+              recallTime);
+    }
+  }
+
+  // Now, make sure the ideal dureation is not too slow for any axis.
+  if (flags & kFlagMovePan) {
+    double timeAtMinimumSpeed = slowestMoveForAxisToPosition(axis_identifier_pan, panPosition);
+    if (timeAtMinimumSpeed == 0) {
+      if (localDebug) {
+        fprintf(stderr, "Minimum speed for pan axis not available.  Returning 0.\n");
+      }
+      return 0;
+    }
+    recallTime = MIN(recallTime, timeAtMinimumSpeed);
+    if (localDebug) {
+      fprintf(stderr, "Slowest duration for move (pan): %lf.  Now %lf.\n", timeAtMinimumSpeed,
+              recallTime);
+    }
+  }
+  if (flags & kFlagMoveTilt) {
+    double timeAtMinimumSpeed = slowestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
+    if (timeAtMinimumSpeed == 0) {
+      if (localDebug) {
+        fprintf(stderr, "Minimum speed for tilt axis not available.  Returning 0.\n");
+      }
+      return 0;
+    }
+    recallTime = MIN(recallTime, timeAtMinimumSpeed);
+    if (localDebug) {
+      fprintf(stderr, "Slowest duration for move (tilt): %lf.  Now %lf.\n", timeAtMinimumSpeed,
+              recallTime);
+    }
+  }
+  if (flags & kFlagMoveZoom) {
+    double timeAtMinimumSpeed = slowestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
+    if (timeAtMinimumSpeed == 0) {
+      if (localDebug) {
+        fprintf(stderr, "Minimum speed for zoom axis not available.  Returning 0.\n");
+      }
+      return 0;
+    }
+    recallTime = MIN(recallTime, timeAtMinimumSpeed);
+    if (localDebug) {
+      fprintf(stderr, "Slowest duration for move (zoom): %lf.  Now %lf.\n", timeAtMinimumSpeed,
+              recallTime);
+    }
+  }
+  return recallTime;
+}
+
+int64_t minimumPositionsPerSecondForAxis(axis_identifier_t axis) {
+  switch(axis) {
+    case axis_identifier_pan:
+        return MIN_PAN_POSITIONS_PER_SECOND();
+    case axis_identifier_tilt:
+        return MIN_TILT_POSITIONS_PER_SECOND();
+    case axis_identifier_zoom:
+        return MIN_ZOOM_POSITIONS_PER_SECOND();
+  }
+  return 0;
+}
+
+int64_t minimumPositionsPerSecondForData(int64_t *calibrationData, int maximumSpeed) {
+  if (calibrationData == NULL) {
+    return 0;
+  }
+  for (int i = 0; i <= maximumSpeed; i++) {
+    if (calibrationData[i] != 0) {
+      return calibrationData[i];
+    }
+  }
+  return 0;
+}
+
+int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis) {
+  switch(axis) {
+    case axis_identifier_pan:
+        return MAX_PAN_POSITIONS_PER_SECOND();
+    case axis_identifier_tilt:
+        return MAX_TILT_POSITIONS_PER_SECOND();
+    case axis_identifier_zoom:
+        return MAX_ZOOM_POSITIONS_PER_SECOND();
+  }
+  return 0;
+}
+
+double fastestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position) {
+  // With 80% of the move at 100% speed and the first and last 10% transitioning from/to 0% and
+  // averaging 50%, that means the average speed through the entire move is always 90% of the
+  // maximum speed from that middle 80%.  This is a slight approximation because there is a
+  // minimum speed for the motors, but we ignore that to make the computation reasonable.
+
+  uint64_t maximumPositionsPerSecond = maximumPositionsPerSecondForAxis(axis);
+  if (maximumPositionsPerSecond == 0) {
+    return 0;
+  }
+  uint64_t currentPosition = getAxisPosition(axis);
+  uint64_t distance = llabs(position - currentPosition);
+  return (double)distance / ((double)maximumPositionsPerSecond * 0.9);
+}
+
+double slowestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position) {
+  // We ignore any ramp time to the slowest speed, because it would be too hard to calculate
+  // that (and we don't log that data).  This just computes the duration based on the number of
+  // positions per second at the slowest native speed.
+
+  uint64_t minimumPositionsPerSecond = minimumPositionsPerSecondForAxis(axis);
+  if (minimumPositionsPerSecond == 0) {
+    return 0;
+  }
+  uint64_t currentPosition = getAxisPosition(axis);
+  uint64_t distance = llabs(position - currentPosition);
+  return (double)distance / (double)minimumPositionsPerSecond;
 }
 
 bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, bool isRaw);
@@ -637,8 +909,9 @@ void cancelRecallIfNeeded(char *context) {
   }
 }
 
-bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed) {
-  bool localDebug = false;
+bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration) {
+  bool localDebug = true;
+
   if (localDebug) {
     fprintf(stderr, "setAxisPositionIncrementally\n");
   }
@@ -647,7 +920,15 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
     return false;
   }
 
+  if (duration == 0 && localDebug) {
+    fprintf(stderr, "WARNING: NO DURATION AVAILABLE FOR INCREMENTAL SET COMMAND.\n");
+  } else if (localDebug) {
+    fprintf(stderr, "DURATION COMPUTED AS: %lf\n", duration);
+  }
+
   gAxisMoveInProgress[axis] = true;
+  gAxisStartTime[axis] = timeStamp();
+  gAxisDuration[axis] = duration;
   gAxisMoveStartPosition[axis] = getAxisPosition(axis);
   gAxisMoveTargetPosition[axis] = position;
   gAxisMoveMaxSpeed[axis] = maxSpeed;
@@ -881,10 +1162,6 @@ void setResponseArray(visca_response_t *response, uint8_t *array, uint8_t count)
   bcopy(array, response->data, count);
 }
 
-// Legal preset values are in the range 0..255.
-bool savePreset(int presetNumber);
-bool recallPreset(int presetNumber);
-
 bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
 
   if (gCalibrationModeVISCADisabled) {
@@ -906,7 +1183,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                          // 00-00-0p-0q = set to pq (0x00..0x80)
                 break;
               case 0x07: // Zoom stop (00), tele (02 or 20-27), wide (03 or 30-37)
-{
+              {
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 uint8_t zoomCmd = command[4];
                 if (zoomCmd == 2) zoomCmd = 0x23;
@@ -930,7 +1207,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 }
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;
-}
+              }
               case 0x08: // Focus: Not implemented
                 break;
               case 0x0B: // Iris settings.
@@ -981,7 +1258,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 break;
               case 0x47: // Absolute zoom.
 #if ZOOM_POSITION_SUPPORTED
-{
+              {
                  // Do not attempt to use absolute positioning while in calibration mode!
                  if (gCalibrationMode) {
                      fprintf(stderr, "Ignoring absolute zoom while in calibration mode.\n");
@@ -997,7 +1274,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 uint8_t speed = ((command[len - 2] & 0xf0) == 0) ? ((command[8] & 0xf) + 1) :
                     getVISCAZoomSpeedFromTallyState();
                 cancelRecallIfNeeded("setZoomPosition");
-                setZoomPosition(position, scaleVISCAZoomSpeedToCoreSpeed(speed));
+                setZoomPosition(position, scaleVISCAZoomSpeedToCoreSpeed(speed), 0);
 
                 // If (command[9] & 0xf0) == 0, then the low bytes of 9-12 are focus position,
                 // and speed is at position 13, shared with focus.  If we ever add support for
@@ -1005,7 +1282,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;
-}
+              }
 #else
                 // Absolute zoom position unsupported.
                 break;
@@ -1018,34 +1295,40 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
           break;
         case 0x06:
             switch(command[3]) {
-              case 0x01: // Pan/tilt drive
-{
-                while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
-                int16_t panSpeed = command[4];
-                int16_t tiltSpeed = command[5];
-                uint8_t panCommand = command[6];
-                uint8_t tiltCommand = command[7];
-                // 2 is right.  Right is negative.
-                if (panCommand == 2) panSpeed = -panSpeed;
-                else if (panCommand == 3) panSpeed = 0;
-                if (tiltCommand == 2) tiltSpeed = -tiltSpeed;
-                else if (tiltCommand == 3) tiltSpeed = 0;
+              case 0x01:
+              {
+                if (len == 6) {
+                  // Recall speed.
+                  setRecallSpeedVISCA(command[4]);
+                } else {
+                  // Pan/tilt drive or recall speed
+                  while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
+                  int16_t panSpeed = command[4];
+                  int16_t tiltSpeed = command[5];
+                  uint8_t panCommand = command[6];
+                  uint8_t tiltCommand = command[7];
+                  // 2 is right.  Right is negative.
+                  if (panCommand == 2) panSpeed = -panSpeed;
+                  else if (panCommand == 3) panSpeed = 0;
+                  if (tiltCommand == 2) tiltSpeed = -tiltSpeed;
+                  else if (tiltCommand == 3) tiltSpeed = 0;
 
-                // If there is a move (recall or position set) in progress, ignore any
-                // requests to set the pan or tilt speed to zero, because that means the
-                // operator is not touching the stick.  But if the operator touches the
-                // stick, abort any in-progress move immediately.
-                if (!moveInProgress() || panSpeed != 0 || tiltSpeed != 0) {
+                  // If there is a move (recall or position set) in progress, ignore any
+                  // requests to set the pan or tilt speed to zero, because that means the
+                  // operator is not touching the stick.  But if the operator touches the
+                  // stick, abort any in-progress move immediately.
+                  if (!moveInProgress() || panSpeed != 0 || tiltSpeed != 0) {
                     cancelRecallIfNeeded("Pan/tilt command received");
                     setAxisSpeed(axis_identifier_pan, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed), false);
                     setAxisSpeed(axis_identifier_tilt, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed), false);
+                  }
                 }
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;
-}
+              }
               case 0x02: // Pan/tilt absolute
-{
+              {
                  // Do not attempt to use absolute positioning while in calibration mode!
                  if (gCalibrationMode) {
                      fprintf(stderr, "Ignoring absolute pan/tilt while in calibration mode.\n");
@@ -1064,15 +1347,16 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
                 cancelRecallIfNeeded("Pan/tilt absolute command received");
                 if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
-                                           tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed))) {
+                                        tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
+                                        0)) {
                     return false;
                 }
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;
-}
+              }
               case 0x03: // Pan/tilt relative
-{
+              {
                  // Do not attempt to use relative positioning while in calibration mode!
                  if (gCalibrationMode) {
                      fprintf(stderr, "Ignoring relative pan/tilt while in calibration mode.\n");
@@ -1096,7 +1380,8 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
                     cancelRecallIfNeeded("Pan/tilt relative command received");
                     if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed), 
-                                               tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed))) {
+                                            tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
+                                            0)) {
                         return false;
                     }
                 } else {
@@ -1105,7 +1390,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength));
                 return true;
-}
+              }
               case 0x07: // Pan/tilt limit set: Not implemented.
                 break;
               case 0x35: // Select resolution: Not implemented.
@@ -1236,6 +1521,8 @@ int getVISCAZoomSpeedFromTallyState(void) {
 }
 
 bool recallPreset(int presetNumber) {
+    bool localDebug = true;
+
     // Do not attempt to recall positions in calibration mode!
     if (gCalibrationMode) {
         fprintf(stderr, "Ignoring recall while in calibration mode.\n");
@@ -1256,14 +1543,34 @@ bool recallPreset(int presetNumber) {
     int tallyState = GET_TALLY_STATE();
     bool onProgram = (tallyState == kTallyStateRed);
 
+    // These speeds are used if there is no speed data for any axis.
     int panSpeed = onProgram ? 5 : 24;
     int tiltSpeed = onProgram ? 5 : 24;
     int zoomSpeed = getVISCAZoomSpeedFromTallyState();
 
+    uint64_t currentPanPosition = getAxisPosition(axis_identifier_pan);
+    uint64_t currentTiltPosition = getAxisPosition(axis_identifier_tilt);
+    uint64_t currentZoomPosition = getAxisPosition(axis_identifier_zoom);
+
+    // To avoid breaking pan and tilt for devices that don't support zoom automation or vice versa,
+    // set flags only for axes that are actually moving.
+    int flags = ((preset.panPosition != currentPanPosition) ? kFlagMovePan : 0) |
+                ((preset.tiltPosition != currentTiltPosition) ? kFlagMoveTilt : 0) |
+                ((preset.zoomPosition != currentZoomPosition) ? kFlagMoveZoom : 0);
+
+    fprintf(stderr, "flags: %d\n", flags);
+
+    double duration = durationForMove(flags, preset.panPosition, preset.tiltPosition, preset.zoomPosition);
+
+    if (duration == 0 && localDebug) {
+        fprintf(stderr, "WARNING: durationForMove returned 0\n");
+    }
+
     cancelRecallIfNeeded("recallPreset");
     bool retval = setPanTiltPosition(preset.panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
-                                        preset.tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed));
-    bool retval2 = setZoomPosition(preset.zoomPosition, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed));
+                                     preset.tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
+                                     duration);
+    bool retval2 = setZoomPosition(preset.zoomPosition, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed), 0);
 
     if (retval && retval2) {
         fprintf(stderr, "Loaded preset %d\n", presetNumber);
@@ -1280,10 +1587,42 @@ bool recallPreset(int presetNumber) {
     return retval && retval2;
 }
 
+void setRecallSpeedVISCA(int value) {
+  gRecallSpeedSet = true;
+  gVISCARecallSpeed = value;
+}
+
+// VISCA (or at least PTZOptics) allows a range of 1 to 24.  This maps those into speeds.
+// These speeds are just sort of arbitrary mappings.
+double currentRecallTime(void) {
+  int recallSpeed = gRecallSpeedSet ? gVISCARecallSpeed : getVISCAZoomSpeedFromTallyState();
+
+  // Slowest speed is 1, which maps to 30 seconds.
+  // Fastest speed is 24, which maps to 2 seconds.
+
+  // k - 24n = 2
+  // k - 1n = 30
+  // ---------------
+  // 24k - 24n = 720
+  // -k + 24n = -2
+  // 23k     = 718
+  // k = 718/23
+  // ---------------
+  // k - n = 30
+  // 718/23 - n = 30
+  // 718/23 = 30 + n
+  // n = 718/23 - 30
+  // n = 28/23  (about 1.2173)
+
+  double multiplier = 28.0/23.0;
+  double computed_max = 718.0/23.0;
+  double duration = computed_max - (multiplier * recallSpeed);
+  return (duration > 30) ? 30 :
+         (duration < 2) ? 2 :
+         duration;
+}
 
 #pragma mark - Calibration
-
-double timeStamp(void);
 
 void do_calibration(void) {
   int localDebug = 0;
@@ -1382,7 +1721,7 @@ void do_calibration(void) {
         usleep(10000);  // Run 100 times per second.
       }
       if (localDebug > 1) {
-        fprintf(stderr, "Loop check: panMoved: %s tiltMoved: %s time: %lf\n",
+        fprintf(stderr, "Loop check: panMoved: %s tiltMoved: %s time since last move: %lf\n",
                 axisHasMoved[axis_identifier_pan] ? "YES" : "NO",
                 axisHasMoved[axis_identifier_tilt] ? "YES" : "NO",
                 (timeStamp() - lastMoveTime));
@@ -1611,7 +1950,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
   }
 
   int64_t *data = (int64_t *)malloc(sizeof(int64_t) * (maxSpeed - minSpeed + 1));
-  setAxisPositionIncrementally(axis, startPosition, SCALE_CORE);  // Move as quickly as possible.
+  setAxisPositionIncrementally(axis, startPosition, SCALE_CORE, 0);  // Move as quickly as possible.
   waitForAxisMove(axis);
 
   if (localDebug) {
@@ -1935,13 +2274,24 @@ void run_startup_tests(void) {
     0,   1,   1,   1,   1,   2,   2,   2,   3,   3,    3
   };
 
-  // Verify the results for inputs at SCALE_CORE.
+  // Verify the results for inputs at SCALE_CORE (positive).
   for (int i = 0; i < (sizeof(source1000Values) / sizeof(source1000Values[0])); i++) {
     assert(scaleSpeed(source1000Values[i], SCALE_CORE, maxSpeed, translatedData) == expectedValues[i]);
   }
 
-  // Verify the results for inputs at an arbitrary scale.
+  // Verify the results for inputs at an arbitrary scale (positive).
   for (int i = 0; i < (sizeof(source100Values) / sizeof(source100Values[0])); i++) {
     assert(scaleSpeed(source100Values[i], 100, maxSpeed, translatedData) == expectedValues[i]);
   }
+
+  // Verify the results for inputs at SCALE_CORE (negative).
+  for (int i = 0; i < (sizeof(source1000Values) / sizeof(source1000Values[0])); i++) {
+    assert(scaleSpeed(-source1000Values[i], SCALE_CORE, maxSpeed, translatedData) == -expectedValues[i]);
+  }
+
+  // Verify the results for inputs at an arbitrary scale (negative).
+  for (int i = 0; i < (sizeof(source100Values) / sizeof(source100Values[0])); i++) {
+    assert(scaleSpeed(-source100Values[i], 100, maxSpeed, translatedData) == -expectedValues[i]);
+  }
+
 }

@@ -1,8 +1,5 @@
 #include "panasonicptz.h"
 
-int32_t *panaZoomMilliscale(void);
-int32_t *panaPanTiltMilliscale(void);
-
 #include <fcntl.h>
 #include <math.h>
 #include <stdbool.h>
@@ -182,10 +179,10 @@ void freeMulti(char **array, ssize_t count) {
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
     int scaledPanSpeed =
         isRaw ? panSpeed : scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                                       panaPanTiltMilliscale());
+                                       pana_pan_scaled_data);
     int scaledTiltSpeed =
         isRaw ? tiltSpeed : scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                                       panaPanTiltMilliscale());
+                                       pana_tilt_scaled_data);
 
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_zoom_position = 0;
@@ -309,7 +306,7 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
 
     int intSpeed =
         isRaw ? (speed + 50) : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE,
-                                          panaZoomMilliscale()) + 50;
+                                          pana_zoom_scaled_data) + 50;
     char *intSpeedString = panaIntString(intSpeed, 2, false);
 
     if (localDebug) {
@@ -527,12 +524,40 @@ void panaModuleCalibrate(void) {
   writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE);
 }
 
-// For now, return NULL.  Values are 0..1000, so int32_t only.
-int32_t *panaZoomMilliscale(void) {
-  return NULL;
+int64_t panaMinimumPanPositionsPerSecond(void) {
+  #if !PANASONIC_PTZ_ZOOM_ONLY
+    return minimumPositionsPerSecondForData(pana_pan_data, PAN_TILT_SCALE_HARDWARE);
+  #endif
+  return 0;
 }
 
-// For now, return NULL.  Values are 0..1000, so int32_t only.
-int32_t *panaPanTiltMilliscale(void) {
-  return NULL;
+int64_t panaMinimumTiltPositionsPerSecond(void) {
+  #if !PANASONIC_PTZ_ZOOM_ONLY
+    return minimumPositionsPerSecondForData(pana_tilt_data, PAN_TILT_SCALE_HARDWARE);
+  #endif
+  return 0;
+}
+
+int64_t panaMinimumZoomPositionsPerSecond(void) {
+  return minimumPositionsPerSecondForData(pana_zoom_data, ZOOM_SCALE_HARDWARE);
+  return 0;
+}
+
+int64_t panaMaximumPanPositionsPerSecond(void) {
+  #if !PANASONIC_PTZ_ZOOM_ONLY
+    return pana_pan_data[PAN_TILT_SCALE_HARDWARE];
+  #endif
+  return 0;
+}
+
+int64_t panaMaximumTiltPositionsPerSecond(void) {
+  #if !PANASONIC_PTZ_ZOOM_ONLY
+    return pana_tilt_data[PAN_TILT_SCALE_HARDWARE];
+  #endif
+  return 0;
+}
+
+int64_t panaMaximumZoomPositionsPerSecond(void) {
+  return pana_zoom_data[ZOOM_SCALE_HARDWARE];
+  return 0;
 }

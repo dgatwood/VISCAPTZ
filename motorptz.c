@@ -83,11 +83,6 @@ static volatile bool g_pan_tilt_raw = false;
   int32_t *motor_tilt_scaled_data = NULL;
 #endif  // USE_MOTOR_PAN_AND_TILT
 
-// For now, return NULL.  Values are 0..1000, so int32_t only.
-int32_t *motorPanTiltMilliscale(void) {
-  return NULL;
-}
-
 bool motorModuleInit(void) {
     bool localDebug = motor_enable_debugging || false;
     if (localDebug) fprintf(stderr, "Initializing motor module\n");
@@ -98,15 +93,19 @@ bool motorModuleInit(void) {
     }
     if (localDebug) fprintf(stderr, "Initializing motor\n");
     Motor_Init();
+#else
+    // Start the fake hardware in the middle.
+    g_last_pan_position = 1000000;
+    g_last_tilt_position = 1000000;
 #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
     if (localDebug) fprintf(stderr, "Motor initialized\n");
 
   // Start the motor control thread in the background.
   if (motor_enable_debugging) fprintf(stderr, "Motor module init\n");
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
-#if ENABLE_ENCODER_HARDWARE
+#if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
   pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
-#endif
+#endif  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
 
   if (localDebug) fprintf(stderr, "Motor module init done\n");
   return motorModuleReload();
@@ -159,7 +158,7 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
 
 #pragma mark - Position monitor thread
 
-#if ENABLE_ENCODER_HARDWARE
+#if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
 #if USE_CANBUS
 int motorOpenCANSock(void) {
 
@@ -275,13 +274,9 @@ void *runPositionMonitorThread(void *argIgnored) {
         }
     #else  // !USE_CANBUS
         updatePositionsSerial(pan_fd, tilt_fd)
-        usleep(10000);  // Update 100x per second (latency-critical).
     #endif  // USE_CANBUS
-#else  // !ENABLE_HARDWARE
-    g_last_pan_position += g_pan_speed;
-    g_last_tilt_position += g_tilt_speed;
-    usleep(10000);  // Update 100x per second (latency-critical).
 #endif  // ENABLE_HARDWARE
+    usleep(10000);  // Update 100x per second (latency-critical).
   }
 #if ENABLE_HARDWARE
   #if USE_CANBUS
@@ -308,7 +303,7 @@ bool updatePositionsCANBus(int sock) {
 
     struct timeval tv;
     tv.tv_sec = 0;
-    tv.tv_usec = 100000;  // 10 reads per second.
+    tv.tv_usec = 100000;  // give up if the encoder doesn't respond within 0.1 seconds.
 
     int retval = select(sock + 1, &readfds, NULL /* &writefds */, NULL, &tv);
     if (retval > 0) {
@@ -494,48 +489,66 @@ void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
 }
 
 #endif  // USE_CANBUS
-#else  // !ENABLE_ENCODER_HARDWARE
+#else  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
 void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
 }
-#endif  // ENABLE_ENCODER_HARDWARE
+#endif  // ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
 
 #pragma mark - Motor control thread
 
 void *runMotorControlThread(void *argIgnored) {
-#if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
+#if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE && ENABLE_HARDWARE)
   bool localDebug = false;
 #endif
+
   while (1) {
-#if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
     int scaledPanSpeed = g_pan_tilt_raw ?
         llabs(g_pan_speed) :
         llabs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                         motorPanTiltMilliscale()));
+                         motor_pan_scaled_data));
     int scaledTiltSpeed = g_pan_tilt_raw ?
         llabs(g_tilt_speed) :
         llabs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                         motorPanTiltMilliscale()));
+                         motor_tilt_scaled_data));
 
+#if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
     if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
     Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
     if (localDebug) fprintf(stderr, "Setting motor B speed to %d.\n", scaledTiltSpeed);
     Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
     if (localDebug) fprintf(stderr, "Done.\n");
-#endif  // ENABLE_HARDWARE
 
-#if ENABLE_STATUS_DEBUGGING
+#else  // !(ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
+    int pan_sign = panEncoderReversed() ? -1 : 1;
+    int pan_sign_2 = (g_pan_speed < 0) ? -1 : 1;
+
+    int tilt_sign = tiltEncoderReversed() ? -1 : 1;
+    int tilt_sign_2 = (g_tilt_speed < 0) ? -1 : 1;
+
+
+    g_last_pan_position += 6 * scaledPanSpeed * pan_sign * pan_sign_2 / 100;
+    g_last_tilt_position += 6 * scaledTiltSpeed * tilt_sign * tilt_sign_2 / 100;
+
+#endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
+
+#if ENABLE_STATUS_DEBUGGING || !ENABLE_HARDWARE
     int64_t zoom_speed = GET_ZOOM_SPEED();
     int64_t zoom_position = GET_ZOOM_POSITION();
 
+#if ENABLE_HARDWARE
     static int count = 0;
     if (!(count++ % 50)) {
+#endif  // ENABLE_HARDWARE
         printf("PAN SPEED: %" PRId64 " (%d) TILT SPEED: %" PRId64 " (%d) "
                "PAN POSITION: %" PRId64 " TILT POSITION: %" PRId64
                " ZOOM SPEED: %" PRId64 " ZOOM POSITION: %" PRId64 "\n",
                g_pan_speed, scaledPanSpeed, g_tilt_speed, scaledTiltSpeed,
                g_last_pan_position, g_last_tilt_position, zoom_speed, zoom_position);
+#if ENABLE_HARDWARE
     }
-#endif
+#endif  // ENABLE_HARDWARE
+#endif  // ENABLE_STATUS_DEBUGGING || !ENABLE_HARDWARE
+
     usleep(10000);  // Update 100x per second (latency-critical).
   }
   return NULL;
@@ -560,4 +573,20 @@ void motorModuleCalibrate(void) {
   writeCalibrationDataForAxis(axis_identifier_tilt, tiltCalibrationData, PAN_TILT_SCALE_HARDWARE);
 
   fprintf(stderr, "Done calibrating motors.\n");
+}
+
+int64_t motorMinimumPanPositionsPerSecond(void) {
+  return minimumPositionsPerSecondForData(motor_pan_data, ZOOM_SCALE_HARDWARE);
+}
+
+int64_t motorMinimumTiltPositionsPerSecond(void) {
+  return minimumPositionsPerSecondForData(motor_tilt_data, ZOOM_SCALE_HARDWARE);
+}
+
+int64_t motorMaximumPanPositionsPerSecond(void) {
+  return motor_pan_data[ZOOM_SCALE_HARDWARE];
+}
+
+int64_t motorMaximumTiltPositionsPerSecond(void) {
+  return motor_tilt_data[ZOOM_SCALE_HARDWARE];
 }

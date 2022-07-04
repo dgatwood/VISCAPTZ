@@ -20,6 +20,14 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed);
 int panaGetTallyState(void);
 bool panaSetTallyState(int tallyState);
 
+int64_t panaMinimumPanPositionsPerSecond(void);
+int64_t panaMinimumTiltPositionsPerSecond(void);
+int64_t panaMinimumZoomPositionsPerSecond(void);
+
+int64_t panaMaximumPanPositionsPerSecond(void);
+int64_t panaMaximumTiltPositionsPerSecond(void);
+int64_t panaMaximumZoomPositionsPerSecond(void);
+
 // Actual range on the AG-CX350.  Other cameras may vary.
 #define ZOOM_RANGE 4720
 
@@ -42,19 +50,22 @@ bool panaSetTallyState(int tallyState);
     // zoom position.  Others don't provide speed control, so you may not want to
     // use the zoom command anyway.
     #if PANASONIC_PTZ_ZOOM_ONLY || PANASONIC_DISABLE_ZOOM_COMMAND
-        #define SET_ZOOM_POSITION(position, maxSpeed) \
-            setAxisPositionIncrementally(axis_identifier_zoom, position, maxSpeed)
+        #define SET_ZOOM_POSITION(position, maxSpeed, time) \
+            setAxisPositionIncrementally(axis_identifier_zoom, position, maxSpeed, time)
     #else  // !(PANASONIC_PTZ_ZOOM_ONLY || PANASONIC_DISABLE_ZOOM_COMMAND)
-        #define SET_ZOOM_POSITION(position, maxSpeed) \
+        #define SET_ZOOM_POSITION(position, maxSpeed, time) \
             panaSetZoomPosition(axis_identifier_zoom, position, maxSpeed)
     #endif  // PANASONIC_PTZ_ZOOM_ONLY || PANASONIC_DISABLE_ZOOM_COMMAND
+
+    #define MIN_ZOOM_POSITIONS_PER_SECOND() panaMinimumZoomPositionsPerSecond();
+    #define MAX_ZOOM_POSITIONS_PER_SECOND() panaMaximumZoomPositionsPerSecond();
 
     #if !PANASONIC_PTZ_ZOOM_ONLY
         #define GET_PAN_TILT_POSITION(panPositionRef, tiltPositionRef) \
             panaGetPanTiltPosition(panPositionRef, tiltPositionRef)
         #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed, isRaw) \
             panaSetPanSpeed(panSpeed, tiltSpeed, isRaw)
-        #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed) 
+        #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, time) 
             panaSetPanTiltPosition(panPosition, panSpeed, tiltPosition, tiltSpeed)
         #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
         #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
@@ -62,6 +73,11 @@ bool panaSetTallyState(int tallyState);
 
         // Panasonic defines the range as 0 to 99.
         #define PAN_TILT_SCALE_HARDWARE 49
+
+        #define MIN_PAN_POSITIONS_PER_SECOND() panaMinimumPanPositionsPerSecond();
+        #define MIN_TILT_POSITIONS_PER_SECOND() panaMinimumTiltPositionsPerSecond();
+        #define MAX_PAN_POSITIONS_PER_SECOND() panaMaximumPanPositionsPerSecond();
+        #define MAX_TILT_POSITIONS_PER_SECOND() panaMaximumTiltPositionsPerSecond();
     #endif
 
 #endif
