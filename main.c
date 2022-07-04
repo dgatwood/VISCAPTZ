@@ -202,7 +202,7 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Ready for VISCA commands.\n");
 
-#if 1
+#if 0
   // Temporary test code.
 
   fprintf(stderr, "Moving pan axis.\n");
