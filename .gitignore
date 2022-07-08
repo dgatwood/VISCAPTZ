@@ -1,2 +1,6 @@
 *.o
 viscaptz
+.DS_Store
+*.swp
+junk
+preset_*
