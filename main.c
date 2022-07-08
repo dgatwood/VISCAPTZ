@@ -3,7 +3,9 @@
 #include "fakeptz.h"
 #include "main.h"
 #include "motorptz.h"
+#include "obs_tally.h"
 #include "panasonicptz.h"
+#include "tricaster_tally.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -184,6 +186,14 @@ int main(int argc, char *argv[]) {
 
   SET_IP_ADDR(CAMERA_IP);
 
+  if (!obsModuleInit()) {
+    fprintf(stderr, "OBS module init failed.  Bailing.\n");
+    exit(1);
+  }
+  if (!tricasterModuleInit()) {
+    fprintf(stderr, "Tricaster module init failed.  Bailing.\n");
+    exit(1);
+  }
   if (!motorModuleInit()) {
     fprintf(stderr, "Motor module init failed.  Bailing.\n");
     exit(1);

@@ -19,8 +19,8 @@ else
 LINUX_TARGETS=
 endif
 
-viscaptz: main.o configurator.o panasonicptz.o motorptz.o ${LINUX_TARGETS} *.h
-	${CC} ${CFLAGS} main.o configurator.o panasonicptz.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
+viscaptz: main.o obs_tally.o tricaster_tally.o configurator.o panasonicptz.o motorptz.o ${LINUX_TARGETS} *.h
+	${CC} ${CFLAGS} main.o obs_tally.o tricaster_tally.o configurator.o panasonicptz.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
 
 motorcontrol/libmotorcontrol.so:
 	cd motorcontrol ; make libmotorcontrol.so ; sudo make install
