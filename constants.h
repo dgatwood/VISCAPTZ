@@ -18,7 +18,7 @@ typedef enum {
 
 // We use the same tally codes as NewTek and Marshall NDI cameras.
 // Program mode is 5, preview mode is 6.
-enum {
+typedef enum {
   kTallyStateOff = 0,
   kTallyStateUnknown1 = 1,
   kTallyStateUnknown2 = 2,
@@ -26,7 +26,7 @@ enum {
   kTallyStateUnknown4 = 4,
   kTallyStateRed = 5,
   kTallyStateGreen = 6
-};
+} tallyState;
 
 #define PAN_SCALE_VISCA   24
 #define TILT_SCALE_VISCA  24
@@ -44,5 +44,9 @@ typedef enum {
 extern int debugPanAndTilt;
 
 #include "config.h"
+
+#if USE_VISCA_TALLY_SOURCE
+  #define GET_TALLY_STATE() VISCA_getTallySource()
+#endif
 
 #endif  // __CONSTANTS_H__

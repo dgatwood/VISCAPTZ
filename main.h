@@ -100,6 +100,10 @@ int64_t setZoomOutLimit(int64_t limit);
 // to that scale.
 int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData);
 
+// Returns the current tally state as cached in main.c.  Used if there is
+// no other tally source defined.
+tallyState VISCA_getTallySource(void);
+
 int debugGetTallyState(void);
 bool debugSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);
 bool debugSetZoomSpeed(int64_t speed);

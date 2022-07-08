@@ -36,7 +36,10 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
     #define MODULE_INIT() panaModuleInit()
     #define SET_IP_ADDR(address) panaSetIPAddress(address);
 
-    #define GET_TALLY_STATE() panaGetTallyState()
+    #if USE_PANASONIC_TALLY_SOURCE
+        #define GET_TALLY_STATE() panaGetTallyState()
+    #endif
+
     #define SET_TALLY_STATE(state) panaSetTallyState(state)
     #define GET_ZOOM_POSITION() panaGetZoomPosition()
     #define GET_ZOOM_SPEED() panaGetZoomSpeed()

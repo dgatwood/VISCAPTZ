@@ -38,6 +38,8 @@ const char *kZoomInLimitKey = "zoom_in_limit";
 const char *kZoomOutLimitKey = "zoom_out_limit";
 const char *kZoomEncoderReversedKey = "zoom_encoder_reversed";
 
+volatile tallyState gTallyState = kTallyStateOff;
+
 typedef enum {
   kFlagMovePan = 0x1,             //! Use the pan axis position.
   kFlagMoveTilt = 0x2,            //! Use the tilt axis position.
@@ -91,7 +93,7 @@ bool setAxisSpeed(axis_identifier_t axis, int64_t position, bool debug);
 bool setAxisSpeedRaw(axis_identifier_t axis, int64_t speed, bool debug);
 void cancelRecallIfNeeded(char *context);
 double timeStamp(void);
-double durationForMove(moveModeFlags flags, uint64_t panPosition, uint64_t tiltPosition, uint64_t zoomPosition);
+double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition);
 
 bool gRecallSpeedSet = false;
 int gVISCARecallSpeed = 0;
@@ -670,8 +672,8 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
     return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, duration);
 }
 
-double fastestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position);
-double slowestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position);
+double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position);
+double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position);
 
 /**
  * Computes the move duration for a move to panPosition/tiltPosition/zoomPosition or some subset
@@ -684,7 +686,7 @@ double slowestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position);
  * differences, this will return the longer of the possible durations, and one axis will just finish
  * sooner.
  */
-double durationForMove(moveModeFlags flags, uint64_t panPosition, uint64_t tiltPosition, uint64_t zoomPosition) {
+double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition) {
   bool localDebug = true;
 
   double recallTime = currentRecallTime();
@@ -819,32 +821,32 @@ int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis) {
   return 0;
 }
 
-double fastestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position) {
+double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   // With 80% of the move at 100% speed and the first and last 10% transitioning from/to 0% and
   // averaging 50%, that means the average speed through the entire move is always 90% of the
   // maximum speed from that middle 80%.  This is a slight approximation because there is a
   // minimum speed for the motors, but we ignore that to make the computation reasonable.
 
-  uint64_t maximumPositionsPerSecond = maximumPositionsPerSecondForAxis(axis);
+  int64_t maximumPositionsPerSecond = maximumPositionsPerSecondForAxis(axis);
   if (maximumPositionsPerSecond == 0) {
     return 0;
   }
-  uint64_t currentPosition = getAxisPosition(axis);
-  uint64_t distance = llabs(position - currentPosition);
+  int64_t currentPosition = getAxisPosition(axis);
+  int64_t distance = llabs(position - currentPosition);
   return (double)distance / ((double)maximumPositionsPerSecond * 0.9);
 }
 
-double slowestMoveForAxisToPosition(axis_identifier_t axis, uint64_t position) {
+double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   // We ignore any ramp time to the slowest speed, because it would be too hard to calculate
   // that (and we don't log that data).  This just computes the duration based on the number of
   // positions per second at the slowest native speed.
 
-  uint64_t minimumPositionsPerSecond = minimumPositionsPerSecondForAxis(axis);
+  int64_t minimumPositionsPerSecond = minimumPositionsPerSecondForAxis(axis);
   if (minimumPositionsPerSecond == 0) {
     return 0;
   }
-  uint64_t currentPosition = getAxisPosition(axis);
-  uint64_t distance = llabs(position - currentPosition);
+  int64_t currentPosition = getAxisPosition(axis);
+  int64_t distance = llabs(position - currentPosition);
   return (double)distance / (double)minimumPositionsPerSecond;
 }
 
@@ -1131,25 +1133,38 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
   return false;
 }
 
+tallyState VISCA_getTallySource(void) {
+  return gTallyState;
+}
+
 bool setTallyOff() {
+  gTallyState = kTallyStateOff;
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateOff);
+#elif USE_VISCA_TALLY_SOURCE
+  return true;
 #else
   return false;
 #endif
 }
 
 bool setTallyRed() {
+  gTallyState = kTallyStateRed;
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateRed);
+#elif USE_VISCA_TALLY_SOURCE
+  return true;
 #else
   return false;
 #endif
 }
 
 bool setTallyGreen() {
+  gTallyState = kTallyStateGreen;;
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateGreen);
+#elif USE_VISCA_TALLY_SOURCE
+  return true;
 #else
   return false;
 #endif
@@ -1548,9 +1563,9 @@ bool recallPreset(int presetNumber) {
     int tiltSpeed = onProgram ? 5 : 24;
     int zoomSpeed = getVISCAZoomSpeedFromTallyState();
 
-    uint64_t currentPanPosition = getAxisPosition(axis_identifier_pan);
-    uint64_t currentTiltPosition = getAxisPosition(axis_identifier_tilt);
-    uint64_t currentZoomPosition = getAxisPosition(axis_identifier_zoom);
+    int64_t currentPanPosition = getAxisPosition(axis_identifier_pan);
+    int64_t currentTiltPosition = getAxisPosition(axis_identifier_tilt);
+    int64_t currentZoomPosition = getAxisPosition(axis_identifier_zoom);
 
     // To avoid breaking pan and tilt for devices that don't support zoom automation or vice versa,
     // set flags only for axes that are actually moving.
@@ -2264,13 +2279,13 @@ void run_startup_tests(void) {
     assert(translatedData[i] == expectedResuls[i]);
   }
 
-  uint64_t source1000Values[] = {
+  int64_t source1000Values[] = {
     0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000
   };
-  uint64_t source100Values[] = {
+  int64_t source100Values[] = {
     0,  10,  20,  30,  40,  50,  60,  70,  80,  90,  100
   };
-  uint64_t expectedValues[] = {
+  int64_t expectedValues[] = {
     0,   1,   1,   1,   1,   2,   2,   2,   3,   3,    3
   };
 
