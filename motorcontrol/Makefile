@@ -58,5 +58,5 @@ install : ${TARGET}
 	cp ${TARGET} /usr/local/lib/ ; ldconfig
 
 clean :
-	rm $(DIR_BIN)/*.* 
-	rm $(TARGET) 
+	rm -f $(DIR_BIN)/*.* 
+	rm -f $(TARGET) 

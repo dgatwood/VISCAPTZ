@@ -49,9 +49,22 @@ extern int debugPanAndTilt;
   #define GET_TALLY_STATE() VISCA_getTallySource()
 #endif
 
+#if USE_PANASONIC_PTZ
+  extern const char *kCameraIPKey;
+#endif
+
+#if USE_TRICASTER_TALLY_SOURCE
+  extern const char *kTricasterIPKey;
+#endif
+
 #if USE_OBS_TALLY_SOURCE
   extern const char *kOBSPasswordKey;
   extern const char *kOBSWebSocketURLKey;
+#endif
+
+#if (USE_OBS_TALLY_SOURCE || USE_TRICASTER_TALLY_SOURCE)
+  #define TALLY_SOURCE_NAME_REQUIRED 1
+  extern const char *kTallySourceName;
 #endif
 
 #endif  // __CONSTANTS_H__

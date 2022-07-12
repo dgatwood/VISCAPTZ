@@ -32,15 +32,15 @@ sources.  The currently supported sources are:
           If you're controlling a Panasonic camera via NDI, this software can
           read the tally state from the camera.
     * Newtek Tricaster
-          By setting TALLY_SOURCE_NAME to a specific source name, this software
-          can read the active sources from a Tricaster video production
-          workstation and control the tally state accordingly.  This
-          functionality has not yet been tested.
+          By setting the tally source name to a specific source name, this
+          software can read the active sources from a Tricaster video
+          production workstation and control the tally state accordingly.
+          This functionality has not yet been tested.
     * OBS
-          By setting TALLY_SOURCE_NAME to a specific source name, this software
-          can read the active sources from a Tricaster video production
-          workstation and control the tally state accordingly.  This
-          functionality requires installation of libgettally from here:
+          By setting the tally source name to a specific source name, this
+          software can read the active sources from OBS Studio and control
+          the tally state accordingly.  This functionality requires
+          installation of libgettally from here:
 
               https://github.com/dgatwood/v8-libwebsocket-obs-websocket
 
@@ -147,13 +147,24 @@ Finally, the Panasonic support requires libcurl.  To install it, type:
 Then just `make` and `./viscaptz`.
 
 
-OBS Tally Configuration:
-------------------------
+Tally and Camera IP Configuration:
+----------------------------------
 
-If you are using OBS as your tally source, you must store the password.  To do
-this, type:
+If you are using OBS as your tally source, you must configure the WebSocket URL
+and, if necessary, a password.  To do this, type:
 
+    ./viscaptz --setobsurl "websocket URL"   # e.g. ws://127.0.0.1:4455/
     ./viscaptz --setobspass "thePassword"
+
+If you are using a Tricaster switcher as your tally source, you must store its
+IP address.  To do this, type:
+
+    ./viscaptz --settricasterip "IP address"
+
+If you are using a Panasonic IP camera's pan, tilt, or zoom control, you must
+store its IP address.  To do this type:
+
+    ./viscaptz --setcameraip "IP address"
 
 
 CANBus Configuration:

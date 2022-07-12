@@ -15,27 +15,6 @@
 // #define CONFIG_FILE_PATH "/home/pi/viscaptz.conf"
 
 
-#pragma mark - General camera info
-
-/**
- * The IP address of an IP-based camera for getting and setting tally,
- * controlling and obtaining the status of zoom, etc.
- */
-#define CAMERA_IP "192.168.100.13"
-
-/**
- * The IP address of the Tricaster or OBS switcher for getting tally
- * information if either of those tally sources is enabled.
- */
-#define TALLY_IP "192.168.100.1"
-
-/**
- * The source/scene name that represents this camera, used to determine
- * the tally state when communicating with a Tricaster or OBS switcher.
- */
-#define TALLY_SOURCE_NAME "NewTek 1"
-
-
 #pragma mark - Tally master source
 
 // The tally source (the source of truth) can come from the Panasonic
@@ -48,10 +27,10 @@
 #define USE_PANASONIC_TALLY_SOURCE 0
 
 /** Use OBS as the tally source.  Not implemented. */
-#define USE_TRICASTER_TALLY_SOURCE 0
+#define USE_TRICASTER_TALLY_SOURCE 1
 
 /** Use a Tricaster as the tally source.  Not implemented. */
-#define USE_OBS_TALLY_SOURCE 1
+#define USE_OBS_TALLY_SOURCE 0
 
 /**
  * Use this software as the source of truth, rather than monitoring

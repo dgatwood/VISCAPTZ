@@ -10,13 +10,12 @@
 #include "obs_tally.h"
 #include "panasonicptz.h"  // SET_TALLY_STATE
 
-bool obs_tally_debug = true;
-
-
 #if USE_OBS_TALLY_SOURCE
 
+  static bool obs_tally_debug = true;
   static pthread_t obs_tally_thread;
   static tallyState gCurrentOBSTallyState = kTallyStateOff;
+  static char *tally_source_name = NULL;
 
   void *runOBSTallyThread(void *argIgnored);
   void addSceneOnProgram(const char *sceneName);
@@ -30,12 +29,19 @@ bool obsModuleInit(void) {
 
     char *OBSWebSocketURL = getConfigKey(kOBSWebSocketURLKey);
     char *password = getConfigKey(kOBSPasswordKey) ?: "";
+    tally_source_name = getConfigKey(kTallySourceName);
 
     setTallyOff();
 
     if (OBSWebSocketURL == NULL) {
       fprintf(stderr, "No OBS web socket URL specified.  Initialization failed.\n");
       fprintf(stderr, "Run 'viscaptz --setobsurl <URL>' to fix.\n");
+      return false;
+    }
+
+    if (tally_source_name == NULL) {
+      fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
+      fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
       return false;
     }
 
@@ -69,21 +75,21 @@ bool obsModuleInit(void) {
   }
 
   void addSceneOnProgram(const char *sceneName) {
-    if (!strcmp(sceneName, TALLY_SOURCE_NAME)) {
+    if (!strcmp(sceneName, tally_source_name)) {
       gCurrentOBSTallyState = kTallyStateRed;
       setTallyRed();
       if (obs_tally_debug) {
         fprintf(stderr, "Program source %s matches expected source %s\n",
-                sceneName, TALLY_SOURCE_NAME);
+                sceneName, tally_source_name);
       }
     } else if (obs_tally_debug) {
       fprintf(stderr, "Program source %s does not match expected source %s\n",
-              sceneName, TALLY_SOURCE_NAME);
+              sceneName, tally_source_name);
     }
   }
 
   void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
-    if (!strcmp(sceneName, TALLY_SOURCE_NAME)) {
+    if (!strcmp(sceneName, tally_source_name)) {
       if (alsoOnProgram) {
         fprintf(stderr, "Ignored preview source %s because it is on program.\n",
                 sceneName);
@@ -93,25 +99,25 @@ bool obsModuleInit(void) {
       setTallyGreen();
       if (obs_tally_debug) {
         fprintf(stderr, "Preview source %s matches expected source %s\n",
-                sceneName, TALLY_SOURCE_NAME);
+                sceneName, tally_source_name);
       }
     } else if (obs_tally_debug) {
       fprintf(stderr, "Preview source %s does not match expected source %s\n",
-              sceneName, TALLY_SOURCE_NAME);
+              sceneName, tally_source_name);
     }
   }
 
   void markSceneInactive(const char *sceneName) {
-    if (!strcmp(sceneName, TALLY_SOURCE_NAME)) {
+    if (!strcmp(sceneName, tally_source_name)) {
       gCurrentOBSTallyState = kTallyStateOff;
       setTallyOff();
       if (obs_tally_debug) {
         fprintf(stderr, "Inactive source %s matches expected source %s\n",
-                sceneName, TALLY_SOURCE_NAME);
+                sceneName, tally_source_name);
       }
     } else if (obs_tally_debug) {
       fprintf(stderr, "Inactive source %s does not match expected source %s\n",
-              sceneName, TALLY_SOURCE_NAME);
+              sceneName, tally_source_name);
     }
   }
 #endif

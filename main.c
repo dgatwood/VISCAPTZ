@@ -39,6 +39,9 @@ const char *kTiltLimitBottomKey = "tilt_limit_down";
 const char *kZoomInLimitKey = "zoom_in_limit";
 const char *kZoomOutLimitKey = "zoom_out_limit";
 const char *kZoomEncoderReversedKey = "zoom_encoder_reversed";
+const char *kCameraIPKey = "camera_ip_address";
+const char *kTricasterIPKey = "tricaster_ip_address";
+const char *kTallySourceName = "tally_source_name";
 
 #if USE_OBS_TALLY_SOURCE
   const char *kOBSWebSocketURLKey = "obs_websocket_url";
@@ -145,8 +148,23 @@ bool gRecenter = false;
 
 bool resetCalibration(void);
 void do_calibration(void);
-void setOBSWebSocketURL(char *OBSWebSocketURL);
-void setOBSPassword(char *password);
+
+#if TALLY_SOURCE_NAME_REQUIRED
+  void setTallySourceName(char *tallySourceName);
+#endif
+
+#ifdef SET_IP_ADDR
+  void setCameraIP(char *TricasterIP);
+#endif
+
+#if USE_TRICASTER_TALLY_SOURCE
+  void setTricasterIP(char *TricasterIP);
+#endif
+
+#if USE_OBS_TALLY_SOURCE
+  void setOBSWebSocketURL(char *OBSWebSocketURL);
+  void setOBSPassword(char *password);
+#endif
 
 
 #pragma mark - Main
@@ -177,6 +195,33 @@ int main(int argc, char *argv[]) {
       gCalibrationModeZoomOnly = true;
     } else if (!strcmp(argv[1], "--recenter")) {
       gRecenter = true;
+#if TALLY_SOURCE_NAME_REQUIRED
+    } else if (!strcmp(argv[1], "--settallysourcename")) {
+      if (argc < 3) {
+        fprintf(stderr, "Usage: viscaptz --settallysourcename <Source/Scene Name>\n");
+        exit(1);
+      }
+      setTallySourceName(argv[2]);
+      exit(0);
+#endif
+#ifdef SET_IP_ADDR
+    } else if (!strcmp(argv[1], "--setcameraip")) {
+      if (argc < 3) {
+        fprintf(stderr, "Usage: viscaptz --setcameraip <Camera IP>\n");
+        exit(1);
+      }
+      setCameraIP(argv[2]);
+      exit(0);
+#endif
+#if USE_TRICASTER_TALLY_SOURCE
+    } else if (!strcmp(argv[1], "--settricasterip")) {
+      if (argc < 3) {
+        fprintf(stderr, "Usage: viscaptz --settricasterip <Tricaster IP>\n");
+        exit(1);
+      }
+      setTricasterIP(argv[2]);
+      exit(0);
+#endif
 #if USE_OBS_TALLY_SOURCE
     } else if (!strcmp(argv[1], "--setobsurl")) {
       if (argc < 3) {
@@ -207,7 +252,15 @@ int main(int argc, char *argv[]) {
 
   pthread_create(&network_thread, NULL, runNetworkThread, NULL);
 
-  SET_IP_ADDR(CAMERA_IP);
+#ifdef SET_IP_ADDR
+  char *cameraIP = getConfigKey(kCameraIPKey);
+  if (cameraIP == NULL) {
+    fprintf(stderr, "This software is configured for an IP-based camera, but you have not set\n");
+    fprintf(stderr, "an IP-based address.  Run viscaptz --setcameraip to fix this.\n");
+    exit(1);
+  }
+  SET_IP_ADDR(cameraIP);
+#endif
 
   if (!obsModuleInit()) {
     fprintf(stderr, "OBS module init failed.  Bailing.\n");
@@ -2283,6 +2336,33 @@ int64_t zoomOutLimit(void) {
 int64_t zoomEncoderReversed(void) {
   return getConfigKeyInteger(kZoomEncoderReversedKey);
 }
+
+
+#pragma mark - Named tally source support (Tricaster, OBS, etc.)
+
+#if TALLY_SOURCE_NAME_REQUIRED
+  void setTallySourceName(char *tallySourceName) {
+    setConfigKey(kTallySourceName, tallySourceName);
+  }
+#endif
+
+
+#pragma mark - Panasonic camera support
+
+#ifdef SET_IP_ADDR
+  void setCameraIP(char *cameraIP) {
+    setConfigKey(kCameraIPKey, cameraIP);
+  }
+#endif
+
+
+#pragma mark - Tricaster support
+
+#if USE_TRICASTER_TALLY_SOURCE
+void setTricasterIP(char *TricasterIP) {
+    setConfigKey(kTricasterIPKey, TricasterIP);
+}
+#endif
 
 
 #pragma mark - OBS support
