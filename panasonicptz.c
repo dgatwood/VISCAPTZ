@@ -240,6 +240,7 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix) {
     CURL *curlQueryHandle = curl_easy_init();
+    curl_easy_setopt(curlQueryHandle, CURLOPT_TIMEOUT, 2);  // By IP, so short limit.
     curl_easy_setopt(curlQueryHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
     curl_easy_setopt(curlQueryHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 
@@ -390,6 +391,12 @@ int panaGetTallyState(void) {
 }
 
 bool panaSetTallyState(int tallyState) {
+
+    if (pana_enable_debugging) {
+        fprintf(stderr, "@@@ UPDATING PANASONIC TALLY STATE NOW %s\n",
+                tallyStateName(tallyState));
+    }
+
     bool localDebug = pana_enable_debugging || false;
     int redState = (tallyState == 5);
     int greenState = (tallyState == 6);

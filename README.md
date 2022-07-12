@@ -23,6 +23,31 @@ It also contains crude, completely untested support for Panasonic PTZ cameras,
 just in case somebody wants to use this as a translator between VISCA and
 Panasonic's CGI-based protocol for some reason.
 
+It also provides support for getting tally information from various tally
+sources.  The currently supported sources are:
+
+    * VISCA
+          The VISCA protocol allows you to set the tally state.
+    * Panasonic
+          If you're controlling a Panasonic camera via NDI, this software can
+          read the tally state from the camera.
+    * Newtek Tricaster
+          By setting TALLY_SOURCE_NAME to a specific source name, this software
+          can read the active sources from a Tricaster video production
+          workstation and control the tally state accordingly.  This
+          functionality has not yet been tested.
+    * OBS
+          By setting TALLY_SOURCE_NAME to a specific source name, this software
+          can read the active sources from a Tricaster video production
+          workstation and control the tally state accordingly.  This
+          functionality requires installation of libgettally from here:
+
+              https://github.com/dgatwood/v8-libwebsocket-obs-websocket
+
+Beyond that, the only remaining missing piece of functionality is a thread
+to obtain tally light information from OBS (via OBS-Websocket) or Tricaster
+software (by polling) and push that tally light state to the camera.
+
 Finally, I included a completely untested Arduino project that does the same
 thing.  I gave up on using the Arduino because I didn't want to have to modify
 that many shields that all use the same chip select pins, half of which don't
@@ -88,10 +113,6 @@ again, I'll do any final tuning on that.  Then, at some future date
 when I have access to the Panasonic camera again, I need to verify
 that the code works as expected against the real camera hardware.
 
-Beyond that, the only remaining missing piece of functionality is a thread
-to obtain tally light information from OBS (via OBS-Websocket) or Tricaster
-software (by polling) and push that tally light state to the camera.
-
 
 Installation:
 -------------
@@ -124,6 +145,15 @@ Finally, the Panasonic support requires libcurl.  To install it, type:
     sudo apt-get install libcurl4-openssl-dev
 
 Then just `make` and `./viscaptz`.
+
+
+OBS Tally Configuration:
+------------------------
+
+If you are using OBS as your tally source, you must store the password.  To do
+this, type:
+
+    ./viscaptz --setobspass "thePassword"
 
 
 CANBus Configuration:

@@ -3,10 +3,13 @@
 #define ENABLE_CONFIGURATOR_DEBUGGING 0
 
 #include <libgen.h>
+#include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "constants.h"
 #include "configurator.h"
@@ -50,13 +53,30 @@ bool getConfigKeyBool(const char *key) {
   return boolValue;
 }
 
+const char *getConfigFilePath(void) {
+  #ifdef CONFIG_FILE_PATH
+    return CONFIG_FILE_PATH;
+  #endif
+
+  static char *value = NULL;
+
+  if (value != NULL) {
+    return value;
+  }
+
+  struct passwd *pw = getpwuid(getuid());
+
+  asprintf(&value, "%s/.viscaptz.conf", pw->pw_dir);
+  return value;
+}
+
 char *getConfigKey(const char *key) {
   bool localDebug = configuratorDebug || false;
 
-  FILE *fp = fopen(CONFIG_FILE_PATH, "r");
+  FILE *fp = fopen(getConfigFilePath(), "r");
   if (localDebug && fp == NULL) {
     perror("viscaptz");
-    fprintf(stderr, "Could not open file \"%s\" for reading\n", CONFIG_FILE_PATH);
+    fprintf(stderr, "Could not open file \"%s\" for reading\n", getConfigFilePath());
   }
   char *buf = NULL;
   size_t linecapacity = 0;
@@ -96,20 +116,16 @@ char *getConfigKey(const char *key) {
 }
 
 bool setConfigKey(const char *key, const char *value) {
-  FILE *fp = fopen(CONFIG_FILE_PATH, "r");
+  FILE *fp = fopen(getConfigFilePath(), "r");
   if (!fp) {
     fprintf(stderr, "WARNING: Could not open %s for reading",
-            CONFIG_FILE_PATH);
+            getConfigFilePath());
   }
 
-#ifdef __linux__
-  // Linux dirname, by default, is broken, and modifies its buffer.  (Why!?!)
-  char *junk = NULL;
-  asprintf(&junk, "%s", CONFIG_FILE_PATH);
-  char *directory = dirname(junk);
-#else
-  char *directory = dirname(CONFIG_FILE_PATH);
-#endif
+  // Some dirname implementations modify their buffer.  Be safe.
+  char *configFilePathCopy = NULL;
+  asprintf(&configFilePathCopy, "%s", getConfigFilePath());
+  char *directory = dirname(configFilePathCopy);
 
   char *tempfilename = tempnam(directory, "viscaptz-temp-");
   char *buf = NULL;
@@ -120,9 +136,8 @@ bool setConfigKey(const char *key, const char *value) {
     if (fp) {
       fclose(fp);
     }
-#ifdef __linux__
-    free(junk);
-#endif
+
+    free(configFilePathCopy);
     return false;
   }
 
@@ -150,13 +165,11 @@ bool setConfigKey(const char *key, const char *value) {
   fclose(fq);
 
   if (!error) {
-    error = error || (rename(tempfilename, CONFIG_FILE_PATH) != 0);
+    error = error || (rename(tempfilename, getConfigFilePath()) != 0);
   }
   free(tempfilename);
   free(buf);
-#ifdef __linux__
-  free(junk);
-#endif
+  free(configFilePathCopy);
   return !error;
 }
 

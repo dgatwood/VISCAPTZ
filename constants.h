@@ -49,4 +49,9 @@ extern int debugPanAndTilt;
   #define GET_TALLY_STATE() VISCA_getTallySource()
 #endif
 
+#if USE_OBS_TALLY_SOURCE
+  extern const char *kOBSPasswordKey;
+  extern const char *kOBSWebSocketURLKey;
+#endif
+
 #endif  // __CONSTANTS_H__

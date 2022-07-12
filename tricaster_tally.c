@@ -15,7 +15,9 @@
 // Retry every 5 seconds.
 #define RECONNECT_DELAY 5000000
 
+#if USE_TRICASTER_TALLY_SOURCE
 static pthread_t tricaster_tally_thread;
+#endif
 
 static tallyState gTricasterTallyState;
 
@@ -26,7 +28,9 @@ void *runTricasterTallyThread(void *argIgnored);
 void teardown(int sock);
 
 bool tricasterModuleInit(void) {
+#if USE_TRICASTER_TALLY_SOURCE
   pthread_create(&tricaster_tally_thread, NULL, runTricasterTallyThread, NULL);
+#endif
   return true;
 }
 
@@ -121,6 +125,13 @@ void handleResponse(char *buf, ssize_t length) {
   }
 }
 
+void setTallyStateFromTricaster(tallyState newState) {
+  gTricasterTallyState = newState;
+  #ifdef SET_TALLY_STATE
+    SET_TALLY_STATE(gTricasterTallyState);
+  #endif
+}
+
 
 // <shortcut_state name="program_tally" value="INPUT1|BFR2|DDR3" type="" sender="" />
 // <shortcut_state name="preview_tally" value="INPUT7" type="" sender="" />
@@ -160,12 +171,12 @@ void handleTag(char *tag) {
 
   if (found == true) {
     if (setProgram) {
-      gTricasterTallyState = kTallyStateRed;
+      setTallyStateFromTricaster(kTallyStateRed);
     } else {
-      gTricasterTallyState = kTallyStateGreen;
+      setTallyStateFromTricaster(kTallyStateGreen);
     }
   } else {
-    gTricasterTallyState = kTallyStateOff;
+    setTallyStateFromTricaster(kTallyStateOff);
   }
 }
 

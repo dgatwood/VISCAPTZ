@@ -7,6 +7,6 @@ bool tricasterModuleInit(void);
 
 tallyState tricaster_getTallyState(void);
 
-#if USE_OBS_TALLY_SOURCE
+#if USE_TRICASTER_TALLY_SOURCE
   #define GET_TALLY_STATE() tricaster_getTallyState()
 #endif

@@ -40,6 +40,11 @@ const char *kZoomInLimitKey = "zoom_in_limit";
 const char *kZoomOutLimitKey = "zoom_out_limit";
 const char *kZoomEncoderReversedKey = "zoom_encoder_reversed";
 
+#if USE_OBS_TALLY_SOURCE
+  const char *kOBSWebSocketURLKey = "obs_websocket_url";
+  const char *kOBSPasswordKey = "obs_websocket_password";
+#endif
+
 volatile tallyState gTallyState = kTallyStateOff;
 
 typedef enum {
@@ -140,6 +145,8 @@ bool gRecenter = false;
 
 bool resetCalibration(void);
 void do_calibration(void);
+void setOBSWebSocketURL(char *OBSWebSocketURL);
+void setOBSPassword(char *password);
 
 
 #pragma mark - Main
@@ -170,6 +177,22 @@ int main(int argc, char *argv[]) {
       gCalibrationModeZoomOnly = true;
     } else if (!strcmp(argv[1], "--recenter")) {
       gRecenter = true;
+#if USE_OBS_TALLY_SOURCE
+    } else if (!strcmp(argv[1], "--setobsurl")) {
+      if (argc < 3) {
+        fprintf(stderr, "Usage: viscaptz --setobsurl <WebSockets URL>\n");
+        exit(1);
+      }
+      setOBSWebSocketURL(argv[2]);
+      exit(0);
+    } else if (!strcmp(argv[1], "--setobspass")) {
+      if (argc < 3) {
+        fprintf(stderr, "Usage: viscaptz --setobspass <password>\n");
+        exit(1);
+      }
+      setOBSPassword(argv[2]);
+      exit(0);
+#endif
     }
   }
 #if USE_CANBUS
@@ -214,7 +237,7 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Ready for VISCA commands.\n");
 
-#if 1
+#if 0
   // Temporary test code.
 
   fprintf(stderr, "Moving pan axis.\n");
@@ -1147,7 +1170,7 @@ tallyState VISCA_getTallySource(void) {
   return gTallyState;
 }
 
-bool setTallyOff() {
+bool setTallyOff(void) {
   gTallyState = kTallyStateOff;
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateOff);
@@ -1158,7 +1181,7 @@ bool setTallyOff() {
 #endif
 }
 
-bool setTallyRed() {
+bool setTallyRed(void) {
   gTallyState = kTallyStateRed;
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateRed);
@@ -1169,7 +1192,7 @@ bool setTallyRed() {
 #endif
 }
 
-bool setTallyGreen() {
+bool setTallyGreen(void) {
   gTallyState = kTallyStateGreen;;
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateGreen);
@@ -1178,6 +1201,27 @@ bool setTallyGreen() {
 #else
   return false;
 #endif
+}
+
+const char *tallyStateName(tallyState state) {
+  switch(state) {
+    case kTallyStateOff:
+      return "kTallyStateOff";
+    case kTallyStateUnknown1:
+      return "kTallyStateUnknown1";
+    case kTallyStateUnknown2:
+      return "kTallyStateUnknown2";
+    case kTallyStateUnknown3:
+      return "kTallyStateUnknown3";
+    case kTallyStateUnknown4:
+      return "kTallyStateUnknown4";
+    case kTallyStateRed:
+      return "kTallyStateRed";
+    case kTallyStateGreen:
+      return "kTallyStateGreen";
+    default:
+      return "UNKNOWN STATE";
+  }
 }
 
 void setResponseArray(visca_response_t *response, uint8_t *array, uint8_t count) {
@@ -2239,6 +2283,19 @@ int64_t zoomOutLimit(void) {
 int64_t zoomEncoderReversed(void) {
   return getConfigKeyInteger(kZoomEncoderReversedKey);
 }
+
+
+#pragma mark - OBS support
+
+#if USE_OBS_TALLY_SOURCE
+  void setOBSPassword(char *password) {
+    setConfigKey(kOBSPasswordKey, password);
+  }
+
+  void setOBSWebSocketURL(char *OBSWebSocketURL) {
+    setConfigKey(kOBSWebSocketURLKey, OBSWebSocketURL);
+  }
+#endif
 
 
 #pragma mark - Tests

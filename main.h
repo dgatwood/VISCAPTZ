@@ -9,6 +9,18 @@ extern bool gCalibrationMode;
 extern bool gCalibrationModeQuick;
 extern bool gRecenter;
 
+/** Returns a string providing the name of a tally state. */
+const char *tallyStateName(tallyState);
+
+/** Sets the tally light to red (if possible). */
+bool setTallyRed(void);
+
+/** Sets the tally light to green (if possible). */
+bool setTallyGreen(void);
+
+/** Sets the tally light to off (if possible). */
+bool setTallyOff(void);
+
 /**
  * Returns an array where position 0 is the number of positions
  * moved in one second at minSpeed, position 1 is at minSpeed + 1,
