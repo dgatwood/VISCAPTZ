@@ -27,9 +27,6 @@
 #include "motorcontrol/lib/Config/Debug.h"
 #include "motorcontrol/lib/MotorDriver/MotorDriver.h"
 #include "motorcontrol/lib/PCA9685/PCA9685.h"
-// #include "motorcontrol/DEV_Config.c"
-// #include "motorcontrol/MotorDriver.c"
-// #include "motorcontrol/PCA9685.c"
 
 #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
@@ -45,15 +42,6 @@
 #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
 
-// Figure out these values when we have the hardware.  They will probably
-// have to be configurable, too.
-#define MIN_ENCODER_POSITION_FOR_TILT 3000
-#define MAX_ENCODER_POSITION_FOR_TILT 20000
-#define ENCODER_SCALE_FOR_TILT (MAX_ENCODER_POSITION_FOR_TILT - MIN_ENCODER_POSITION_FOR_TILT)
-#define MIN_ENCODER_POSITION_FOR_PAN 3000
-#define MAX_ENCODER_POSITION_FOR_PAN 20000
-#define ENCODER_SCALE_FOR_PAN (MAX_ENCODER_POSITION_FOR_PAN - MIN_ENCODER_POSITION_FOR_PAN)
-
 static bool motor_enable_debugging = false;
 
 
@@ -63,10 +51,6 @@ pthread_t motor_control_thread;
 pthread_t position_monitor_thread;
 void *runMotorControlThread(void *argIgnored);
 void *runPositionMonitorThread(void *argIgnored);
-
-bool motorPanTiltPositionEnabled = false;
-
-static char *g_cameraIPAddr = NULL;
 
 static volatile int64_t g_pan_speed = 0;
 static volatile int64_t g_tilt_speed = 0;
@@ -128,14 +112,6 @@ bool motorModuleReload(void) {
             convertSpeedValues(motor_tilt_data, PAN_TILT_SCALE_HARDWARE);
     }
   #endif  // USE_MOTOR_PAN_AND_TILT
-  return true;
-}
-
-bool motorSetIPAddress(char *address) {
-  if (g_cameraIPAddr != NULL) {
-    free(g_cameraIPAddr);
-  }
-  asprintf(&g_cameraIPAddr, "%s", address);
   return true;
 }
 

@@ -16,16 +16,6 @@
 #include "main.h"
 #include "constants.h"
 
-// Figure out these values when we have the hardware.  They will probably
-// have to be configurable, too.
-#define SERIAL_DEV_FILE_FOR_TILT "/dev/char/serial/uart0"
-#define MIN_ENCODER_POSITION_FOR_TILT 3000
-#define MAX_ENCODER_POSITION_FOR_TILT 20000
-#define ENCODER_SCALE_FOR_TILT (MAX_ENCODER_POSITION_FOR_TILT - MIN_ENCODER_POSITION_FOR_TILT)
-#define SERIAL_DEV_FILE_FOR_PAN "/dev/char/serial/uart1"
-#define MIN_ENCODER_POSITION_FOR_PAN 3000
-#define MAX_ENCODER_POSITION_FOR_PAN 20000
-#define ENCODER_SCALE_FOR_PAN (MAX_ENCODER_POSITION_FOR_PAN - MIN_ENCODER_POSITION_FOR_PAN)
 
 #define FREEMULTI(array) freeMulti(array, sizeof(array) / sizeof(array[0]))
 

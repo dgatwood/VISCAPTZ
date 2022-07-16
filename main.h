@@ -4,9 +4,13 @@
 
 #pragma mark - Base implementation functions, callable from modules.
 
-// True if we are in calibration mode.
+/** True when in calibration mode. */
 extern bool gCalibrationMode;
+
+/** True if we are recalibrating. */
 extern bool gCalibrationModeQuick;
+
+/** True if we are recentering the encoders. */
 extern bool gRecenter;
 
 /** Returns a string providing the name of a tally state. */
@@ -75,49 +79,80 @@ int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed);
  */
 int64_t minimumPositionsPerSecondForData(int64_t *calibrationData, int maximumSpeed);
 
+/** True if the pan motor moves to the right when sent positive speed values. */
 bool panMotorReversed(void);
+
+/** True if the tilt motor moves to down when sent positive speed values. */
 bool tiltMotorReversed(void);
+
+/** True if the pan encoder values increase when moving to the right. */
 bool panEncoderReversed(void);
+
+/** True if the tilt encoder values increase when moving down. */
 bool tiltEncoderReversed(void);
+
+/** True if the zoom position value increases when zooming out. */
 int64_t zoomEncoderReversed(void);
+
+/**
+ * Sets the value returned by zoomEncoderReversed.
+ *
+ * @param isReversed True if the zoom position value increases
+ *                   when zooming out, else false.
+ */
 int64_t setZoomEncoderReversed(bool isReversed);
 
+/** The leftmost position used during calibration. */
 int64_t leftPanLimit(void);
+
+/** The rightmost position used during calibration. */
 int64_t rightPanLimit(void);
 
+/** The topmost position used during calibration. */
 int64_t topTiltLimit(void);
+
+/** The bottommost position used during calibration. */
 int64_t bottomTiltLimit(void);
 
+/** The maximally zoomed in position used during calibration. */
 int64_t zoomInLimit(void);
+
+/** The maximally zoomed out position used during calibration. */
 int64_t zoomOutLimit(void);
+
+/** Sets the position returned by zoomInLimit. */
 int64_t setZoomInLimit(int64_t limit);
+
+/** Sets the position returned by zoomOutLimit. */
 int64_t setZoomOutLimit(int64_t limit);
 
-// Scales a speed from a scale of 0..fromScale to 0..toScale.
-//
-// If scaleData is NULL, 0 is 0, and all other input values map onto
-// equally sized groups of numbers on the output size or input groups onto
-// single output values, depending on direction.
-//
-// If scaleData is non-NULL, it is assumed to be a set of values that
-// are equal to the raw scale value for that motor speed divided by
-// the raw scale value for the fastest motor position times 1,000.
-//
-// Thus, each value represents the core scale value that most closely
-// approximates that speed in the target scale.  Any zero-speed values
-// are skipped and replaced by the first nonzero value.  This isn't
-// exactly right mathematically, but it is as close as is physically
-// possible given motors' tendency to stall out at low speeds.
-// If fromScale is not the core scale, the value is first converted
-// to that scale.
+/**
+ * Scales a speed from a scale of 0..fromScale to 0..toScale.
+ *
+ * @param speed     The speed value in the original scale (0 to fromScale).
+ * @param fromScale The current scale.
+ * @param toScale   The target scale.
+ *
+ * If scaleData is NULL, 0 is 0, and all other input values map onto
+ * equally sized groups of numbers on the output size or input groups onto
+ * single output values, depending on direction.
+ *
+ * If scaleData is non-NULL, it is assumed to be a set of values that
+ * are equal to the raw scale value for that motor speed divided by
+ * the raw scale value for the fastest motor position times 1,000.
+ *
+ * Thus, each value represents the core scale value that most closely
+ * approximates that speed in the target scale.  Any zero-speed values
+ * are skipped and replaced by the first nonzero value.  This isn't
+ * exactly right mathematically, but it is as close as is physically
+ * possible given motors' tendency to stall out at low speeds.
+ * If fromScale is not the core scale, the value is first converted
+ * to that scale.
+ */
 int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData);
 
-// Returns the current tally state as cached in main.c.  Used if there is
-// no other tally source defined.
-tallyState VISCA_getTallySource(void);
-
-int debugGetTallyState(void);
-bool debugSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);
-bool debugSetZoomSpeed(int64_t speed);
-bool debugGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
-int64_t debugGetZoomPosition(void);
+/**
+ * Returns the current tally state as cached in main.c.  Used if there is
+ * no other tally source defined.
+ */
+tallyState VISCA_getTallyState(void);

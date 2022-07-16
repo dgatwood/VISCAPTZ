@@ -12,7 +12,7 @@
 #pragma mark - Local path configuration
 
 // If not defined, uses ~/.viscaptz.conf
-// #define CONFIG_FILE_PATH "/home/pi/viscaptz.conf"
+// #define CONFIG_FILE_PATH "/etc/viscaptz.conf"
 
 
 #pragma mark - Tally master source
@@ -22,8 +22,12 @@
 // or OBS switcher if you aren't.  Or, if you want to control the tally
 // light exclusively over VISCA, you can specify a VISCA (fake) tally
 // source that just stores the last received tally state in RAM.
+//
+// IMPORTANT: Do not enable more than one tally source.
 
-/** Use a Panasonic camera as the tally source. */
+/**
+ * Use a Panasonic camera as the tally source.
+ */
 #define USE_PANASONIC_TALLY_SOURCE 0
 
 /** Use OBS as the tally source.  Not implemented. */
@@ -34,9 +38,12 @@
 
 /**
  * Use this software as the source of truth, rather than monitoring
- * any external device.
+ * any external device.  Enabled if no other tally source is enabled.
  */
-#define USE_VISCA_TALLY_SOURCE 0
+#define USE_VISCA_TALLY_SOURCE \
+    !(USE_PANASONIC_TALLY_SOURCE || USE_TRICASTER_TALLY_SOURCE || \
+      USE_OBS_TALLY_SOURCE)
+
 
 #pragma mark - Motor configuration
 
@@ -70,8 +77,12 @@
 #pragma mark - Encoder configuration
 
 /**
+ * Chooses what type of encoder is connected.
+ *
  * If 1, the encoder is expected to be on a CANBus connection.
  * If 0, the encoder is expected to be on an RS485 (Modbus) connection.
+ *
+ * This value is ignored if ENABLE_HARDWARE is 0.
  *
  * Note that RS485 encoders are entirely untested.  Remove this note if
  * that ever changes.
@@ -94,9 +105,6 @@
  * Set to 0 if you enjoy a bad experience, or if 1 is broken somehow.
  */
 #define EXPERIMENTAL_TIME_PROGRESS 1
-
-/** For early testing.  Do not use.  This should go away. */
-#define USE_FAKE_PTZ 0
 
 
 #pragma mark - Making builds simpler

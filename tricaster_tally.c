@@ -128,7 +128,7 @@ tallyState tricaster_getTallyState(void) {
     while ((pos = strstr(pos, "<shortcut_state ")) != NULL) {
       char *end = strstr(pos, ">");
       if (end == NULL) {
-        // Ick.
+        // Ick.  Something went wrong.
         fprintf(stderr, "tricaster_tally: WARNING: Got partial buffer.\n");
         handleTag(pos);
         break;

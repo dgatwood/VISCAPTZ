@@ -4,29 +4,62 @@
 
 #include "constants.h"
 
+/** Reassigns the CANBus encoder at oldCANBusID so that it will be at newCANBusID. */
 void reassign_encoder_device_id(int oldCANBusID, int newCANBusID);
 
-extern bool motorPanTiltPositionEnabled;
-
+/** Initializes the motor control module (and encoders). */
 bool motorModuleInit(void);
+
+/** Reinitializes the motor control module (and encoders) after calibration. */
 bool motorModuleReload(void);
+
+/** Performs a motor module calibration cycle. */
 void motorModuleCalibrate(void);
-bool motorSetIPAddress(char *address);
+
+/**
+ * Sets the pan and tilt speeds of the motor module.
+ *
+ * @param panSpeed  The pan speed.
+ * @param tiltSpeed The tilt speed.
+ * @param isRaw     If true, the speed values are in hardware scale
+ *                  (from -100 to 100).  If false, the speed values are
+ *                  in core scale (from -1000 to 1000).
+ */
 bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);
+
+/**
+ * Gets the current pan and tilt position from the encoders.  The scale is
+ * arbitrary and depends on the encoder and gearing.
+ */
 bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
-int motorGetTallyState(void);
 
-int64_t motorPanSpeed(int64_t fromPosition, int64_t toPosition);
-int64_t motorTiltSpeed(int64_t fromPosition, int64_t toPosition);
-
+/**
+ * Returns the number of encoder positions per second that the pan axis moves
+ * when operating at its slowest speed.
+ */
 int64_t motorMinimumPanPositionsPerSecond(void);
+
+/**
+ * Returns the number of encoder positions per second that the tilt axis moves
+ * when operating at its slowest speed.
+ */
 int64_t motorMinimumTiltPositionsPerSecond(void);
-int64_t motorMinimumZoomPositionsPerSecond(void);
 
+/**
+ * Returns the number of encoder positions per second that the pan axis moves
+ * when operating at its fastest speed.
+ */
 int64_t motorMaximumPanPositionsPerSecond(void);
-int64_t motorMaximumTiltPositionsPerSecond(void);
-int64_t motorMaximumZoomPositionsPerSecond(void);
 
+/**
+ * Returns the number of encoder positions per second that the tilt axis moves
+ * when operating at its fastest speed.
+ */
+int64_t motorMaximumTiltPositionsPerSecond(void);
+
+
+// If motor pan and tilt are enabled, map the standard motion and position macros
+// to functions in this module.
 #if USE_MOTOR_PAN_AND_TILT
 
     #define GET_PAN_TILT_POSITION(panPositionRef, tiltPositionRef) \

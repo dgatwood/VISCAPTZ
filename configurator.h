@@ -8,14 +8,14 @@
 char *getConfigKey(const char *key);
 
 /**
- * Returns the value of the specified configuration key as a boolean.
- * Missing values are returned as false.
+ * Returns the value of the specified configuration key as a Boolean
+ * value.  Missing values are returned as false.
  */
 bool getConfigKeyBool(const char *key);
 
 /**
  * Returns the value of the specified configuration key as a 64-bit
- * integer value.  Missing values are returned as zero (0).
+ * signed integer value.  Missing values are returned as zero (0).
  */
 int64_t getConfigKeyInteger(const char *key);
 

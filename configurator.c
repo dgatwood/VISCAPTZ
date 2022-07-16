@@ -16,6 +16,7 @@
 
 static bool configuratorDebug = false;
 
+// Returns true if the specified line's key portion matches the specified key.
 bool lineMatchesKey(const char *buf, const char *key) {
   size_t keyLength = strlen(key);
   return (strlen(buf) > (keyLength + 1)) &&
@@ -23,6 +24,7 @@ bool lineMatchesKey(const char *buf, const char *key) {
       (buf[keyLength] == '=');
 }
 
+// Returns the value of the specified key as a 64-bit signed integer value.
 int64_t getConfigKeyInteger(const char *key) {
   bool localDebug = configuratorDebug || false;
   char *stringValue = getConfigKey(key);
@@ -40,6 +42,7 @@ int64_t getConfigKeyInteger(const char *key) {
   return intValue;
 }
 
+// Returns the value of the specified key as a Boolean value.
 bool getConfigKeyBool(const char *key) {
   char *stringValue = getConfigKey(key);
   if (stringValue == NULL) {
@@ -53,6 +56,7 @@ bool getConfigKeyBool(const char *key) {
   return boolValue;
 }
 
+// Returns the configuration file path (~/.viscaptz.conf unless overridden).
 const char *getConfigFilePath(void) {
   #ifdef CONFIG_FILE_PATH
     return CONFIG_FILE_PATH;
@@ -70,6 +74,7 @@ const char *getConfigFilePath(void) {
   return value;
 }
 
+// Returns the value of the specified key as a string.
 char *getConfigKey(const char *key) {
   bool localDebug = configuratorDebug || false;
 
@@ -115,6 +120,7 @@ char *getConfigKey(const char *key) {
   return NULL;
 }
 
+// Sets the configuration key to the specified string value.
 bool setConfigKey(const char *key, const char *value) {
   FILE *fp = fopen(getConfigFilePath(), "r");
   if (!fp) {
@@ -148,6 +154,7 @@ bool setConfigKey(const char *key, const char *value) {
     if (lineMatchesKey(buf, key)) {
       // Matching line.
       if (value != NULL) {
+        // Write the new value if it is non-NULL, else treat it as a deletion.
         error = error || (fprintf(fq, "%s=%s\n", key, value) == -1);
       }
       found = true;
@@ -173,14 +180,17 @@ bool setConfigKey(const char *key, const char *value) {
   return !error;
 }
 
+// Deletes the specified configuration key.
 bool removeConfigKey(const char *key) {
   return setConfigKey(key, NULL);
 }
 
+// Sets the configuration key to the specified Boolean value.
 bool setConfigKeyBool(const char *key, bool value) {
   return setConfigKey(key, value ? "1" : "0");
 }
 
+// Sets the configuration key to the specified 64-bit signed integer value.
 bool setConfigKeyInteger(const char *key, int64_t value) {
   bool localDebug = configuratorDebug || false;
   char *stringValue = NULL;

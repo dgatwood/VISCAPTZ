@@ -7,6 +7,8 @@ bool tricasterModuleInit(void);
 
 tallyState tricaster_getTallyState(void);
 
+// If the Tricaster tally source is enabled, map the standard tally getter
+// macro to a function in this module.
 #if USE_TRICASTER_TALLY_SOURCE
   #define GET_TALLY_STATE() tricaster_getTallyState()
 #endif

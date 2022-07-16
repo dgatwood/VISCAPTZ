@@ -1,6 +1,5 @@
 #include "configurator.h"
 #include "constants.h"
-#include "fakeptz.h"
 #include "main.h"
 #include "motorptz.h"
 #include "obs_tally.h"
@@ -26,30 +25,77 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-static int kUnusedPosition = 0;  // Tells programmers that a value in a move call is unused.
-static int kAxisStallThreshold = 100;
+
+#pragma mark - Configuration keys
+
+/** Boolean key indicating that the pan motor direction is reversed. */
 const char *kPanMotorReversedKey = "pan_axis_motor_reversed";
+
+/** Boolean key indicating that the tilt motor direction is reversed. */
 const char *kTiltMotorReversedKey = "tilt_axis_motor_reversed";
+
+/** Boolean key indicating that the pan encoder direction is reversed. */
 const char *kPanEncoderReversedKey = "pan_axis_encoder_reversed";
+
+/** Boolean key indicating that the tilt encoder direction is reversed. */
 const char *kTiltEncoderReversedKey = "tilt_axis_encoder_reversed";
+
+/** Integer key providing the left pan limit for calibration and recalibration. */
 const char *kPanLimitLeftKey = "pan_limit_left";
+
+/** Integer key providing the right pan limit for calibration and recalibration. */
 const char *kPanLimitRightKey = "pan_limit_right";
+
+/** Integer key providing the upper tilt limit for calibration and recalibration. */
 const char *kTiltLimitTopKey = "tilt_limit_up";
+
+/** Integer key providing the lower tilt limit for calibration and recalibration. */
 const char *kTiltLimitBottomKey = "tilt_limit_down";
+
+/** Integer key providing the zoomed in limit for calibration and recalibration. */
 const char *kZoomInLimitKey = "zoom_in_limit";
+
+/** Integer key providing the zoomed out limit for calibration and recalibration. */
 const char *kZoomOutLimitKey = "zoom_out_limit";
+
+/** Boolean key indicating that the zoom encoder sends larger values when zoomed out. */
 const char *kZoomEncoderReversedKey = "zoom_encoder_reversed";
+
+/** String key containing the camera IP address for the Panasonic module. */
 const char *kCameraIPKey = "camera_ip_address";
-const char *kTricasterIPKey = "tricaster_ip_address";
+
+#if USE_TRICASTER_TALLY_SOURCE
+  /** String key containing the switcher IP address for the Tricaster module. */
+  const char *kTricasterIPKey = "tricaster_ip_address";
+#endif
+
+/** String key containing the tally source name for the Tricaster or OBS module. */
 const char *kTallySourceName = "tally_source_name";
 
 #if USE_OBS_TALLY_SOURCE
+  /** String key containing the websocket URL for the OBS module. */
   const char *kOBSWebSocketURLKey = "obs_websocket_url";
+
+  /** String key containing the websocket password for the OBS module. */
   const char *kOBSPasswordKey = "obs_websocket_password";
 #endif
 
-volatile tallyState gTallyState = kTallyStateOff;
 
+#pragma mark - Other constants
+
+/**
+ * The maximum number of times we will try to move the motor if the
+ * encoder value does not change.
+ */
+static int kAxisStallThreshold = 100;
+
+/**
+ * A constant that indicates that a value (pan, tilt, or zoom) in a move
+ * call is unused because of the associated moveModeFlags value.
+ */
+static int kUnusedPosition = 0;  // Tells programmers that a value in a move call is unused.
+
+/** Flags used to control which parameters of a move call are used.  */
 typedef enum {
   kFlagMovePan = 0x1,             //! Use the pan axis position.
   kFlagMoveTilt = 0x2,            //! Use the tilt axis position.
@@ -57,70 +103,275 @@ typedef enum {
 } moveModeFlags;
 
 
-#pragma mark - Structures and prototypes
+#pragma mark - Data structures
 
+/** A data structure representing a VISCA request (command/inquiry) packet over the wire. */
 typedef struct {
   uint8_t cmd[2];
-  uint16_t len;
+  uint16_t len;  // Big endian!  (Network byte order.)
   uint32_t sequence_number;
   uint8_t data[65519];  // Maximum theoretical IPv6 UDP packet size minus above.
 } visca_cmd_t;
 
+/** A data structure representing a VISCA response packet over the wire. */
 typedef struct {
   uint8_t cmd[2];
-  uint16_t len;  // Big endian!
+  uint16_t len;  // Big endian!  (Network byte order.)
   uint32_t sequence_number;
   uint8_t data[65527];  // Maximum theoretical IPv6 UDP packet size.
 } visca_response_t;
 
-#define NUM_AXES (axis_identifier_zoom + 1)
+/** A data structure representing a preset on disk. */
+typedef struct {
+    int64_t panPosition, tiltPosition, zoomPosition;
+} preset_t;
 
+
+#pragma mark - Global variables
+
+// General state
+
+/** True if in calibration mode, else false. */
+bool gCalibrationMode = false;
+
+/**
+ * True if recalibrating pan/tilt/zoom speeds without reconfiguring the
+ * bounds and axis directions.
+ */
+bool gCalibrationModeQuick = false;
+
+/** True if recalibrating only the zoom speed (e.g. when switching cameras). */
+bool gCalibrationModeZoomOnly = false;
+
+/**
+ * True during phases of calibration in which VISCA controls
+ * should be disabled.
+ */
+bool gCalibrationModeVISCADisabled = false;
+
+/**
+ * True if the encoders should update their center position based on their
+ * current position.
+ */
+bool gRecenter = false;
+
+/**
+ * The thread used for the VISCA listener.  This is on a separate
+ * thread because when in calibration modes, the main thread must
+ * do additional work.
+ */
+pthread_t gVISCANetworkThread;
+
+
+// Data about the current automated move (recalls, absolute positioning calls, etc.)
+
+/** True if the specified axis is (still) involved in the currently active move. */
 static bool gAxisMoveInProgress[NUM_AXES];
+
+/** The start position of a given axis for the currently active move. */
 static int64_t gAxisMoveStartPosition[NUM_AXES];
+
+/** The ending position of a given axis for the currently active move. */
 static int64_t gAxisMoveTargetPosition[NUM_AXES];
+
+/**
+ * The maximum speed of a given axis for the currently active move.  This appears
+ * to be completely unused.
+ */
 static int64_t gAxisMoveMaxSpeed[NUM_AXES];
+
+/**
+ * The most recent speed at which the specified axis was moving in the currently
+ * active move.
+ */
 static int64_t gAxisLastMoveSpeed[NUM_AXES];
+
+/**
+ * The position of the specified axis at the previous move interval (1/100th of
+ * a second).  Used to determine if the motor has stalled at the end of an
+ * uncalibrated move to avoid wasting power (forever) unnecessarily.
+ */
 static int64_t gAxisPreviousPosition[NUM_AXES];
+
+/**
+ * The desired duration of the move on the specified axis in seconds (relative
+ * to gAxisStartTime).
+ */
 static double gAxisDuration[NUM_AXES];
+
+/**
+ * The timestamp (in floating-point seconds since the ephoc) at which the
+ * current move began.
+ */
 static double gAxisStartTime[NUM_AXES];
+
+/**
+ * The number of consecutive checks of the position of the axis in which
+ * the position value did not change.  Used to stop moving early if the
+ * motor has stalled during an uncalibrated move, rather than wasting
+ * power forever.
+ */
 static int gAxisStalls[NUM_AXES];
 
-int debugPanAndTilt = 0; // kDebugModePan;// kDebugModeZoom;  // Bitmap from debugMode.
+/**
+ * The current tally state as set by VISCA commands.  Used only if
+ * the VISCA tally source is active.
+ */
+volatile tallyState gTallyState = kTallyStateOff;
 
-void run_startup_tests(void);
-
-pthread_t network_thread;
-void *runPTZThread(void *argIgnored);
-void *runNetworkThread(void *argIgnored);
-bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, socklen_t structLength);
-int getVISCAZoomSpeedFromTallyState(void);
-
-bool absolutePositioningSupportedForAxis(axis_identifier_t axis);
-void handleRecallUpdates(void);
-int64_t getAxisPosition(axis_identifier_t axis);
-bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration);
-bool setAxisSpeed(axis_identifier_t axis, int64_t position, bool debug);
-bool setAxisSpeedRaw(axis_identifier_t axis, int64_t speed, bool debug);
-void cancelRecallIfNeeded(char *context);
-double timeStamp(void);
-double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition);
-
+/**
+ * Set to true if a VISCA command has specified a particular recall speed.
+ * If this has not yet happened, the recall speed is determined based on
+ * whether the camera is live or not.
+ */
 bool gRecallSpeedSet = false;
+
+/** The recall speed as set via VISCA. */
 int gVISCARecallSpeed = 0;
-void setRecallSpeedVISCA(int value);
+
+
+#pragma mark - Prototypes
+
+// Absolute positioning/recall prototypes
+
+/** Returns true if absolute positioning is supported for the specified axis. */
+bool absolutePositioningSupportedForAxis(axis_identifier_t axis);
+
+/** Cancels any active recalls. */
+void cancelRecallIfNeeded(char *context);
+
+/**
+ * Returns the duration that should be used for a recall if performed right now,
+ * By default, this returns a duration based on whether the camera is in preview
+ * mode or program mode.  If a maximum speed is set via VISCA, that speed takes
+ * precedence.
+ *
+ * This function ignores whether the duraton is actually possible.  For that,
+ * you should call durationForMove.
+ */
 double currentRecallTime(void);
 
-// Legal preset values are in the range 0..255, but the code doesn't check, so use higher numbers for
-// internal tests, etc.
-bool savePreset(int presetNumber);
+/**
+ * Computes the duration for a move to the specified positions on the specified axes.
+ *
+ * @param flags A set of flags that defines which axes are used.
+ *
+ */
+double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition);
+
+/**
+ * Returns the fastest possible move that the camera can make to the specified
+ * position on the specified axis (measured in seconds).
+ */
+double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position);
+
+/**
+ * Returns the current position of the specified axis.
+ *
+ * If the specified axis does not support absolute positioning, this function returns zero (0).
+ */
+int64_t getAxisPosition(axis_identifier_t axis);
+
+/** Updates the speed of axes that are being moved incrementally under programmatic control. */
+void handleRecallUpdates(void);
+
+/**
+ * Sets the position of an axis to the specified position.
+ *
+ * @param maxSpeed The maximum speed for the axis.  This value appears to be unused.
+ * @param duration The target duration.
+ */
+bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration);
+
+/** Sets the axis speed, using core scale speed values. */
+bool setAxisSpeed(axis_identifier_t axis, int64_t position, bool debug);
+
+/** Sets the axis speed, using values based on the hardware scale for that axis. */
+bool setAxisSpeedRaw(axis_identifier_t axis, int64_t speed, bool debug);
+
+/** Do not use directly.  Call setAxisSpeed or setAxisSpeedRaw instead. */
+bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, bool isRaw);
+
+/**
+ * Returns the slowest possible move that the camera can make to the specified
+ * position on the specified axis (measured in seconds).
+ */
+double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position);
+
+
+// Preset management
+
+/**
+ * Recalls the specified preset and moves the camera to that position.
+ *
+ * Legal preset values are in the range 0..255, but the code doesn't check, so use
+ * higher numbers for internal tests, etc.
+ */
 bool recallPreset(int presetNumber);
 
+/**
+ * Stores the current position into the specified preset.
+ *
+ * Legal preset values are in the range 0..255, but the code doesn't check, so use
+ * higher numbers for internal tests, etc.
+ */
+bool savePreset(int presetNumber);
 
+
+// VISCA-related functions
+
+/**
+ * Gets a default zoom speed (in VISCA range) based on the current tally state,
+ * e.g. the speed is slower when the camera is live.
+ */
+int getVISCAZoomSpeedFromTallyState(void);
+
+/** Processes a single VISCA command or inquiry packet. */
+bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, socklen_t structLength);
+
+/* Sets the speed for future recall operations (from a VISCA source, using VISCA scale). */
+void setRecallSpeedVISCA(int value);
+
+/** Returns a canned VISCA response suitable for sending in response to an error. */
 visca_response_t *failedVISCAResponse(void);
+
+/** Returns a canned VISCA response suitable for sending in response to an enqueued command. */
 visca_response_t *enqueuedVISCAResponse(void);
+
+/** Returns a canned VISCA response suitable for sending in response to a completed command. */
 visca_response_t *completedVISCAResponse(void);
 
-void *runMotorControlThread(void *argIgnored);
+
+// Miscellaneous prototypes.
+
+/** The main function of the VISCA network thread. */
+void *runNetworkThread(void *argIgnored);
+
+/** Runs a series of tests for built-in conversion functions. */
+void runStartupTests(void);
+
+/** Returns the current time in seconds and fractions of a second. */
+double timeStamp(void);
+
+
+/**
+ * Sends the provided VISCA response, modified to use the specified sequence number, 
+ * over the specified socket, using the specified source address and source address
+ * length.
+ */
+bool sendVISCAResponse(visca_response_t *response, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
+
+/** Handles a VISCA inquiry packet. */
+bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
+
+/** Handles a VISCA command packet. */
+bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
+
+/** Populates the specified VISCA response with the specified data bytes. */
+#define SET_RESPONSE(response, array) setResponseArray(response, array, (uint8_t)(sizeof(array) / sizeof(array[0])))
+
+/** Helper function for SET_RESPONSE. */
+void setResponseArray(visca_response_t *response, uint8_t *array, uint8_t count);
 
 // ABOUT SPEEDS
 //
@@ -138,31 +389,29 @@ void *runMotorControlThread(void *argIgnored);
 //   * Motor control: ???
 //   * Panasonic zoom (CGI): -49 to 49
 
-pthread_t motor_control_thread;
-
-bool gCalibrationMode = false;
-bool gCalibrationModeQuick = false;
-bool gCalibrationModeZoomOnly = false;
-bool gCalibrationModeVISCADisabled = false;
-bool gRecenter = false;
-
 bool resetCalibration(void);
 void do_calibration(void);
 
+#if USE_TRICASTER_TALLY_SOURCE
+  /** Stores the Tricaster IP address into settings (used for Tricaster tally sources). */
+  void setTricasterIP(char *TricasterIP);
+#endif
+
 #if TALLY_SOURCE_NAME_REQUIRED
+  /** Stores the tally source/scene name (used by OBS and Tricaster tally sources) into settings. */
   void setTallySourceName(char *tallySourceName);
 #endif
 
 #ifdef SET_IP_ADDR
+  /** Stores the camera's IP address into settings (used for Panasonic cameras). */
   void setCameraIP(char *TricasterIP);
 #endif
 
-#if USE_TRICASTER_TALLY_SOURCE
-  void setTricasterIP(char *TricasterIP);
-#endif
-
 #if USE_OBS_TALLY_SOURCE
+  /** Stores the WebSocket URL (used by OBS tally sources) into settings. */
   void setOBSWebSocketURL(char *OBSWebSocketURL);
+
+  /** Stores the WebSocket password (used by OBS tally sources) into settings. */
   void setOBSPassword(char *password);
 #endif
 
@@ -171,7 +420,7 @@ void do_calibration(void);
 
 int main(int argc, char *argv[]) {
 
-  run_startup_tests();
+  runStartupTests();
 
   if (argc >= 2) {
     if (!strcmp(argv[1], "--calibrate")) {
@@ -250,7 +499,7 @@ int main(int argc, char *argv[]) {
   }
 #endif
 
-  pthread_create(&network_thread, NULL, runNetworkThread, NULL);
+  pthread_create(&gVISCANetworkThread, NULL, runNetworkThread, NULL);
 
 #ifdef SET_IP_ADDR
   char *cameraIP = getConfigKey(kCameraIPKey);
@@ -279,8 +528,6 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
-
   fprintf(stderr, "Created threads.\n");
 
   if (gCalibrationMode) {
@@ -290,90 +537,12 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Ready for VISCA commands.\n");
 
-#if 0
-  // Temporary test code.
-
-  fprintf(stderr, "Moving pan axis.\n");
-
-  const int interval = 1000000;  // 1 second.
-
-  setAxisSpeed(axis_identifier_pan, 1000, false);
-  usleep(interval);  // Move for a while.
-  setAxisSpeed(axis_identifier_pan, 0, false);
-
-  fprintf(stderr, "Moving tilt axis.\n");
-
-  setAxisSpeed(axis_identifier_tilt, 1000, false);
-  usleep(interval);  // Move for a while.
-  setAxisSpeed(axis_identifier_tilt, 0, false);
-
-  fprintf(stderr, "Storing preset.\n");
-  savePreset(500);
-
-  fprintf(stderr, "Moving pan axis back.\n");
-
-  setAxisSpeed(axis_identifier_pan, -1000, false);
-  usleep(interval);  // Move for a while.
-  setAxisSpeed(axis_identifier_pan, 0, false);
-
-  fprintf(stderr, "Moving tilt axis back.\n");
-
-  setAxisSpeed(axis_identifier_tilt, -1000, false);
-  usleep(interval);  // Move for a while.
-  setAxisSpeed(axis_identifier_tilt, 0, false);
-
-  fprintf(stderr, "Recalling preset.\n");
-  recallPreset(500);
-
-  fprintf(stderr, "Done temporary move code.\n");
-#endif
-
   // Spin this thread forever for now.
   while (1) {
     usleep(1000000);
   }
 }
 
-#pragma mark - Testing implementation (no-ops)
-
-bool debugSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
-  fprintf(stderr, "setPanTiltSpeed: pan speed: %" PRId64 "\n"
-                  "tilt speed: %" PRId64 " raw: %s\n", panSpeed, tiltSpeed, isRaw ? "YES" : "NO");
-  return false;
-}
-
-bool debugSetZoomSpeed(int64_t speed) {
-  fprintf(stderr, "setZoomSpeed: %" PRId64 "\n", speed);
-  return false;
-}
-
-bool debugGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
-  fprintf(stderr, "getPanPosition\n");
-  if (panPosition != NULL) {
-    *panPosition = 0.0;
-  }
-  if (tiltPosition != NULL) {
-    *tiltPosition = 0.0;
-  }
-  return true;
-}
-
-int64_t debugGetZoomPosition(void) {
-  // Future versions will return a position (arbitrary scale).
-  // Return 0 if the value is "close enough" that motion is impossible.
-  fprintf(stderr, "getZoomPosition\n");
-  return 0.0;
-}
-
-int debugGetTallyState(void) {
-  FILE *fp = fopen("/var/tmp/tallyState", "r");
-  if (!fp) return 0;
-  char data[100];
-  fgets(data, 99, fp);
-  fclose(fp);
-  // fprintf(stderr, "Tally state: %d\n", atoi(data));
-  return atoi(data);
-}
 
 #pragma mark - Generic move routines
 
@@ -428,13 +597,23 @@ int actionProgress(int64_t startPosition, int64_t curPosition, int64_t endPositi
 ///                             of the total move length).
 int computeSpeed(int progress) {
     if (progress < 100 || progress > 900) {
-        // For now, we evenly ramp up to full speed at 10% progress and down starting at 90%.
-        // This is *NOT* ideal, particularly if we use P2 protocol and get zoom position updates
-        // only once per second.
         int distance_to_nearest_endpoint = (progress >= 900) ? (1000 - progress) : progress;
 
+        // Depending on whether you run this function before or after calibrating the
+        // motor speed, the progress value is either based on the percentage of progress
+        // position-wise or time-wise.  The former is extremely inaccurate, giving fairly
+        // jerky motion, but that's the best you can do without knowing the maximum speed
+        // of the motor.
+        //
+        // After you calibrate the motor speed, this uses a time-based curve.  The explanation
+        // below tells how this works.
+        //
+        // From 10% to 90%, the motor moves at full speed.  On either end, the motor's speed
+        // is computed based on an s-curve, computed as follows:
+        //
         // With vertical acccuracy of ± .1% at the two endpoints (i.e. 0.001 at the bottom,
         //     0.999 at the top):
+        //
         // 1 / (1 + e^-x) would give us a curve of length 14 from -7 to 7.
         // 1 / (1 + e^-(x*7)) would give us a curve of length 14 from -1 to 1.
         // 1 / (1 + e^-((x*7 / 50)) would give us a curve of length 100 from -50 to 50.
@@ -442,9 +621,6 @@ int computeSpeed(int progress) {
         //                                 progress period).
         // 1 / (1 + e^-(7x/50 - 7)) is simplified.
         // 1 / (1 + e^(7 - (7x/50))) is fully simplified.
-        //
-        // In the future, this will move to a time-based curve, rather than a distance-based
-        // curve.  The explanation below tells how this will happen.
         //
         // The integral of this is -(1/7)((-50 * ln (1+e^(7-(7x /50))))-7x+350).
         // Evaluated from 0 to 100, this gives us 50.0065104747 - 0.00651047466,
@@ -462,37 +638,61 @@ int computeSpeed(int progress) {
         // middle 80% of the move, that means that the peak speed during the middle 80%
         // should be 10/9ths of 500, or about 555.55.
         //
-        // With that, we can calculate the exact fraction of maximum speed that the
-        // motors should run.
+        // With that information, we can calculate the exact fraction of maximum speed
+        // that the motors should run at their peak to achieve a move of a given
+        // duration, and from there, we can compute what the speed should be at any
+        // given point in time from the start of the movement to the end.
         //
         // However, motors are nonlinear.  They don't move at all at low power, and
-        // their speed isn't exactly linear in the duty cycle.  To compute the actual
-        // output levels correctly, we need to do a calibration stage.  Here's how that
-        // will work:
+        // their speed isn't exactly linear in the duty cycle.  (This actually requires
+        // a workaround just to get motion at all without calibration data, because
+        // we have to prevent it from moving at zero speed, or else the progress
+        // will never increase, and it will never speed up.)
         //
-        // 1.  Run ./viscaptz --calibrate
-        // 2.  Quickly figure out which way the pan control moves the camera, and
-        //     which way the tilt moves the camera.
-        // 3.  Move the camera to the leftmost position that you're comfortable
-        //     using, followed by the rightmost position.
-        // 4.  Move the camera to the maximum upwards position that you're comfortable
-        //     using, followed by the maximum downwards position.
-        // 5.  Wait ten seconds without moving the camera.  The software will interpet
-        //     the last horizontal move direction to be right, and the last vertical
-        //     move direction to be down, and will invert the motion on that axis as
-        //     needed to ensure that VISCA left/right/up/down moves go in the right
-        //     direction.
-        // 6.  The camera will then pan towards the left at progressively increasing
-        //     speeds, computing the number of positions per second at each speed,
-        //     rewinding to the right when it hits the left edge.
-        // 7.  The camera will perform a similiar calibration for the tilt.
-        // 8.  The camera will perform a similiar calibration for the zoom.
+        // So to compute the actual output levels correctly, we need to do a calibration
+        // stage.  Here's how that works:
         //
-        // The result will be a table of positions-per-second values for each speed
-        // value.  At run time, the app might convert this into a balanced binary tree
-        // (if performance necessitates it) to more quickly generate the ideal actual
-        // core speed value (from 0 to 1000) to achieve the desired theoretical core
-        // speed value.
+        // 1.  The user runs ./viscaptz --calibrate
+        // 2.  The user moves the camera to the leftmost position that is safe to use,
+        //     followed by the rightmost position.
+        // 3.  The user moves the camera to the maximum upwards position that is safe
+        //     to use, followed by the maximum downwards position.
+        // 4.  The user waits ten seconds without moving the camera.  The software
+        //     interprets the last horizontal move direction to be right, and the last
+        //     vertical move direction to be down, and will invert the motion on each
+        //     axis as needed to ensure that VISCA left/right/up/down moves go in the
+        //     right direction.  The software also recognizes whether the encoder
+        //     positions increase or decrease as the camera moves in each direction,
+        //     and uses that to determine which way to move based on whether the
+        //     target position is a smaller or larger number.
+        //
+        // At this point, automated calibration continues as follows:
+        //
+        // 1.  The camera repeatedly pans back and forth, computing the number
+        //     of positions per second at each speed.  It performs this computation
+        //     several times, throws out any outliers (beyond one standard deviation),
+        //     and then computes the average.
+        //
+        //     If the computed positions-per-second value for any speed is slower
+        //     than the computed positions-per-second value at the previous speed
+        //     value, the loop goes back and recomputes the previous speed value
+        //     (in case that value was high) and then the current speed value.
+        //     This is, unfortunately, always going to be an approximation, because
+        //     drag on the motor won't be constant (wires drag on the tripod), the
+        //     input voltage may not be constant, etc.
+        //
+        // 2.  The camera performs a similiar calibration for the tilt.
+        // 3.  The camera performs a similiar calibration for the zoom.
+        //
+        // The result is a table of positions-per-second values for each hardware speed
+        // value.  From there, the hardware module scales these values so that the
+        // highest encoder-positions-per-second value is converted to 1000 and all
+        // smaller values are scaled proportionally.
+        //
+        // When computing the hardware speed for a given core speed (scale -1000 to 1000),
+        // the scaling function then can use the scaled values to determine how close
+        // each hardware speed is to the expected values, and can adjust them accordingly.
+
         double exponent = 7.0 - ((7.0 * distance_to_nearest_endpoint) / 50.0);
         double speedFromProgress = 1 / (1 + pow(M_E, exponent));
         return round(speedFromProgress * 1000.0);
@@ -525,7 +725,8 @@ void handleRecallUpdates(void) {
         fprintf(stderr, "Axis %d direction %d\n", axis, direction);
       }
 
-      // Left/up are positive for the motor.  Right/down are negative.
+      // Left/up values are treated as positive (ignoring any inversion required if the motor is
+      // backwards).  Right/down are negative.
       //
       // Normal encoder:   Higher values are left.  So a higher value (left of current) means
       //                   positive motor speeds
@@ -576,14 +777,23 @@ void handleRecallUpdates(void) {
       gAxisPreviousPosition[axis] = axisPosition;
 
       if (panProgress == 1000) {
+        // If we have reached the target position, stop all motion on the axis.
         if (localDebug) {
             fprintf(stderr, "AXIS %d MOTION COMPLETE\n", axis);
         }
         gAxisMoveInProgress[axis] = false;
         setAxisSpeed(axis, 0, false);
       } else {      
-        // Scale based on max speed out of 24 (VISCA percentage) and scale to a range of
-        // -1000 to 1000 (core speed).
+        // Compute the target speed based on the current pan progress.
+        //
+        // If we do not have calibration data, specify a floor (MIN_PAN_TILT_SPEED) to
+        // ensure that the motion does not get stuck.  The reason for this is because
+        // the progress (and thus the speed) increases as the encoder position
+        // increases, so if the motor stalls (no motion) at a given voltage, the speed
+        // would never increase, so the motor would never start moving.
+        //
+        // Do not use a minimum speed if we are using wall clock time, because computed
+        // progress doesn't depend on the motors changing the encoder position.
         int speed = usingPositionBasedProgress ?
             MAX(computeSpeed(panProgress), MIN_PAN_TILT_SPEED) :
             computeSpeed(panProgress);
@@ -599,6 +809,16 @@ void handleRecallUpdates(void) {
   }
 }
 
+// Returns the integer value that is at least as far from zero as
+// the specified double value, but without losing the sign.
+//
+// In other words for positive numbers, this returns an integer that
+// is at least as large as the original value, and for negative
+// numbers, this returns an integer that is at least as large a
+// negative value.
+//
+// Or, put another way, this returns the ceiling of the absolute
+// value of the number, but with the original value's sign.
 double absceil(double value) {
   return (value > 0) ? ceil(value) : floor(value);
 }
@@ -758,18 +978,15 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
     return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, duration);
 }
 
-double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position);
-double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position);
-
 /**
  * Computes the move duration for a move to panPosition/tiltPosition/zoomPosition or some subset
  * thereof (controlled by flags).
  *
- * By default, this returns the value of currentRecallTime(), but only if every axis can move that
- * quickly or slowly.
+ * By default, this returns the value of currentRecallTime(), but only if every axis can reach the
+ * target position that quickly or slowly.
  *
- * If it is not possible to make both axes reach the destination simultaneously because of speed
- * differences, this will return the longer of the possible durations, and one axis will just finish
+ * If it is not possible to make all axes reach the destination simultaneously because of speed
+ * differences, this returns the longer of the possible durations, and one axis will just finish
  * sooner.
  */
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition) {
@@ -781,7 +998,7 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
     fprintf(stderr, "Default duration for move: %lf\n", recallTime);
   }
 
-  // First, make sure the ideal dureation is not too fast for any axis.
+  // First, make sure the ideal duration is not too fast for any axis.
   if (flags & kFlagMovePan) {
     double timeAtMaximumSpeed = fastestMoveForAxisToPosition(axis_identifier_pan, panPosition);
     if (timeAtMaximumSpeed == 0) {
@@ -825,7 +1042,7 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
     }
   }
 
-  // Now, make sure the ideal dureation is not too slow for any axis.
+  // Now, make sure the ideal duration is not too slow for any axis.
   if (flags & kFlagMovePan) {
     double timeAtMinimumSpeed = slowestMoveForAxisToPosition(axis_identifier_pan, panPosition);
     if (timeAtMinimumSpeed == 0) {
@@ -912,6 +1129,13 @@ double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   // averaging 50%, that means the average speed through the entire move is always 90% of the
   // maximum speed from that middle 80%.  This is a slight approximation because there is a
   // minimum speed for the motors, but we ignore that to make the computation reasonable.
+  //
+  // Based on that, we can take the maximum number of positions per second that the axis is
+  // capable of moving at maximum speed, mutiply times 0.9, and get the maximum average speed.
+  // You can then divide the total move distance by that number, and that gives you the
+  // minimum number of seconds that the camera can spend reaching that destination (using
+  // our s-curve algorithm; it is, of course, possible to achieve a slightly shorter
+  // duration by ramping more quickly to the maximum speed).
 
   int64_t maximumPositionsPerSecond = maximumPositionsPerSecondForAxis(axis);
   if (maximumPositionsPerSecond == 0) {
@@ -923,9 +1147,14 @@ double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
 }
 
 double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
-  // We ignore any ramp time to the slowest speed, because it would be too hard to calculate
-  // that (and we don't log that data).  This just computes the duration based on the number of
-  // positions per second at the slowest native speed.
+  // This computes the maximum possible duration that the axis can spend reaching a
+  // given position by dividing the number of positions by the number of positions
+  // per second at the slowest native speed.
+  // 
+  // As with the fastest move computation, we ignore any ramp time to the slowest
+  // speed, both because it would be too hard to compute that ramp time, and
+  // because in practice, the ramp time to the slowest native speed is usually
+  // negligible anyway.
 
   int64_t minimumPositionsPerSecond = minimumPositionsPerSecondForAxis(axis);
   if (minimumPositionsPerSecond == 0) {
@@ -935,8 +1164,6 @@ double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   int64_t distance = llabs(position - currentPosition);
   return (double)distance / (double)minimumPositionsPerSecond;
 }
-
-bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, bool isRaw);
 
 bool setAxisSpeed(axis_identifier_t axis, int64_t speed, bool debug) {
   return setAxisSpeedInternal(axis, speed, debug, false);
@@ -1033,10 +1260,10 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
 
 #pragma mark - Networking
 
-bool sendVISCAResponse(visca_response_t *response, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
 
 void *runNetworkThread(void *argIgnored) {
-  // Listen on UDP port 52381.
+  // VISCA-over-IP can be run on any port, ostensibly, but most cameras
+  // use UDP port 52381, so this uses that port as well.
   unsigned short port = 52381;
 
   struct sockaddr_in client, server;
@@ -1075,23 +1302,19 @@ void *runNetworkThread(void *argIgnored) {
 
     struct timeval timeout;
     timeout.tv_sec = 0;
-    timeout.tv_usec = 10000;  // 10 millisecond update interval.
+    timeout.tv_usec = 10000;  // Update the speed of automatic recall operations 100x per second (10 ms).
 
     if (select(sock + 1, &read_fds, NULL, NULL, &timeout) > 0) {
       int bytes_received = recvfrom(sock, &command, sizeof(visca_cmd_t), 0, 
         (struct sockaddr *) &client, &structLength);
 
-      // fprintf(stderr, "Got packet.\n");
       if (bytes_received < 0) {
         perror("recvfrom");
-        // exit(EXIT_FAILURE);
       } else if (structLength > 0) {
         bool success = handleVISCAPacket(command, sock, (struct sockaddr *)&client, structLength);
         if (!success) {
           fprintf(stderr, "VISCA error\n");
           while (!sendVISCAResponse(failedVISCAResponse(), command.sequence_number, sock, (struct sockaddr *)&client, structLength));
-        // } else {
-          // fprintf(stderr, "Success\n");
         }
       }
     }
@@ -1118,9 +1341,6 @@ bool sendVISCAResponse(visca_response_t *response, uint32_t sequenceNumber, int 
 
 #pragma mark - VISCA command translation
 
-bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
-bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
-
 void printbuf(uint8_t *buf, int len) {
   fprintf(stderr, "BUF: ");
   for (int i = 0; i < len; i++) {
@@ -1140,9 +1360,6 @@ bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, s
     return handleVISCACommand(command.data, htons(command.len), command.sequence_number, sock, client, structLength);
   }
 }
-
-#define SET_RESPONSE(response, array) setResponseArray(response, array, (uint8_t)(sizeof(array) / sizeof(array[0])))
-void setResponseArray(visca_response_t *response, uint8_t *array, uint8_t count);
 
 visca_response_t *failedVISCAResponse(void) {
   static visca_response_t response;
@@ -1183,7 +1400,6 @@ visca_response_t *tallyModeResponse(int tallyState) {
 
 bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
   // All VISCA inquiries start with 0x90.
-  // fprintf(stderr, "INQUIRY\n");
   if(command[0] != 0x81) return false;
 
   switch(command[1]) {
@@ -1219,7 +1435,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
   return false;
 }
 
-tallyState VISCA_getTallySource(void) {
+tallyState VISCA_getTallyState(void) {
   return gTallyState;
 }
 
@@ -1290,7 +1506,6 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
     return false;
   }
 
-  // fprintf(stderr, "COMMAND\n");
   // All VISCA commands start with 0x8x, where x is the camera number.  For IP, always 1.
   if(command[0] != 0x81) return false;
 
@@ -1312,11 +1527,11 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 if (zoomCmd == 3) zoomCmd = 0x33;
 
                 int8_t zoomSpeed = 0;
-                if (zoomCmd != 0) {  // Don't set a speed if the command is "zoom stop".
+                if (zoomCmd != 0) {  // Leave the speed at zero if the command is "zoom stop".
                     int8_t zoomRawSpeed = command[4] & 0xf;
 
-                    // VISCA zoom speeds go from 0 to 7, but we need to treat 0 as stopped, so immediately
-                    // convert that to be from 1 to 8.
+                    // VISCA zoom speeds go from 0 to 7, but the output speed's 0 is stopped, so
+                    // immediately convert the range to be from 1 to 8 instead.
                     zoomSpeed = ((zoomCmd & 0xf0) == 0x20) ? zoomRawSpeed + 1 : - (zoomRawSpeed + 1);
                 }
                 // If there is a move (recall or position set) in progress, ignore any
@@ -1599,7 +1814,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 }
 
 
-#pragma mark - Presets
+#pragma mark - Preset management
 
 char *presetFilename(int presetNumber) {
     static char *buf = NULL;
@@ -1609,10 +1824,6 @@ char *presetFilename(int presetNumber) {
     asprintf(&buf, "preset_%d", presetNumber);
     return buf;
 }
-
-typedef struct {
-    int64_t panPosition, tiltPosition, zoomPosition;
-} preset_t;
 
 bool savePreset(int presetNumber) {
     preset_t preset;
@@ -1714,14 +1925,20 @@ void setRecallSpeedVISCA(int value) {
   gVISCARecallSpeed = value;
 }
 
-// VISCA (or at least PTZOptics) allows a range of 1 to 24.  This maps those into speeds.
-// These speeds are just sort of arbitrary mappings.
+/**
+ * Returns the duration that a recall should take based on either the current tally state
+ * or the speed set via VISCA.
+ */
 double currentRecallTime(void) {
+  // VISCA (or at least PTZOptics) allows a range of 1 to 24.  This maps those into speeds.
+  // These speeds are just sort of arbitrary mappings.
   int recallSpeed = gRecallSpeedSet ? gVISCARecallSpeed : getVISCAZoomSpeedFromTallyState();
 
   // Slowest speed is 1, which maps to 30 seconds.
   // Fastest speed is 24, which maps to 2 seconds.
-
+  //
+  // From there, we compute an equation to find the other values.
+  //
   // k - 24n = 2
   // k - 1n = 30
   // ---------------
@@ -1744,8 +1961,10 @@ double currentRecallTime(void) {
          duration;
 }
 
+
 #pragma mark - Calibration
 
+// Computes a map between motor speed and encoder positions per second for each axis.
 void do_calibration(void) {
   int localDebug = 0;
   int64_t lastPosition[NUM_AXES];
@@ -1761,15 +1980,16 @@ void do_calibration(void) {
 
   if (!gCalibrationModeQuick) {
     if (localDebug) {
-      // This happened earlier, but log it.
+      // This technically happened a bit earlier (before module initialization), but log it
+      // onscreen now so that the user will know.
       fprintf(stderr, "Resetting metrics.\n");
     }
 
     if (localDebug) {
-      fprintf(stderr, "Waiting for the sytem to stabilize.\n");
+      fprintf(stderr, "Waiting for the system to stabilize.\n");
     }
 
-    // Wait a whole second to ensure everything is up and running.
+    // Wait two seconds to ensure everything is up and running.
     usleep(2000000);
 
     for (axis_identifier_t axis = axis_identifier_pan; axis <= axis_identifier_tilt; axis++) {
@@ -1860,6 +2080,9 @@ void do_calibration(void) {
     setConfigKeyBool(kPanMotorReversedKey, lastMoveWasPositive[axis_identifier_pan]);
     setConfigKeyBool(kTiltMotorReversedKey, lastMoveWasPositive[axis_identifier_tilt]);
 
+    // Similarly, if the last move (which should have resulted in a negative change to the
+    // encoder position) increased the encoder position, then the encoder for that axis
+    // is backwards.
     setConfigKeyBool(kPanEncoderReversedKey, lastMoveWasPositiveAtEncoder[axis_identifier_pan]);
     setConfigKeyBool(kTiltEncoderReversedKey, lastMoveWasPositiveAtEncoder[axis_identifier_tilt]);
 
@@ -2380,7 +2603,7 @@ void setTricasterIP(char *TricasterIP) {
 
 #pragma mark - Tests
 
-void run_startup_tests(void) {
+void runStartupTests(void) {
   char *bogusValue = getConfigKey("nonexistentKey");
   assert(bogusValue == NULL);
 
@@ -2455,5 +2678,4 @@ void run_startup_tests(void) {
   for (int i = 0; i < (sizeof(source100Values) / sizeof(source100Values[0])); i++) {
     assert(scaleSpeed(-source100Values[i], 100, maxSpeed, translatedData) == -expectedValues[i]);
   }
-
 }
