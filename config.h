@@ -31,10 +31,10 @@
 #define USE_PANASONIC_TALLY_SOURCE 0
 
 /** Use a Tricaster as the tally source.  Not implemented. */
-#define USE_TRICASTER_TALLY_SOURCE 0
+#define USE_TRICASTER_TALLY_SOURCE 1
 
 /** Use OBS as the tally source.  Not implemented. */
-#define USE_OBS_TALLY_SOURCE 1
+#define USE_OBS_TALLY_SOURCE 0
 
 /**
  * Use this software as the source of truth, rather than monitoring

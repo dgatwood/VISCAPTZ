@@ -1,6 +1,7 @@
 #include "panasonicptz.h"
 
 #include <assert.h>
+#include <curl/curl.h>
 #include <fcntl.h>
 #include <math.h>
 #include <stdbool.h>
@@ -12,48 +13,76 @@
 #include <termios.h>
 #include <unistd.h>
 
-#include <curl/curl.h>
-
 #include "main.h"
 #include "constants.h"
 
 
-#define FREEMULTI(array) freeMulti(array, sizeof(array) / sizeof(array[0]))
+#pragma mark - Data types
 
-#pragma mark URL support
- 
+/** A sized buffer for passing around data from libcurl. */
 typedef struct {
   char *data;
   size_t len;
 } curl_buffer_t;
 
-static bool pana_enable_debugging = false;
 
+#pragma mark - Function prototypes
+
+#define FREEMULTI(array) freeMulti(array, sizeof(array) / sizeof(array[0]))
+void freeMulti(char **array, ssize_t count);
+ 
 char *panaIntString(uint64_t value, int digits, bool hex);
+
 void freeURLBuffer(curl_buffer_t *buffer);
 curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle);
 static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChunks, void *userp);
+
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix);
 
+void runPanasonicTests(void);
+
+
+#pragma mark - Global variables
+
+/** If true, enables extra debugging. */
+static bool pana_enable_debugging = false;
+
+/** The last zoom speed that was set. */
+static int64_t gLastZoomSpeed = 0;
+
+/** The IP address of the camera. */
+static char *g_cameraIPAddr = NULL;
+
 #if USE_PANASONIC_PTZ
-  int64_t *pana_zoom_data = NULL;
-  int32_t *pana_zoom_scaled_data = NULL;
+  /** The zoom calibration data in raw form (positions per second for each speed). */
+  int64_t *panasonicZoomCalibrationData = NULL;
+
+  /** The zoom calibration data in core-scaled form (1000 * value / max_value). */
+  int32_t *panasonicScaledZoomCalibrationData = NULL;
 
   #if !PANASONIC_PTZ_ZOOM_ONLY
+    /** The pan calibration data in raw form (positions per second for each speed). */
     int64_t *pana_pan_data = NULL;
+
+    /** The pan calibration data in core-scaled form (1000 * value / max_value). */
     int32_t *pana_pan_scaled_data = NULL;
+
+    /** The pan calibration data in raw form (positions per second for each speed). */
     int64_t *pana_tilt_data = NULL;
+
+    /** The tilt calibration data in core-scaled form (1000 * value / max_value). */
     int32_t *pana_tilt_scaled_data = NULL;
+
   #endif  // !PANASONIC_PTZ_ZOOM_ONLY
 #endif  // USE_PANASONIC_PTZ
 
-#pragma mark - Panasonic implementation
 
-static char *g_cameraIPAddr = NULL;
+#pragma mark - Panasonic module implementation
 
-void runPanasonicTests(void);
-
+// Public function.  Docs in header.
+//
+// Initializes the module.
 bool panaModuleInit(void) {
     runPanasonicTests();
 
@@ -69,19 +98,22 @@ bool panaModuleInit(void) {
     return panaModuleReload();
 }
 
+// Public function.  Docs in header.
+//
+// Reinitializes the module after calibration.
 bool panaModuleReload(void) {
   #if USE_PANASONIC_PTZ
     int maxSpeed = 0;
     bool localDebug = false;
-    pana_zoom_data =
+    panasonicZoomCalibrationData =
         readCalibrationDataForAxis(axis_identifier_zoom, &maxSpeed);
     if (maxSpeed == ZOOM_SCALE_HARDWARE) {
-        pana_zoom_scaled_data =
-            convertSpeedValues(pana_zoom_data, ZOOM_SCALE_HARDWARE);
+        panasonicScaledZoomCalibrationData =
+            convertSpeedValues(panasonicZoomCalibrationData, ZOOM_SCALE_HARDWARE);
         if (localDebug) {
           for (int i=0;i<ZOOM_SCALE_HARDWARE;i++) {
-            fprintf(stderr, "%d: raw: %" PRId64 "\n", i, pana_zoom_data[i]);
-            fprintf(stderr, "%d: scaled: %d\n", i, pana_zoom_scaled_data[i]);
+            fprintf(stderr, "%d: raw: %" PRId64 "\n", i, panasonicZoomCalibrationData[i]);
+            fprintf(stderr, "%d: scaled: %d\n", i, panasonicScaledZoomCalibrationData[i]);
           }
         }
     } else {
@@ -108,11 +140,17 @@ bool panaModuleReload(void) {
   return true;
 }
 
+// Public function.  Docs in header.
+//
+// Tears down the module.
 bool panaModuleTeardown(void) {
     curl_global_cleanup();
     return true;
 }
 
+// Public function.  Docs in header.
+//
+// Sets the camera's IP address.
 bool panaSetIPAddress(char *address) {
   if (g_cameraIPAddr != NULL) {
     free(g_cameraIPAddr);
@@ -121,6 +159,7 @@ bool panaSetIPAddress(char *address) {
   return true;
 }
 
+/** Returns the number of characters required to represent the specified value in hexadecimal. */
 int hexDigits(uint64_t value) {
   int digits = 1;
   value = value >> 4;
@@ -131,6 +170,7 @@ int hexDigits(uint64_t value) {
   return digits;
 }
 
+/** Returns the number of characters required to represent the specified value in base 10. */
 int decDigits(uint64_t value) {
   int digits = 1;
   value = value / 10;
@@ -141,6 +181,11 @@ int decDigits(uint64_t value) {
   return digits;
 }
 
+/**
+ * Returns a string containing the provided number, zero-padded to have the specified
+ * number of digits.  If hex is true, the result is in base 16 (but with no leading 0x).
+ * Otherwise, the result is in base 10.
+ */
 char *panaIntString(uint64_t value, int digits, bool hex) {
     int actualDigits = hex ? hexDigits(value) : decDigits(value);
     ssize_t length = MAX(digits, actualDigits);
@@ -154,6 +199,9 @@ char *panaIntString(uint64_t value, int digits, bool hex) {
     return str;
 }
 
+/**
+ * Frees each string in an array of the specified length.
+ */
 void freeMulti(char **array, ssize_t count) {
   for (ssize_t i = 0; i < count; i++) {
     free(array[i]);
@@ -161,6 +209,10 @@ void freeMulti(char **array, ssize_t count) {
 }
 
 #if !PANASONIC_PTZ_ZOOM_ONLY
+
+// Public function.  Docs in header.
+//
+// Sets the pan and tilt speed in core scale or hardware scale (if isRaw is true).
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
     int scaledPanSpeed =
         isRaw ? panSpeed : scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
@@ -183,6 +235,9 @@ bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
     return retval;
 }
 
+// Public function.  Docs in header.
+//
+// Moves the camera to the specified pan and tilt position.
 bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
                             int64_t tiltPosition, int64_t tiltSpeed) {
     // Panasonic's documentation makes no sense, so this is probably wrong,
@@ -208,6 +263,9 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
 }
 #endif
 
+// Public function.  Docs in header.
+//
+// Moves the camera to the specified zoom position.
 bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
     char *value = panaIntString(position, 3, true);
     char *response = sendCommand("ptz", "#AXZ", &value, 1, "axz");
@@ -220,8 +278,20 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
     return false;
 }
 
-// Sends the command, strips the specified prefix from the response, and returns it as a
-// newly allocated string.
+/**
+ * Sends the specified command to a Panasonic camera.
+ *
+ * @param group          The command group (CGI script name), typically "ptz" or "cam".
+ * @param command        The command code.
+ * @param values         An array of string values to concatenate onto the command.
+ * @param numValues      The size of the additional values array.
+ * @param responsePrefix The expected prefix for the response.
+ *
+ * @result
+ *     Returns the response with the response prefix stripped from the beginning, and
+ *     returns it as a newly allocated string.  This code prints a warning if the
+ *     expected prefix is not present.
+ */
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix) {
     CURL *curlQueryHandle = curl_easy_init();
@@ -278,21 +348,25 @@ char *sendCommand(const char *group, const char *command, char *values[],
     return retval;
 }
 
-static int64_t last_zoom_speed = 0;
-
+// Public function.  Docs in header.
+//
+// Returns the camera's most recent zoom speed (for debugging only).
 int64_t panaGetZoomSpeed(void) {
     // Just return the last cached value.  The camera doesn't provide
     // a way to query this.
-    return last_zoom_speed;
+    return gLastZoomSpeed;
 }
 
+// Public function.  Docs in header.
+//
+// Sets the camera's zoom speed.
 bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     bool localDebug = false;
-    last_zoom_speed = speed;
+    gLastZoomSpeed = speed;
 
     int intSpeed =
         isRaw ? (speed + 50) : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE,
-                                          pana_zoom_scaled_data) + 50;
+                                          panasonicScaledZoomCalibrationData) + 50;
     char *intSpeedString = panaIntString(intSpeed, 2, false);
 
     if (localDebug) {
@@ -311,6 +385,9 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     return retval;
 }
 
+// Public function.  Docs in header.
+//
+// Gets the camera's current pan and tilt position.
 bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_pan_position = 0;
@@ -330,6 +407,9 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
     return retval;
 }
 
+// Public function.  Docs in header.
+//
+// Gets the camera's current zoom position.
 int64_t panaGetZoomPosition(void) {
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_zoom_position = 0;
@@ -344,6 +424,9 @@ int64_t panaGetZoomPosition(void) {
     return last_zoom_position;
 }
 
+// Public function.  Docs in header.
+//
+// Returns the camera's current tally light state.
 int panaGetTallyState(void) {
     bool localDebug = pana_enable_debugging || false;
     static int g_last_tally_state = 0;
@@ -375,6 +458,9 @@ int panaGetTallyState(void) {
     return g_last_tally_state;
 }
 
+// Public function.  Docs in header.
+//
+// Sets the camera's tally light state.
 bool panaSetTallyState(int tallyState) {
 
     if (pana_enable_debugging) {
@@ -407,8 +493,10 @@ bool panaSetTallyState(int tallyState) {
     return retval;
 }
 
+
 #pragma mark - URL support
 
+/** Fetches the provided URL with the provided handle and returns the data in a buffer. */
 curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
   bool localDebug = false;
   curl_buffer_t *chunk = malloc(sizeof(curl_buffer_t));;
@@ -431,11 +519,13 @@ curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
   return chunk;
 }
 
+/** Frees a curl_buffer_t, including the data inside it. */
 void freeURLBuffer(curl_buffer_t *buffer) {
   free(buffer->data);
   free(buffer);
 }
 
+/** Curl callback that accumulates data in an in-memory buffer. */
 static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChunks, void *userp)
 {
   size_t totalSize = chunkSize * nChunks;
@@ -455,8 +545,10 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
   return totalSize;
 }
 
+
 #pragma mark - Calibration
 
+/** Polls the zoom position 5x per second until it stops for at least a second. */
 void waitForZoomStop(void) {
   bool localDebug = false;
   int64_t lastPosition = panaGetZoomPosition();
@@ -484,6 +576,10 @@ void waitForZoomStop(void) {
   }
 }
 
+// Public function.  Docs in header.
+//
+// Creates speed tables indicating how fast the zoom axis moves at various
+// speeds (in positions per second).
 void panaModuleCalibrate(void) {
   bool localDebug = false;
 
@@ -516,6 +612,9 @@ void panaModuleCalibrate(void) {
   writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE);
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of pan positions per second at the camera's slowest speed.
 int64_t panaMinimumPanPositionsPerSecond(void) {
   #if !PANASONIC_PTZ_ZOOM_ONLY
     return minimumPositionsPerSecondForData(pana_pan_data, PAN_TILT_SCALE_HARDWARE);
@@ -523,6 +622,9 @@ int64_t panaMinimumPanPositionsPerSecond(void) {
   return 0;
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of tilt positions per second at the camera's slowest speed.
 int64_t panaMinimumTiltPositionsPerSecond(void) {
   #if !PANASONIC_PTZ_ZOOM_ONLY
     return minimumPositionsPerSecondForData(pana_tilt_data, PAN_TILT_SCALE_HARDWARE);
@@ -530,11 +632,17 @@ int64_t panaMinimumTiltPositionsPerSecond(void) {
   return 0;
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of zoom positions per second at the camera's slowest speed.
 int64_t panaMinimumZoomPositionsPerSecond(void) {
-  return minimumPositionsPerSecondForData(pana_zoom_data, ZOOM_SCALE_HARDWARE);
+  return minimumPositionsPerSecondForData(panasonicZoomCalibrationData, ZOOM_SCALE_HARDWARE);
   return 0;
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of pan positions per second at the camera's fastest speed.
 int64_t panaMaximumPanPositionsPerSecond(void) {
   #if !PANASONIC_PTZ_ZOOM_ONLY
     return pana_pan_data[PAN_TILT_SCALE_HARDWARE];
@@ -542,6 +650,9 @@ int64_t panaMaximumPanPositionsPerSecond(void) {
   return 0;
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of tilt positions per second at the camera's fastest speed.
 int64_t panaMaximumTiltPositionsPerSecond(void) {
   #if !PANASONIC_PTZ_ZOOM_ONLY
     return pana_tilt_data[PAN_TILT_SCALE_HARDWARE];
@@ -549,11 +660,15 @@ int64_t panaMaximumTiltPositionsPerSecond(void) {
   return 0;
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of zoom positions per second at the camera's fastest speed.
 int64_t panaMaximumZoomPositionsPerSecond(void) {
-  return pana_zoom_data[ZOOM_SCALE_HARDWARE];
+  return panasonicZoomCalibrationData[ZOOM_SCALE_HARDWARE];
   return 0;
 }
 
+/** Runs some basic tests of miscellaneous routines. */
 void runPanasonicTests(void) {
   fprintf(stderr, "Running Panasonic module tests.\n");
 

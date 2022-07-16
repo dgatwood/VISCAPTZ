@@ -198,27 +198,32 @@ bool obsModuleInit(void) {
 #endif
 
 void runOBSTests(void) {
-fprintf(stderr, "Running OBS tests.\n");
 
-  char *testString = "Foo|Bar|Baz";
-  char **resultArray = NULL;
-  int count = 0;
-  splitSourceNames(testString, &resultArray, &count);
+  #if USE_OBS_TALLY_SOURCE
 
-  assert(count == 3);
-  assert(!strcmp(resultArray[0], "Foo"));
-  assert(!strcmp(resultArray[1], "Bar"));
-  assert(!strcmp(resultArray[2], "Baz"));
+    fprintf(stderr, "Running OBS tests.\n");
 
-  assert(isMonitoredScene("Foo", resultArray, count));
-  assert(isMonitoredScene("Bar", resultArray, count));
-  assert(isMonitoredScene("Baz", resultArray, count));
-  assert(!isMonitoredScene("Bat", resultArray, count));
+    char *testString = "Foo|Bar|Baz";
+    char **resultArray = NULL;
+    int count = 0;
+    splitSourceNames(testString, &resultArray, &count);
 
-  for (int i = 0; i < count; i++) {
-    free((void *)resultArray[i]);
-  }
-  free((void *)resultArray);
+    assert(count == 3);
+    assert(!strcmp(resultArray[0], "Foo"));
+    assert(!strcmp(resultArray[1], "Bar"));
+    assert(!strcmp(resultArray[2], "Baz"));
 
-fprintf(stderr, "Done.\n");
+    assert(isMonitoredScene("Foo", resultArray, count));
+    assert(isMonitoredScene("Bar", resultArray, count));
+    assert(isMonitoredScene("Baz", resultArray, count));
+    assert(!isMonitoredScene("Bat", resultArray, count));
+
+    for (int i = 0; i < count; i++) {
+      free((void *)resultArray[i]);
+    }
+    free((void *)resultArray);
+
+    fprintf(stderr, "Done.\n");
+
+  #endif
 }

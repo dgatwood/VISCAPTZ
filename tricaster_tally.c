@@ -29,6 +29,9 @@ void handleTag(char *tag);
 void *runTricasterTallyThread(void *argIgnored);
 void teardown(int sock);
 
+// Public function.  Docs in header.
+//
+// Initializes the Tricaster tally module.
 bool tricasterModuleInit(void) {
   #if USE_TRICASTER_TALLY_SOURCE
     tally_source_name = getConfigKey(kTallySourceName);
@@ -51,11 +54,16 @@ bool tricasterModuleInit(void) {
   return true;
 }
 
+// Public function.  Docs in header.
+//
+// Returns the most recently retrieved tally light state.
 tallyState tricaster_getTallyState(void) {
-  return kTallyStateOff;
+  return gTricasterTallyState;
 }
 
 #if USE_TRICASTER_TALLY_SOURCE
+
+  /** The main loop of the Tricaster tally light monitoring thread. */
   void *runTricasterTallyThread(void *argIgnored) {
     // Connect socket to TALLY_IP port 5951
     while (true) {
@@ -86,7 +94,10 @@ tallyState tricaster_getTallyState(void) {
     return NULL;
   }
 
-  // Returns when anything goes wrong.
+  /**
+   * Handles source tally change messages on a Tricaster socket continuously until the
+   * connection fails.
+   */
   void handleResponses(int sock) {
     int flags = fcntl(sock, F_GETFL);
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
@@ -121,7 +132,7 @@ tallyState tricaster_getTallyState(void) {
   // <shortcut_state name="program_tally" value="INPUT1|BFR2|DDR3" type="" sender="" />
   // <shortcut_state name="preview_tally" value="INPUT7" type="" sender="" />
   // </shortcut_states>
-
+  /** Handles a single tally data response from Tricaster. */
   void handleResponse(char *buf, ssize_t length) {
     char *pos = buf;
 
@@ -143,6 +154,7 @@ tallyState tricaster_getTallyState(void) {
     }
   }
 
+  /** Posts tally state changes to the camera, if applicable, and updates the internal state. */
   void setTallyStateFromTricaster(tallyState newState) {
     gTricasterTallyState = newState;
     #ifdef SET_TALLY_STATE
@@ -153,6 +165,7 @@ tallyState tricaster_getTallyState(void) {
 
   // <shortcut_state name="program_tally" value="INPUT1|BFR2|DDR3" type="" sender="" />
   // <shortcut_state name="preview_tally" value="INPUT7" type="" sender="" />
+  /** Processes a single XML tag looking for tally information. */
   void handleTag(char *tag) {
     bool setProgram = (strstr(tag, "name=\"program_tally\"") != NULL);
     bool setPreview = (strstr(tag, "name=\"preview_tally\"") != NULL);
@@ -198,6 +211,7 @@ tallyState tricaster_getTallyState(void) {
     }
   }
 
+  /** Unregisters the active tally state change subscription and closes the Tricaster socket. */
   void teardown(int sock) {
     const char *endCommand = "<unregister name=\"NTK_states\"/>\n";
     write(sock, endCommand, strlen(endCommand));
