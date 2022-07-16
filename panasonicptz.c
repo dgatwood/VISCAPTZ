@@ -1,5 +1,6 @@
 #include "panasonicptz.h"
 
+#include <assert.h>
 #include <fcntl.h>
 #include <math.h>
 #include <stdbool.h>
@@ -51,16 +52,10 @@ char *sendCommand(const char *group, const char *command, char *values[],
 
 static char *g_cameraIPAddr = NULL;
 
-bool panaModuleInit(void) {
-    // fprintf(stderr, "0x444(2) : %s\n", panaIntString(0x444, 2, true));
-    // fprintf(stderr, "0x444(3) : %s\n", panaIntString(0x444, 3, true));
-    // fprintf(stderr, "0x444(4) : %s\n", panaIntString(0x444, 4, true));
-    // fprintf(stderr, "0x444(5) : %s\n", panaIntString(0x444, 5, true));
+void runPanasonicTests(void);
 
-    // fprintf(stderr, "333(2) : %s\n", panaIntString(333, 2, false));
-    // fprintf(stderr, "333(3) : %s\n", panaIntString(333, 3, false));
-    // fprintf(stderr, "333(4) : %s\n", panaIntString(333, 4, false));
-    // fprintf(stderr, "333(5) : %s\n", panaIntString(333, 5, false));
+bool panaModuleInit(void) {
+    runPanasonicTests();
 
 #if USE_PANASONIC_PTZ
     if (pana_enable_debugging) fprintf(stderr, "Panasonic module init\n");
@@ -557,4 +552,46 @@ int64_t panaMaximumTiltPositionsPerSecond(void) {
 int64_t panaMaximumZoomPositionsPerSecond(void) {
   return pana_zoom_data[ZOOM_SCALE_HARDWARE];
   return 0;
+}
+
+void runPanasonicTests(void) {
+  fprintf(stderr, "Running Panasonic module tests.\n");
+
+  char *tempValue = panaIntString(0x444, 2, true);
+  assert(!strcmp(tempValue, "444"));
+  free(tempValue);
+
+  tempValue = panaIntString(0x444, 3, true);
+  assert(!strcmp(tempValue, "444"));
+  free(tempValue);
+
+  tempValue = panaIntString(0x444, 3, true);
+  assert(!strcmp(tempValue, "444"));
+  free(tempValue);
+
+  tempValue = panaIntString(0x444, 4, true);
+  assert(!strcmp(tempValue, "0444"));
+  free(tempValue);
+
+  tempValue = panaIntString(0x444, 5, true);
+  assert(!strcmp(tempValue, "00444"));
+  free(tempValue);
+
+  tempValue = panaIntString(333, 2, false);
+  assert(!strcmp(tempValue, "333"));
+  free(tempValue);
+
+  tempValue = panaIntString(333, 3, false);
+  assert(!strcmp(tempValue, "333"));
+  free(tempValue);
+
+  tempValue = panaIntString(333, 4, false);
+  assert(!strcmp(tempValue, "0333"));
+  free(tempValue);
+
+  tempValue = panaIntString(333, 5, false);
+  assert(!strcmp(tempValue, "00333"));
+  free(tempValue);
+
+  fprintf(stderr, "Done.\n");
 }

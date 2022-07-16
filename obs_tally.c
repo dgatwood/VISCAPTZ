@@ -215,5 +215,10 @@ fprintf(stderr, "Running OBS tests.\n");
   assert(isMonitoredScene("Baz", resultArray, count));
   assert(!isMonitoredScene("Bat", resultArray, count));
 
+  for (int i = 0; i < count; i++) {
+    free((void *)resultArray[i]);
+  }
+  free((void *)resultArray);
+
 fprintf(stderr, "Done.\n");
 }
