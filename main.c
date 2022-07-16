@@ -489,7 +489,7 @@ int main(int argc, char *argv[]) {
 #endif
     }
   }
-#if USE_CANBUS
+#if USE_CANBUS && ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
   if (argc >= 4) {
     if (!strcmp(argv[1], "--reassign")) {
       int oldCANBusID = atoi(argv[2]);
@@ -2434,6 +2434,9 @@ const char *calibrationDataKeyNameForAxis(axis_identifier_t axis) {
   }
 }
 
+// Public function.  Docs in header.
+//
+// Reads calibration data from the configuration file.
 int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
                                     int *maxSpeed) {
   char *rawCalibrationData = getConfigKey(calibrationDataKeyNameForAxis(axis));
@@ -2475,6 +2478,9 @@ int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
   return data;
 }
 
+// Public function.  Docs in header.
+//
+// Writes calibration data to the configuration file.
 bool writeCalibrationDataForAxis(axis_identifier_t axis, int64_t *calibrationData, int maxSpeed) {
   char *stringData = NULL;
   asprintf(&stringData, "%s", "");
@@ -2491,6 +2497,7 @@ bool writeCalibrationDataForAxis(axis_identifier_t axis, int64_t *calibrationDat
 
 #pragma mark - Pan and tilt direction information.
 
+/** Purges all calibration data from the configuration file. */
 bool resetCalibration(void) {
   bool retval = true;
   retval = removeConfigKey(kPanMotorReversedKey) && retval;

@@ -150,21 +150,36 @@ Then just `make` and `./viscaptz`.
 Tally and Camera IP Configuration:
 ----------------------------------
 
-If you are using OBS as your tally source, you must configure the WebSocket URL
-and, if necessary, a password.  To do this, type:
+OBS or
+Tricaster:
+    If you are using EITHER a Tricaster or OBS as your tally source, you must
+    specify the source or scene name to monitor.  To do this, type:
 
-    ./viscaptz --setobsurl "websocket URL"   # e.g. ws://127.0.0.1:4455/
-    ./viscaptz --setobspass "thePassword"
+    ./viscaptz --settallysourcename "sourceName"
 
-If you are using a Tricaster switcher as your tally source, you must store its
-IP address.  To do this, type:
+    Because OBS scenes aren't always mapped 1:1 with sources, the OBS tally
+    source lets you provide muliple scene names separated by a vertical pipe
+    character (|).
 
-    ./viscaptz --settricasterip "IP address"
+OBS:
+    If you are using OBS as your tally source, you must also configure the
+    WebSocket URL and, if necessary, a password.  To do this, type:
 
-If you are using a Panasonic IP camera's pan, tilt, or zoom control, you must
-store its IP address.  To do this type:
+        ./viscaptz --setobsurl "websocket URL"   # e.g. ws://127.0.0.1:4455/
+        ./viscaptz --setobspass "thePassword"
 
-    ./viscaptz --setcameraip "IP address"
+Tricaster:
+    If you are using a Tricaster switcher as your tally source, you must also
+    provide its IP address.  To do this, type:
+
+        ./viscaptz --settricasterip "IP address"
+
+Panasonic camera:
+    If you are using a Panasonic IP camera's pan, tilt, or zoom control or
+    are using it as a tally source, you must provide its IP address.  To do
+    this, type:
+
+        ./viscaptz --setcameraip "IP address"
 
 
 CANBus Configuration:

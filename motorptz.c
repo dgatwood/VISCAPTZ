@@ -44,8 +44,18 @@
 
 static bool motor_enable_debugging = false;
 
-
-#pragma mark - Motor pan/tilt implementation
+#if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
+  #if USE_CANBUS
+    int motorOpenCANSock(void);
+    bool updatePositionsCANBus(int sock);
+    void resetCenterPositionsCANBus(int sock);
+    void handleCANFrame(struct can_frame *frame);
+    bool sendCANRequestFrame(int sock, uint8_t deviceID);
+  #else
+    void updatePositionsSerial(int pan_fd, int tilt_fd);
+    void resetCenterPositionsSerial(int tilt_fd, int pan_fd);
+  #endif
+#endif
 
 pthread_t motor_control_thread;
 pthread_t position_monitor_thread;
@@ -67,6 +77,12 @@ static volatile bool g_pan_tilt_raw = false;
   int32_t *motor_tilt_scaled_data = NULL;
 #endif  // USE_MOTOR_PAN_AND_TILT
 
+
+#pragma mark - Motor module initialization
+
+// Public function.  Docs in header.
+//
+// Initializes the motor control/encoder module.
 bool motorModuleInit(void) {
     bool localDebug = motor_enable_debugging || false;
     if (localDebug) fprintf(stderr, "Initializing motor module\n");
@@ -95,6 +111,9 @@ bool motorModuleInit(void) {
   return motorModuleReload();
 }
 
+// Public function.  Docs in header.
+//
+// Reinitializes the motor control/encoder module after calibration.
 bool motorModuleReload(void) {
   #if USE_MOTOR_PAN_AND_TILT
     int maxSpeed = 0;
@@ -115,6 +134,18 @@ bool motorModuleReload(void) {
   return true;
 }
 
+
+#pragma mark - Motor pan/tilt implementation
+
+// Public function.  Docs in header.
+//
+// Sets the pan and tilt speeds.  The actual speed setting is handled by
+// the motor control thread (runMotorControlThread).  This just updates
+// the global variables that control the speed.
+//
+// This design ensures that the main control code never gets blocked by
+// the hardware drivers and ensures that all changes to hardware speed
+// happen in a single thread.
 bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
   g_pan_tilt_raw = isRaw;
   g_pan_speed = panSpeed;
@@ -122,6 +153,15 @@ bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
   return true;
 }
 
+// Gets the pan and tilt positions from the encoders.  The code that
+// actually obtains these values from the encoder hardware is part of
+// the position monitor thread (runPositionMonitorThread).  This code
+// just retrieves the values previously stored into global variables
+// by the position monitor thread.
+//
+// This design ensures that the main control code never gets blocked
+// by the hardware drivers, and ensures that the encoders don't get
+// confused by requests from multiple threads overlapping.
 bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
   if (panPosition != NULL) {
     *panPosition = g_last_pan_position;
@@ -132,84 +172,16 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
   return true;
 }
 
+
 #pragma mark - Position monitor thread
 
 #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
-#if USE_CANBUS
-int motorOpenCANSock(void) {
 
-    system("sudo ifconfig can0 down");
-    system("sudo ip link set can0 type can bitrate 500000");
-    system("sudo ifconfig can0 up");
-
-    bool localDebug = false;
-    if (localDebug) fprintf(stderr, "Opening CANBus socket... ");
-    int sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
-    if (sock < 0) {
-        perror("socket PF_CAN failed");
-        return 1;
-    }
-    
-    struct ifreq interfaceRequest;
-    strcpy(interfaceRequest.ifr_name, "can0");
-    int retval = ioctl(sock, SIOCGIFINDEX, &interfaceRequest);
-    if (retval < 0) {
-        perror("ioctl failed");
-        return -1;
-    }
-
-    struct sockaddr_can sockaddr;
-    sockaddr.can_family = AF_CAN;
-    sockaddr.can_ifindex = interfaceRequest.ifr_ifindex;
-    retval = bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
-    if (retval < 0) {
-        perror("bind failed");
-        return -1;
-    }
-    
-    if (localDebug) fprintf(stderr, "done\n");
-    return sock;
-}
-
-bool updatePositionsCANBus(int sock);
-void resetCenterPositionsCANBus(int sock);
-
-#else  // !USE_CANBUS
-
-int motorOpenSerialDev(char *path) {
-  int fd = open(path, O_RDWR);
-
-  if (fd < 0) return fd;
-
-  struct termios serial_port_settings;
-  int retval = tcgetattr(fd, &serial_port_settings);
-  if (retval < 0) {
-    perror("Failed to get termios structure");
-    exit(2);
-  }
-  retval = cfsetospeed(&serial_port_settings, B9600);
-  if (retval < 0) {
-    perror("Failed to set 9600 output baud rate");
-    exit(3);
-  }
-  retval = cfsetispeed(&serial_port_settings, B9600);
-  if (retval < 0) {
-    perror("Failed to set 9600 input baud rate");
-    exit(4);
-  }
-  retval = tcsetattr(fd, TCSANOW, &serial_port_settings);
-  if (retval < 0) {
-    perror("Failed to set serial attributes");
-    exit(5);
-  }
-  return fd;
-}
-
-void updatePositionsSerial(int pan_fd, int tilt_fd);
-void resetCenterPositionsSerial(int tilt_fd, int pan_fd);
-
-#endif  // USE_CANBUS
-
+/**
+ * The main loop of the position monitor thread.
+ *
+ * This function polls the encoder hardware 100x per second.
+ */
 void *runPositionMonitorThread(void *argIgnored) {
 #if ENABLE_HARDWARE
     bool localDebug = false;
@@ -266,10 +238,48 @@ void *runPositionMonitorThread(void *argIgnored) {
   return NULL;
 }
 
-#if USE_CANBUS
-void handleCANFrame(struct can_frame *frame);
-bool sendCANRequestFrame(int sock, uint8_t deviceID);
 
+#pragma mark - CANBus-specific encoder implementation
+
+#if USE_CANBUS
+
+/** Opens a CANBus socket for talking to the position encoders. */
+int motorOpenCANSock(void) {
+
+    system("sudo ifconfig can0 down");
+    system("sudo ip link set can0 type can bitrate 500000");
+    system("sudo ifconfig can0 up");
+
+    bool localDebug = false;
+    if (localDebug) fprintf(stderr, "Opening CANBus socket... ");
+    int sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+    if (sock < 0) {
+        perror("socket PF_CAN failed");
+        return 1;
+    }
+    
+    struct ifreq interfaceRequest;
+    strcpy(interfaceRequest.ifr_name, "can0");
+    int retval = ioctl(sock, SIOCGIFINDEX, &interfaceRequest);
+    if (retval < 0) {
+        perror("ioctl failed");
+        return -1;
+    }
+
+    struct sockaddr_can sockaddr;
+    sockaddr.can_family = AF_CAN;
+    sockaddr.can_ifindex = interfaceRequest.ifr_ifindex;
+    retval = bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
+    if (retval < 0) {
+        perror("bind failed");
+        return -1;
+    }
+    
+    if (localDebug) fprintf(stderr, "done\n");
+    return sock;
+}
+
+/** Updates the current encoder positions (CANBus version). */
 bool updatePositionsCANBus(int sock) {
     bool localDebug = false;
     bool gotRead = false;
@@ -318,7 +328,8 @@ bool updatePositionsCANBus(int sock) {
     return true;
 }
 
-struct can_frame canBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data) {
+/** Creates a CANBus frame with the specified ID, DLC (length), and fixed-length data array. */
+struct can_frame CANBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data) {
   struct can_frame message;
   memset(&message, 0, sizeof(struct can_frame));
   message.can_id = can_id;
@@ -327,6 +338,7 @@ struct can_frame canBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data
   return message;
 }
 
+/** Processes a CANBus response from the encoder. */
 void handleCANFrame(struct can_frame *response) {
     bool localDebug = false;
     if (localDebug) fprintf(stderr, "Processing CAN frame.\n");
@@ -350,10 +362,11 @@ void handleCANFrame(struct can_frame *response) {
     }
 }
 
+/** Sends a CANBus position response to the encoder. */
 bool sendCANRequestFrame(int sock, uint8_t deviceID) {
     bool localDebug = false;
     uint8_t data[8] = { 0x04, deviceID, 0x01, 0, 0, 0, 0, 0 };
-    struct can_frame message = canBusFrameMake(deviceID, 4, data);
+    struct can_frame message = CANBusFrameMake(deviceID, 4, data);
 
     if (localDebug) {
         fprintf(stderr, "Writing to socket %d frame %d %d\n", sock, message.can_id, message.can_dlc);
@@ -367,10 +380,17 @@ bool sendCANRequestFrame(int sock, uint8_t deviceID) {
     return true;
 }
 
+// Public function.  Docs in header.
+//
+// Reassigns a CANBus-based encoder to use a new device ID.  This reassignment
+// is permanent until updated.  When you get a new set of encoders, you must
+// reassign one of them, because they typically all start out using the same
+// device ID.  You can do this by connecting a single encoder and the using
+// the --reassign command-line flag.  See the main README for details.
 void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
     int sock = motorOpenCANSock();
     uint8_t data[8] = { 0x04, oldCANBusID, 0x02, newCANBusID, 0, 0, 0, 0 };
-    struct can_frame message = canBusFrameMake(oldCANBusID, 4, data);
+    struct can_frame message = CANBusFrameMake(oldCANBusID, 4, data);
 
     fprintf(stderr, "Reassigning device %d to %d\n", oldCANBusID, newCANBusID);
     if (write(sock, &message, sizeof(message)) == sizeof(message)) {
@@ -379,11 +399,16 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
             if (response.data[0] == 0x4 && response.data[1] == oldCANBusID &&
                 response.data[2] == 0x2 && response.data[3] == 0 &&
                 response.can_id == newCANBusID) {
-                    fprintf(stderr, "Reassignment successful.");
+                    fprintf(stderr, "Reassignment successful.\n");
                     exit(0);
-            } else {
+            } else if (response.data[3] != 0) {
                 fprintf(stderr, "Reassignment failed with error %d\n", response.data[3]);
                 exit(1);
+            } else {
+                // According to the docs, the response should come from the new ID, but.
+                // for some reason, it does not.
+                fprintf(stderr, "Reassignment may have failed (response from wrong ID).\n");
+                exit(0);
             }
         } else {
             fprintf(stderr, "Reassignment failed (socket read).\n");
@@ -394,9 +419,10 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
     }
 }
 
+/** Resets the center position of a single CANBus encoder to the current position. */
 void resetCenterPositionOfCANBusEncoder(int sock, int CANBusID) {
     uint8_t data[8] = { 0x04, CANBusID, 0x0C, 0x01, 0, 0, 0, 0 };
-    struct can_frame message = canBusFrameMake(CANBusID, 4, data);
+    struct can_frame message = CANBusFrameMake(CANBusID, 4, data);
 
     fprintf(stderr, "Setting the midpint of the encoder to the current position.\n");
     if (write(sock, &message, sizeof(message)) == sizeof(message)) {
@@ -419,13 +445,51 @@ void resetCenterPositionOfCANBusEncoder(int sock, int CANBusID) {
     }
 }
 
+/** Resets the center position of the encoders to the current position (CANBus version). */
 void resetCenterPositionsCANBus(int sock) {
   resetCenterPositionOfCANBusEncoder(sock, panCANBusID);
   resetCenterPositionOfCANBusEncoder(sock, tiltCANBusID);
 }
 
 
+#pragma mark - RS485/Modbus-specific encoder implementation
+
 #else  // !USE_CANBUS
+
+/**
+ * Opens a serial device file descriptor for talking to serial/Modbus-based
+ * position encoders.
+ */
+int motorOpenSerialDev(char *path) {
+  int fd = open(path, O_RDWR);
+
+  if (fd < 0) return fd;
+
+  struct termios serial_port_settings;
+  int retval = tcgetattr(fd, &serial_port_settings);
+  if (retval < 0) {
+    perror("Failed to get termios structure");
+    exit(2);
+  }
+  retval = cfsetospeed(&serial_port_settings, B9600);
+  if (retval < 0) {
+    perror("Failed to set 9600 output baud rate");
+    exit(3);
+  }
+  retval = cfsetispeed(&serial_port_settings, B9600);
+  if (retval < 0) {
+    perror("Failed to set 9600 input baud rate");
+    exit(4);
+  }
+  retval = tcsetattr(fd, TCSANOW, &serial_port_settings);
+  if (retval < 0) {
+    perror("Failed to set serial attributes");
+    exit(5);
+  }
+  return fd;
+}
+
+/** Updates the current encoder positions (serial/Modbus version). */
 void updatePositionsSerial(int pan_fd, int tilt_fd) {
     static const uint8_t requestBuf[] =
         { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0a };
@@ -446,6 +510,7 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
     g_last_tilt_position = tilt_position;
 }
 
+/** Resets the center position of the encoders to the current position (serial/Modbus version). */
 void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
     // Register 0x000E: Write 0x0001.  (Function support code 0x06)
     // [Device ID = 1] 06 00 01 00 0E [CRC high] [CRC low]
@@ -465,13 +530,17 @@ void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
 }
 
 #endif  // USE_CANBUS
-#else  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
-void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
-}
 #endif  // ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
+
 
 #pragma mark - Motor control thread
 
+/**
+ * The main loop of the motor control thread.
+ *
+ * This thread is responsible for taking the current pan and tilt speeds
+ * (as set by other modules) and converting them into motor speed commands.
+ */
 void *runMotorControlThread(void *argIgnored) {
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE && ENABLE_HARDWARE)
   bool localDebug = false;
@@ -488,26 +557,39 @@ void *runMotorControlThread(void *argIgnored) {
                          motor_tilt_scaled_data));
 
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
+
+    // Set the pan motor speed.
     if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
     Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
+
+    // Set the tilt motor speed.
     if (localDebug) fprintf(stderr, "Setting motor B speed to %d.\n", scaledTiltSpeed);
     Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
+
     if (localDebug) fprintf(stderr, "Done.\n");
 
 #else  // !(ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
+
     int pan_sign = panEncoderReversed() ? -1 : 1;
     int pan_sign_2 = (g_pan_speed < 0) ? -1 : 1;
 
     int tilt_sign = tiltEncoderReversed() ? -1 : 1;
     int tilt_sign_2 = (g_tilt_speed < 0) ? -1 : 1;
 
-
+    /***************************************************************************
+     * Fake hardware simulates encoder values based on the motor speed.  This  *
+     * allows for some limited testing of recall functions without actual      *
+     * hardware.                                                               *
+     ***************************************************************************/
     g_last_pan_position += 6 * scaledPanSpeed * pan_sign * pan_sign_2 / 100;
     g_last_tilt_position += 6 * scaledTiltSpeed * tilt_sign * tilt_sign_2 / 100;
 
 #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
 #if ENABLE_STATUS_DEBUGGING || !ENABLE_HARDWARE
+    // If hardware is disabled or if we have enabled status debugging, print
+    // the current state of the motors (including zoom position and speed) here.
+
     int64_t zoom_speed = GET_ZOOM_SPEED();
     int64_t zoom_position = GET_ZOOM_POSITION();
 
@@ -530,8 +612,13 @@ void *runMotorControlThread(void *argIgnored) {
   return NULL;
 }
 
+
 #pragma mark - Calibration
 
+// Public function.  Docs in header.
+//
+// Performs a calibration run on the pan and tilt hardware to obtain their actual speed
+// (in encoder positions per second) at each speed (duty cycle).
 void motorModuleCalibrate(void) {
   int64_t leftLimit = leftPanLimit();
   int64_t rightLimit = rightPanLimit();
@@ -551,18 +638,34 @@ void motorModuleCalibrate(void) {
   fprintf(stderr, "Done calibrating motors.\n");
 }
 
+// Public function.  Docs in header.
+//
+// Returns the minimum nonzero number of positions per second that the pan axis moves
+// at its slowest non-stalled speed.
 int64_t motorMinimumPanPositionsPerSecond(void) {
   return minimumPositionsPerSecondForData(motor_pan_data, ZOOM_SCALE_HARDWARE);
 }
 
+// Public function.  Docs in header.
+//
+// Returns the minimum nonzero number of positions per second that the tilt axis moves
+// at its slowest non-stalled speed.
 int64_t motorMinimumTiltPositionsPerSecond(void) {
   return minimumPositionsPerSecondForData(motor_tilt_data, ZOOM_SCALE_HARDWARE);
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of positions per second that the pan axis moves at its fastest
+// speed.
 int64_t motorMaximumPanPositionsPerSecond(void) {
   return motor_pan_data[ZOOM_SCALE_HARDWARE];
 }
 
+// Public function.  Docs in header.
+//
+// Returns the number of positions per second that the tilt axis moves at its fastest
+// speed.
 int64_t motorMaximumTiltPositionsPerSecond(void) {
   return motor_tilt_data[ZOOM_SCALE_HARDWARE];
 }

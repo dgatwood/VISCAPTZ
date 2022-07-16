@@ -7,13 +7,23 @@
 /** Reassigns the CANBus encoder at oldCANBusID so that it will be at newCANBusID. */
 void reassign_encoder_device_id(int oldCANBusID, int newCANBusID);
 
-/** Initializes the motor control module (and encoders). */
+/**
+ * Initializes the motor control module (and encoders) and starts motor
+ * control and encoder position monitor thread.
+ */
 bool motorModuleInit(void);
 
 /** Reinitializes the motor control module (and encoders) after calibration. */
 bool motorModuleReload(void);
 
-/** Performs a motor module calibration cycle. */
+/**
+ * Performs a motor module calibration cycle, computing the number of positions
+ * per second at each motor speed in each axis, then computing each of those
+ * values relative to the value at the maximum speed.
+ *
+ * This function uses calibrationDataForMoveAlongAxis to repeatedly move
+ * back and forth at various speeds.
+ */
 void motorModuleCalibrate(void);
 
 /**
@@ -30,30 +40,40 @@ bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);
 /**
  * Gets the current pan and tilt position from the encoders.  The scale is
  * arbitrary and depends on the encoder and gearing.
+ *
+ * @param panPosition Storage for the position of the pan encoder (output parameter)
+ *                    or NULL.
+ * @param panPosition Storage for the position of the pan encoder (output parameter)
+ *                    or NULL.
  */
 bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
 
 /**
  * Returns the number of encoder positions per second that the pan axis moves
- * when operating at its slowest speed.
+ * when operating at its slowest speed.  Returns 0 if no calibration data is
+ * available.
  */
 int64_t motorMinimumPanPositionsPerSecond(void);
 
 /**
  * Returns the number of encoder positions per second that the tilt axis moves
- * when operating at its slowest speed.
+ * when operating at its slowest speed.  Returns 0 if no calibration data is
+ * available.
  */
 int64_t motorMinimumTiltPositionsPerSecond(void);
 
 /**
  * Returns the number of encoder positions per second that the pan axis moves
- * when operating at its fastest speed.
+ * when operating at its fastest non-stalled speed (i.e. the slowest speed
+ * at which the encoder moves at nonzero positions per second).  Returns 0 if
+ * no calibration data is available.
  */
 int64_t motorMaximumPanPositionsPerSecond(void);
 
 /**
  * Returns the number of encoder positions per second that the tilt axis moves
- * when operating at its fastest speed.
+ * when operating at its fastest speed.  Returns 0 if no calibration data is
+ * available.
  */
 int64_t motorMaximumTiltPositionsPerSecond(void);
 

@@ -26,9 +26,29 @@ bool setTallyGreen(void);
 bool setTallyOff(void);
 
 /**
- * Returns an array where position 0 is the number of positions
- * moved in one second at minSpeed, position 1 is at minSpeed + 1,
- * and so on.  The caller is responsible for freeing the array.
+ * Performs calibration for motion on a given axis, computing a
+ * mapping table that tells how many encoder positions the axis
+ * moves in one second at each of the (raw hardware) speed values
+ * from minSpeed through maxSpeed.
+ *
+ * This takes a significant amount of time, and should be performed
+ * only when the hardware changes.
+ *
+ * @param axis          
+ * @param startPosition The leftmost or topmost position or most zoomed
+ *                      out position used during calibration.  The
+ *                      calibration code moves the axis back and forth
+ *                      between this position and endPosition.
+ * @param endPosition   The rightmost or bottommost or most zoomed in
+ *                      position used during calibration.
+ * @param minSpeed      The minimum (hardware-scale speed that should
+ *                      be used during calibration.
+ * @param maxSpeed      The maximum (hardware-scale speed that should
+ *                      be used during calibration.
+ *
+ * @result Returns an array where position 0 is the number of positions
+ *         moved in one second at minSpeed, position 1 is at minSpeed + 1,
+ *         and so on.  The caller is responsible for freeing the array.
  */
 int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                          int64_t startPosition,
@@ -36,11 +56,19 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                          int32_t minSpeed,
                                          int32_t maxSpeed);
 
-/** Reads the calibration data from the configurator. */
+/**
+ * Reads the calibration data for the specified axis from the
+ * configuration file and returns it as an array.  The caller is
+ * responsible for freeing the resulting array.
+ */
 int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
                                     int *maxSpeed);
 
-/** Writes the calibration data to the configurator. */
+/**
+ * Writes the calibration data for the specified axis to the
+ * configuration file.  Returns true if the operation was
+ * successful, else false.
+ */
 bool writeCalibrationDataForAxis(axis_identifier_t axis,
                                  int64_t *calibrationData,
                                  int length);
