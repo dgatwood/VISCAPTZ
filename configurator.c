@@ -3,16 +3,20 @@
 #define ENABLE_CONFIGURATOR_DEBUGGING 0
 
 #include <libgen.h>
+#include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "constants.h"
 #include "configurator.h"
 
 static bool configuratorDebug = false;
 
+// Returns true if the specified line's key portion matches the specified key.
 bool lineMatchesKey(const char *buf, const char *key) {
   size_t keyLength = strlen(key);
   return (strlen(buf) > (keyLength + 1)) &&
@@ -20,6 +24,7 @@ bool lineMatchesKey(const char *buf, const char *key) {
       (buf[keyLength] == '=');
 }
 
+// Returns the value of the specified key as a 64-bit signed integer value.
 int64_t getConfigKeyInteger(const char *key) {
   bool localDebug = configuratorDebug || false;
   char *stringValue = getConfigKey(key);
@@ -37,6 +42,7 @@ int64_t getConfigKeyInteger(const char *key) {
   return intValue;
 }
 
+// Returns the value of the specified key as a Boolean value.
 bool getConfigKeyBool(const char *key) {
   char *stringValue = getConfigKey(key);
   if (stringValue == NULL) {
@@ -50,13 +56,32 @@ bool getConfigKeyBool(const char *key) {
   return boolValue;
 }
 
+// Returns the configuration file path (~/.viscaptz.conf unless overridden).
+const char *getConfigFilePath(void) {
+  #ifdef CONFIG_FILE_PATH
+    return CONFIG_FILE_PATH;
+  #endif
+
+  static char *value = NULL;
+
+  if (value != NULL) {
+    return value;
+  }
+
+  struct passwd *pw = getpwuid(getuid());
+
+  asprintf(&value, "%s/.viscaptz.conf", pw->pw_dir);
+  return value;
+}
+
+// Returns the value of the specified key as a string.
 char *getConfigKey(const char *key) {
   bool localDebug = configuratorDebug || false;
 
-  FILE *fp = fopen(CONFIG_FILE_PATH, "r");
+  FILE *fp = fopen(getConfigFilePath(), "r");
   if (localDebug && fp == NULL) {
     perror("viscaptz");
-    fprintf(stderr, "Could not open file \"%s\" for reading\n", CONFIG_FILE_PATH);
+    fprintf(stderr, "Could not open file \"%s\" for reading\n", getConfigFilePath());
   }
   char *buf = NULL;
   size_t linecapacity = 0;
@@ -95,21 +120,18 @@ char *getConfigKey(const char *key) {
   return NULL;
 }
 
+// Sets the configuration key to the specified string value.
 bool setConfigKey(const char *key, const char *value) {
-  FILE *fp = fopen(CONFIG_FILE_PATH, "r");
+  FILE *fp = fopen(getConfigFilePath(), "r");
   if (!fp) {
     fprintf(stderr, "WARNING: Could not open %s for reading",
-            CONFIG_FILE_PATH);
+            getConfigFilePath());
   }
 
-#ifdef __linux__
-  // Linux dirname, by default, is broken, and modifies its buffer.  (Why!?!)
-  char *junk = NULL;
-  asprintf(&junk, "%s", CONFIG_FILE_PATH);
-  char *directory = dirname(junk);
-#else
-  char *directory = dirname(CONFIG_FILE_PATH);
-#endif
+  // Some dirname implementations modify their buffer.  Be safe.
+  char *configFilePathCopy = NULL;
+  asprintf(&configFilePathCopy, "%s", getConfigFilePath());
+  char *directory = dirname(configFilePathCopy);
 
   char *tempfilename = tempnam(directory, "viscaptz-temp-");
   char *buf = NULL;
@@ -120,9 +142,8 @@ bool setConfigKey(const char *key, const char *value) {
     if (fp) {
       fclose(fp);
     }
-#ifdef __linux__
-    free(junk);
-#endif
+
+    free(configFilePathCopy);
     return false;
   }
 
@@ -133,6 +154,7 @@ bool setConfigKey(const char *key, const char *value) {
     if (lineMatchesKey(buf, key)) {
       // Matching line.
       if (value != NULL) {
+        // Write the new value if it is non-NULL, else treat it as a deletion.
         error = error || (fprintf(fq, "%s=%s\n", key, value) == -1);
       }
       found = true;
@@ -150,24 +172,25 @@ bool setConfigKey(const char *key, const char *value) {
   fclose(fq);
 
   if (!error) {
-    error = error || (rename(tempfilename, CONFIG_FILE_PATH) != 0);
+    error = error || (rename(tempfilename, getConfigFilePath()) != 0);
   }
   free(tempfilename);
   free(buf);
-#ifdef __linux__
-  free(junk);
-#endif
+  free(configFilePathCopy);
   return !error;
 }
 
+// Deletes the specified configuration key.
 bool removeConfigKey(const char *key) {
   return setConfigKey(key, NULL);
 }
 
+// Sets the configuration key to the specified Boolean value.
 bool setConfigKeyBool(const char *key, bool value) {
   return setConfigKey(key, value ? "1" : "0");
 }
 
+// Sets the configuration key to the specified 64-bit signed integer value.
 bool setConfigKeyInteger(const char *key, int64_t value) {
   bool localDebug = configuratorDebug || false;
   char *stringValue = NULL;

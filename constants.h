@@ -8,17 +8,9 @@
 #define USEC_PER_SEC 1000000
 #endif
 
-typedef enum {
-  kDebugModePan = 0x1,
-  kDebugModeTilt = 0x2,
-  kDebugModeZoom = 0x4,
-  kDebugScaling = 0x8,
-  // kDebugLANC = 0x16,  // Unused in RasPi port.
-} debugMode;
-
 // We use the same tally codes as NewTek and Marshall NDI cameras.
-// Program mode is 5, preview mode is 6.
-enum {
+// Program mode is 5.  Preview mode is 6.
+typedef enum {
   kTallyStateOff = 0,
   kTallyStateUnknown1 = 1,
   kTallyStateUnknown2 = 2,
@@ -26,7 +18,7 @@ enum {
   kTallyStateUnknown4 = 4,
   kTallyStateRed = 5,
   kTallyStateGreen = 6
-};
+} tallyState;
 
 #define PAN_SCALE_VISCA   24
 #define TILT_SCALE_VISCA  24
@@ -34,15 +26,41 @@ enum {
 
 #define SCALE_CORE    1000
 
+// Axis identifiers used in various spots throughout the code.
 typedef enum {
   axis_identifier_pan = 0,
   axis_identifier_tilt = 1,
   axis_identifier_zoom = 2,
 } axis_identifier_t;
 
-// Not quite a constant, but used everywhere, and set once in main().
-extern int debugPanAndTilt;
+#define NUM_AXES (axis_identifier_zoom + 1)
+
 
 #include "config.h"
+
+// Configuration keys and macros that are conditionally defined based
+// on config.h.
+
+#if USE_VISCA_TALLY_SOURCE
+  #define GET_TALLY_STATE() VISCA_getTallyState()
+#endif
+
+#if USE_PANASONIC_PTZ
+  extern const char *kCameraIPKey;
+#endif
+
+#if USE_TRICASTER_TALLY_SOURCE
+  extern const char *kTricasterIPKey;
+#endif
+
+#if USE_OBS_TALLY_SOURCE
+  extern const char *kOBSPasswordKey;
+  extern const char *kOBSWebSocketURLKey;
+#endif
+
+#if (USE_OBS_TALLY_SOURCE || USE_TRICASTER_TALLY_SOURCE)
+  #define TALLY_SOURCE_NAME_REQUIRED 1
+  extern const char *kTallySourceName;
+#endif
 
 #endif  // __CONSTANTS_H__
