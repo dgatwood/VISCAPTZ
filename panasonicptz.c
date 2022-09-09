@@ -434,8 +434,8 @@ int panaGetTallyState(void) {
     bool greenState = false;
     if (localDebug) fprintf(stderr, "Fetching RED\n");
 
-    char *redResponse = sendCommand("cam", "QLR", NULL, 0, "TLR:");
-    char *greenResponse = sendCommand("cam", "QLG", NULL, 0, "TLG:");
+    char *redResponse = sendCommand("cam", "QLR", NULL, 0, "OLR:");
+    char *greenResponse = sendCommand("cam", "QLG", NULL, 0, "OLG:");
 
     if (redResponse != NULL && greenResponse != NULL) {
         redState = redResponse[0] == '1';
@@ -498,7 +498,6 @@ bool panaSetTallyState(int tallyState) {
 
 /** Fetches the provided URL with the provided handle and returns the data in a buffer. */
 curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
-  bool localDebug = false;
   curl_buffer_t *chunk = malloc(sizeof(curl_buffer_t));;
   chunk->data = malloc(1);
   chunk->len = 0;
@@ -509,8 +508,8 @@ curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
   CURLcode res = curl_easy_perform(handle);
  
   if(res != CURLE_OK) {
-    if (localDebug) fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                            curl_easy_strerror(res));
+    fprintf(stderr, "curl_easy_perform() failed: %s\n",
+        curl_easy_strerror(res));
     free(chunk->data);
     free(chunk);
     return NULL;

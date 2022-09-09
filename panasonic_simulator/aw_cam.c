@@ -37,13 +37,13 @@ int main(int argc, char *argv[]) {
     int enabled = atoi(raw_tally);
     current_tally = enabled ? (current_tally | TALLY_GREEN) : (current_tally & ~TALLY_GREEN);
 
-    printf("TLG:%d\r\n", (current_tally & TALLY_GREEN) ? 1 : 0);
+    printf("OLG:%d\r\n", (current_tally & TALLY_GREEN) ? 1 : 0);
   } else if (!strncmp(qs, "cmd=TLR:", 8)) {
     char *raw_tally = &(qs[8]);
     int enabled = atoi(raw_tally);
     current_tally = enabled ? (current_tally | TALLY_RED) : (current_tally & ~TALLY_RED);
 
-    printf("TLR:%d\r\n", (current_tally & TALLY_RED) ? 1 : 0);
+    printf("OLR:%d\r\n", (current_tally & TALLY_RED) ? 1 : 0);
 
   // Query tally
   } else if (!strcmp(qs, "cmd=QLG&res=1")) {

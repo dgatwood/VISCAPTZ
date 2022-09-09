@@ -1,10 +1,15 @@
 #include <assert.h>
+
+#if USE_OBS_TALLY_SOURCE
+
 // Install libgettally from here: https://github.com/dgatwood/v8-libwebsocket-obs-websocket
 #include <gettally.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#endif
 
 #include "configurator.h"
 #include "constants.h"

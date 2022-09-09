@@ -320,6 +320,9 @@ bool savePreset(int presetNumber);
 
 // VISCA-related functions
 
+/** Stringifies a VISCA command or inquiry for debugging. */
+char *VISCAMessageDebugString(uint8_t *command, uint8_t len);
+
 /**
  * Gets a default zoom speed (in VISCA range) based on the current tally state,
  * e.g. the speed is slower when the camera is live.
@@ -418,12 +421,16 @@ void do_calibration(void);
 
 #pragma mark - Main
 
+bool debug_verbose = false;
+
 int main(int argc, char *argv[]) {
 
   runStartupTests();
 
   if (argc >= 2) {
-    if (!strcmp(argv[1], "--calibrate")) {
+    if (!strcmp(argv[1], "-v")) {
+      debug_verbose = true;
+    } else if (!strcmp(argv[1], "--calibrate")) {
       gCalibrationMode = true;
 
       // Immediately wipe out calibration data before initializing modules,
@@ -1350,6 +1357,8 @@ void printbuf(uint8_t *buf, int len) {
 }
 
 bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, socklen_t structLength) {
+  if (debug_verbose) fprintf(stderr, "GOT VISCA PACKET %s\n", VISCAMessageDebugString(command.data, htons(command.len)));
+
   if (command.cmd[0] != 0x1) {
     fprintf(stderr, "INVALID[0 = %02x]\n", command.cmd[0]);
     return false;
@@ -1399,6 +1408,8 @@ visca_response_t *tallyModeResponse(int tallyState) {
 }
 
 bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
+  if (debug_verbose) fprintf(stderr, "GOT VISCA INQUIRY %s\n", VISCAMessageDebugString(command, len));
+
   // All VISCA inquiries start with 0x90.
   if(command[0] != 0x81) return false;
 
@@ -1500,11 +1511,29 @@ void setResponseArray(visca_response_t *response, uint8_t *array, uint8_t count)
   bcopy(array, response->data, count);
 }
 
+char *VISCAMessageDebugString(uint8_t *command, uint8_t len) {
+  static char *buf = NULL;
+  if (buf != NULL) {
+    free(buf);
+    buf = NULL;
+  }
+
+  for (int i = 0; i < len; i++) {
+    char *oldbuf = buf;
+    asprintf(&buf, "%s%s0x%02x", (buf == NULL) ? "" : buf, (buf == NULL) ? "" : " ", command[i]);
+    if (oldbuf) free(oldbuf);
+  }
+  return buf;
+}
+
 bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
 
   if (gCalibrationModeVISCADisabled) {
     return false;
   }
+
+  if (debug_verbose) fprintf(stderr, "GOT VISCA COMMAND %s\n", VISCAMessageDebugString(command, len));
+
 
   // All VISCA commands start with 0x8x, where x is the camera number.  For IP, always 1.
   if(command[0] != 0x81) return false;

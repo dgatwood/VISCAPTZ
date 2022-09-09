@@ -14,36 +14,10 @@
 // If not defined, uses ~/.viscaptz.conf
 // #define CONFIG_FILE_PATH "/etc/viscaptz.conf"
 
-
 #pragma mark - Tally master source
 
-// The tally source (the source of truth) can come from the Panasonic
-// camera if you are controlling the tallly over NDI, or from a Tricaster
-// or OBS switcher if you aren't.  Or, if you want to control the tally
-// light exclusively over VISCA, you can specify a VISCA (fake) tally
-// source that just stores the last received tally state in RAM.
-//
-// IMPORTANT: Do not enable more than one tally source.
-
-/**
- * Use a Panasonic camera as the tally source.
- */
-#define USE_PANASONIC_TALLY_SOURCE 0
-
-/** Use a Tricaster as the tally source.  Not implemented. */
-#define USE_TRICASTER_TALLY_SOURCE 1
-
-/** Use OBS as the tally source.  Not implemented. */
-#define USE_OBS_TALLY_SOURCE 0
-
-/**
- * Use this software as the source of truth, rather than monitoring
- * any external device.  Enabled if no other tally source is enabled.
- */
-#define USE_VISCA_TALLY_SOURCE \
-    !(USE_PANASONIC_TALLY_SOURCE || USE_TRICASTER_TALLY_SOURCE || \
-      USE_OBS_TALLY_SOURCE)
-
+// Because some tally sources require linking external libraries, they are
+// configured at the top of the Makefile.
 
 #pragma mark - Motor configuration
 
