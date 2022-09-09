@@ -267,6 +267,9 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
 //
 // Moves the camera to the specified zoom position.
 bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
+
+    fprintf(stderr, "SET ZOOM SPEED TO %d\n", (int)maxSpeed);
+
     char *value = panaIntString(position, 3, true);
     char *response = sendCommand("ptz", "#AXZ", &value, 1, "axz");
     if (response != NULL) {
@@ -295,6 +298,9 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix) {
     CURL *curlQueryHandle = curl_easy_init();
+
+    // For thread safety.
+    curl_easy_setopt(curlQueryHandle, CURLOPT_NOSIGNAL, 1L);
 
     // The following line deserves explanation.  I originally used a 2-second timeout, but
     // then wondered why (when it turned out the camera's IP was wrong) this software failed to

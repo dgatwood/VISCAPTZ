@@ -260,6 +260,12 @@ double currentRecallTime(void);
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition);
 
 /**
+ * Computes the maximum speed that the motor should use reach when moving the specified
+ * distance over the specified time.
+ */
+int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPosition, double time);
+
+/**
  * Returns the fastest possible move that the camera can make to the specified
  * position on the specified axis (measured in seconds).
  */
@@ -604,7 +610,9 @@ int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t
 ///
 ///     @param progress         How much progress has been made (in tenths of a percent
 ///                             of the total move length).
-int computeSpeed(int progress) {
+///     @param peakSpeed        The computed maximum speed for the move, computed by
+///                             a prior call to peakSpeedForMove().
+int computeSpeed(int progress, int peakSpeed) {
     if (progress < 100 || progress > 900) {
         int distance_to_nearest_endpoint = (progress >= 900) ? (1000 - progress) : progress;
 
@@ -617,8 +625,8 @@ int computeSpeed(int progress) {
         // After you calibrate the motor speed, this uses a time-based curve.  The explanation
         // below tells how this works.
         //
-        // From 10% to 90%, the motor moves at full speed.  On either end, the motor's speed
-        // is computed based on an s-curve, computed as follows:
+        // From 10% to 90%, the motor moves at its maximum speed.  On either end, the motor's
+        // speed is computed based on an s-curve, computed as follows:
         //
         // With vertical acccuracy of ± .1% at the two endpoints (i.e. 0.001 at the bottom,
         //     0.999 at the top):
@@ -636,9 +644,13 @@ int computeSpeed(int progress) {
         // or exactly an area of 50 under the curve.  So the s-curves average 50%
         // across their duration.
         //
-        // This means that the average speed across the entire time range from 0 to 1000
-        // is ((maxSpeed * 800) + (0.5 * maxSpeed * 200)) / 1000.  We can simplify this
-        // to 0.9 * maxSpeed.
+        // This means that for an axis that can move at maxPositionsPerSecond positions
+        // per second at its fastest speed, the average speed across the entire time range
+        // from 0 to 1000 is
+        //
+        //   ((maxPositionsPerSecond * 800) + (0.5 * maxPositionsPerSecond * 200)) / 1000
+        //
+        // which can be simplified to 0.9 * maxPositionsPerSecond.
         //
         // So if we know that we want a motion to take 10 seconds (for example), and if
         // that motion is 5000 units of distance, it needs to move 500 units per second,
@@ -704,9 +716,9 @@ int computeSpeed(int progress) {
 
         double exponent = 7.0 - ((7.0 * distance_to_nearest_endpoint) / 50.0);
         double speedFromProgress = 1 / (1 + pow(M_E, exponent));
-        return round(speedFromProgress * 1000.0);
+        return round(speedFromProgress * 1.0 * peakSpeed);
     } else {
-        return 1000;
+        return peakSpeed;
     }
 }
 
@@ -766,7 +778,14 @@ void handleRecallUpdates(void) {
       double currentTime = timeStamp();
       double remainingTime = currentTime - gAxisStartTime[axis];
       double duration = gAxisDuration[axis];
-      bool usingPositionBasedProgress = (duration == 0);
+
+      // Time-based computation can be slightly imprecise.  If the progress based on position is
+      // 1000, we're done with this axis no matter what the wall clock says.  And of course, if
+      // there's no computed duration, we use the position-based approach, and if the duration
+      // is actually zero (no motion needed), then we also use the position-based approach to
+      // guarantee that we don't move.
+      bool usingPositionBasedProgress = (duration == 0 || panProgressByPosition == 1000);
+
       int panProgressByTime = usingPositionBasedProgress ? 0 : (1000.0 * remainingTime ) / duration;
       int panProgress = usingPositionBasedProgress ? panProgressByPosition : panProgressByTime;
 
@@ -778,10 +797,14 @@ void handleRecallUpdates(void) {
                 gAxisStartTime[axis], gAxisStartTime[axis] + duration,
                 currentTime, remainingTime,
                 duration, panProgressByTime);
-     }
+      }
+      int peakSpeed = usingPositionBasedProgress ? 1000 :
+          peakSpeedForMove(axis, gAxisMoveStartPosition[axis], gAxisMoveTargetPosition[axis], duration);
+
 #else
       bool usingPositionBasedProgress = true;
       int panProgress = panProgressByPosition;
+      int peakSpeed = 1000;
 #endif
       gAxisPreviousPosition[axis] = axisPosition;
 
@@ -804,8 +827,8 @@ void handleRecallUpdates(void) {
         // Do not use a minimum speed if we are using wall clock time, because computed
         // progress doesn't depend on the motors changing the encoder position.
         int speed = usingPositionBasedProgress ?
-            MAX(computeSpeed(panProgress), MIN_PAN_TILT_SPEED) :
-            computeSpeed(panProgress);
+            MAX(computeSpeed(panProgress, peakSpeed), MIN_PAN_TILT_SPEED) :
+            computeSpeed(panProgress, peakSpeed);
         setAxisSpeed(axis, speed * direction, localDebug);
         if (localDebug) {
             fprintf(stderr, "AXIS %d SPEED NOW %d * %d (%d)\n",
@@ -990,14 +1013,28 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
 }
 
 double makeDurationValid(axis_identifier_t axis, double duration, int64_t position) {
+  bool localDebug = true;
+  if (localDebug) {
+    fprintf(stderr, "makeDurationValid(axis %d, duration %lf, position: %lld)\n",
+      axis, duration, (long long)position);
+    int64_t currentPosition = getAxisPosition(axis);
+    fprintf(stderr, "    Current position: %lld\n", currentPosition);
+  }
   double slowestDuration = slowestMoveForAxisToPosition(axis, position);
   if (duration > slowestDuration) {
     duration = slowestDuration;
+    if (localDebug) {
+      fprintf(stderr, "Clamped to %lf (slowest duration)\n", slowestDuration);
+    }
   }
   double fastestDuration = fastestMoveForAxisToPosition(axis, position);
   if (duration < fastestDuration) {
     duration = fastestDuration;
+    if (localDebug) {
+      fprintf(stderr, "Clamped to %lf (fastest duration)\n", fastestDuration);
+    }
   }
+  fprintf(stderr, "Final value: %lf\n", duration);
   return duration;
 }
 
@@ -1011,11 +1048,15 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
  * If it is not possible to make all axes reach the destination simultaneously because of speed
  * differences, this returns the longer of the possible durations, and one axis will just finish
  * sooner.
+ *
+ * Additionally, this caps the maximum amount of change at +/- 25% to prevent a massively slow or
+ * fast axis (or a very short move) from changing things too severely.
  */
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition) {
   bool localDebug = true;
 
   double recallTime = currentRecallTime();
+  double originalRecallTime = recallTime;
 
   if (localDebug) {
     fprintf(stderr, "Default duration for move: %lf\n", recallTime);
@@ -1026,42 +1067,42 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
     double timeAtMaximumSpeed = fastestMoveForAxisToPosition(axis_identifier_pan, panPosition);
     if (timeAtMaximumSpeed == 0) {
       if (localDebug) {
-        fprintf(stderr, "Maximum speed for pan axis not available.  Returning 0.\n");
+        fprintf(stderr, "Maximum speed for pan axis not available.  Ignoring axis.\n");
       }
-      return 0;
-    }
-    recallTime = MAX(recallTime, timeAtMaximumSpeed);
-    if (localDebug) {
-      fprintf(stderr, "Fastest duration for move (pan): %lf.  Now %lf.\n", timeAtMaximumSpeed,
-              recallTime);
+    } else {
+      recallTime = MAX(recallTime, timeAtMaximumSpeed);
+      if (localDebug) {
+        fprintf(stderr, "Fastest duration for move (pan): %lf.  Now %lf.\n", timeAtMaximumSpeed,
+                recallTime);
+      }
     }
   }
   if (flags & kFlagMoveTilt) {
     double timeAtMaximumSpeed = fastestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
     if (timeAtMaximumSpeed == 0) {
       if (localDebug) {
-        fprintf(stderr, "Maximum speed for tilt axis not available.  Returning 0.\n");
+        fprintf(stderr, "Maximum speed for tilt axis not available.  Ignoring axis.\n");
       }
-      return 0;
-    }
-    recallTime = MAX(recallTime, timeAtMaximumSpeed);
-    if (localDebug) {
-      fprintf(stderr, "Fastest duration for move (tilt): %lf.  Now %lf.\n", timeAtMaximumSpeed,
-              recallTime);
+    } else {
+      recallTime = MAX(recallTime, timeAtMaximumSpeed);
+      if (localDebug) {
+        fprintf(stderr, "Fastest duration for move (tilt): %lf.  Now %lf.\n", timeAtMaximumSpeed,
+                recallTime);
+      }
     }
   }
   if (flags & kFlagMoveZoom) {
     double timeAtMaximumSpeed = fastestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
     if (timeAtMaximumSpeed == 0) {
       if (localDebug) {
-        fprintf(stderr, "Maximum speed for zoom axis not available.  Returning 0.\n");
+        fprintf(stderr, "Maximum speed for zoom axis not available.  Ignoring axis.\n");
       }
-      return 0;
-    }
-    recallTime = MAX(recallTime, timeAtMaximumSpeed);
-    if (localDebug) {
-      fprintf(stderr, "Fastest duration for move (zoom): %lf.  Now %lf.\n", timeAtMaximumSpeed,
-              recallTime);
+    } else {
+      recallTime = MAX(recallTime, timeAtMaximumSpeed);
+      if (localDebug) {
+        fprintf(stderr, "Fastest duration for move (zoom): %lf.  Now %lf.\n", timeAtMaximumSpeed,
+                recallTime);
+      }
     }
   }
 
@@ -1070,44 +1111,50 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
     double timeAtMinimumSpeed = slowestMoveForAxisToPosition(axis_identifier_pan, panPosition);
     if (timeAtMinimumSpeed == 0) {
       if (localDebug) {
-        fprintf(stderr, "Minimum speed for pan axis not available.  Returning 0.\n");
+        fprintf(stderr, "Minimum speed for pan axis not available.  Ignoring axis.\n");
       }
-      return 0;
-    }
-    recallTime = MIN(recallTime, timeAtMinimumSpeed);
-    if (localDebug) {
-      fprintf(stderr, "Slowest duration for move (pan): %lf.  Now %lf.\n", timeAtMinimumSpeed,
-              recallTime);
+    } else {
+      recallTime = MIN(recallTime, timeAtMinimumSpeed);
+      if (localDebug) {
+        fprintf(stderr, "Slowest duration for move (pan): %lf.  Now %lf.\n", timeAtMinimumSpeed,
+                recallTime);
+      }
     }
   }
   if (flags & kFlagMoveTilt) {
     double timeAtMinimumSpeed = slowestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
     if (timeAtMinimumSpeed == 0) {
       if (localDebug) {
-        fprintf(stderr, "Minimum speed for tilt axis not available.  Returning 0.\n");
+        fprintf(stderr, "Minimum speed for tilt axis not available.  Ignoring axis.\n");
       }
-      return 0;
-    }
-    recallTime = MIN(recallTime, timeAtMinimumSpeed);
-    if (localDebug) {
-      fprintf(stderr, "Slowest duration for move (tilt): %lf.  Now %lf.\n", timeAtMinimumSpeed,
-              recallTime);
+    } else {
+      recallTime = MIN(recallTime, timeAtMinimumSpeed);
+      if (localDebug) {
+        fprintf(stderr, "Slowest duration for move (tilt): %lf.  Now %lf.\n", timeAtMinimumSpeed,
+                recallTime);
+      }
     }
   }
   if (flags & kFlagMoveZoom) {
     double timeAtMinimumSpeed = slowestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
     if (timeAtMinimumSpeed == 0) {
       if (localDebug) {
-        fprintf(stderr, "Minimum speed for zoom axis not available.  Returning 0.\n");
+        fprintf(stderr, "Minimum speed for zoom axis not available.  Ignoring axis.\n");
       }
-      return 0;
-    }
-    recallTime = MIN(recallTime, timeAtMinimumSpeed);
-    if (localDebug) {
-      fprintf(stderr, "Slowest duration for move (zoom): %lf.  Now %lf.\n", timeAtMinimumSpeed,
-              recallTime);
+    } else {
+      recallTime = MIN(recallTime, timeAtMinimumSpeed);
+      if (localDebug) {
+        fprintf(stderr, "Slowest duration for move (zoom): %lf.  Now %lf.\n", timeAtMinimumSpeed,
+                recallTime);
+      }
     }
   }
+
+  if (recallTime > (1.25 * originalRecallTime) ||
+      recallTime < (.75 * originalRecallTime)) {
+    return originalRecallTime;
+  }
+
   return recallTime;
 }
 
@@ -1145,6 +1192,22 @@ int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis) {
         return MAX_ZOOM_POSITIONS_PER_SECOND();
   }
   return 0;
+}
+
+// We calculate the peak speed such that 80% of the time spent moving between two positions
+// is at that speed.  We know that the average speed will be 90% of this speed.
+//
+// We start by computing the number of positions per second given the time and distance.
+// We then divide by 0.9.
+int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPosition, double time) {
+  double peakPositionsPerSecond = (llabs(fromPosition - toPosition) / time) / 0.9;
+  fprintf(stderr, "Peak points per second for move along axis %d from %lld to %lld over time %lf is %lf\n",
+          axis, fromPosition, toPosition, time, peakPositionsPerSecond);
+
+  int peakSpeed = (peakPositionsPerSecond * 1000) / maximumPositionsPerSecondForAxis(axis);
+  fprintf(stderr, "Peak speed: %d\n", peakSpeed);
+
+  return peakSpeed;
 }
 
 double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
@@ -1251,7 +1314,7 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
   bool localDebug = true;
 
   if (localDebug) {
-    fprintf(stderr, "setAxisPositionIncrementally\n");
+    fprintf(stderr, "setAxisPositionIncrementally for axis %d\n", axis);
   }
   if (!absolutePositioningSupportedForAxis(axis)) {
     fprintf(stderr, "Absolute positioning not supported.\n");
