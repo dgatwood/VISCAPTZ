@@ -86,9 +86,9 @@ int64_t motorMaximumTiltPositionsPerSecond(void);
         motorGetPanTiltPosition(panPositionRef, tiltPositionRef)
     #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed, isRaw) \
         motorSetPanTiltSpeed(panSpeed, tiltSpeed, isRaw)
-    #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, time) \
-        (setAxisPositionIncrementally(axis_identifier_pan, panPosition, panSpeed, time) && \
-        setAxisPositionIncrementally(axis_identifier_tilt, tiltPosition, tiltSpeed, time))
+    #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, panTime, tiltTime) \
+        (setAxisPositionIncrementally(axis_identifier_pan, panPosition, panSpeed, panTime) && \
+        setAxisPositionIncrementally(axis_identifier_tilt, tiltPosition, tiltSpeed, tiltTime))
     #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
     #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
 

@@ -46,7 +46,7 @@ void runPanasonicTests(void);
 #pragma mark - Global variables
 
 /** If true, enables extra debugging. */
-static bool pana_enable_debugging = false;
+static bool pana_enable_debugging = true;
 
 /** The last zoom speed that was set. */
 static int64_t gLastZoomSpeed = 0;
@@ -295,7 +295,16 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix) {
     CURL *curlQueryHandle = curl_easy_init();
-    curl_easy_setopt(curlQueryHandle, CURLOPT_TIMEOUT, 2);  // By IP, so short limit.
+
+    // The following line deserves explanation.  I originally used a 2-second timeout, but
+    // then wondered why (when it turned out the camera's IP was wrong) this software failed to
+    // respond to control commands, then suddenly started moving uncontrollably minutes later.
+    // It turned out that received packets were queueing up in the kernel, and being basically
+    // delivered one per second because the tally light operations currently happen on the main
+    // network thread.  This should probably be moved to a separate thread, but a short timeout
+    // is still preferable, because you don't want the camera to keep zooming forever if a
+    // request stalls for any reason.
+    curl_easy_setopt(curlQueryHandle, CURLOPT_TIMEOUT_MS, 300);  // By IP, so very short limit.
     curl_easy_setopt(curlQueryHandle, CURLOPT_WRITEFUNCTION, writeMemoryCallback);
     curl_easy_setopt(curlQueryHandle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 

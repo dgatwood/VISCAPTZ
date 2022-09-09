@@ -284,7 +284,7 @@ void handleRecallUpdates(void);
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration);
 
 /** Sets the axis speed, using core scale speed values. */
-bool setAxisSpeed(axis_identifier_t axis, int64_t position, bool debug);
+bool setAxisSpeed(axis_identifier_t axis, int64_t coreSpeed, bool debug);
 
 /** Sets the axis speed, using values based on the hardware scale for that axis. */
 bool setAxisSpeedRaw(axis_identifier_t axis, int64_t speed, bool debug);
@@ -298,6 +298,8 @@ bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, boo
  */
 double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position);
 
+/** Clamps a move direction based on the maximum and minimum speeds for that axis.  */
+double makeDurationValid(axis_identifier_t axis, double duration, int64_t position);
 
 // Preset management
 
@@ -553,15 +555,15 @@ int main(int argc, char *argv[]) {
 
 #pragma mark - Generic move routines
 
-int actionProgress(int64_t startPosition, int64_t curPosition, int64_t endPosition,
+int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t endPosition,
                    int64_t previousPosition, int *stalls) {
   bool localDebug = false;
   int64_t progress = llabs(curPosition - startPosition);
   int64_t total = llabs(endPosition - startPosition);
 
   if (total == 0) {
-    fprintf(stderr, "End position (%" PRId64 ") = start position (%" PRId64 ").  Doing nothing.\n",
-            startPosition, endPosition);
+    fprintf(stderr, "Axis %d End position (%" PRId64 ") = start position (%" PRId64 ").  Doing nothing.\n",
+            axis, startPosition, endPosition);
     return 1000;
   }
 
@@ -718,7 +720,7 @@ bool moveInProgress(void) {
 }
 
 void handleRecallUpdates(void) {
-  int localDebug = 0;
+  int localDebug = 1;
 
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
     if (gAxisMoveInProgress[axis]) {
@@ -757,7 +759,7 @@ void handleRecallUpdates(void) {
         fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
       }
       int64_t axisPosition = getAxisPosition(axis);
-      int panProgressByPosition = actionProgress(gAxisMoveStartPosition[axis], axisPosition,
+      int panProgressByPosition = actionProgress(axis, gAxisMoveStartPosition[axis], axisPosition,
                                                  gAxisMoveTargetPosition[axis], gAxisPreviousPosition[axis],
                                                  &gAxisStalls[axis]);
 #if EXPERIMENTAL_TIME_PROGRESS
@@ -957,7 +959,7 @@ bool setZoomPosition(int64_t position, int64_t speed, double duration) {
         duration = durationForMove(kFlagMoveZoom, kUnusedPosition, kUnusedPosition, position);
     }
 
-    return SET_ZOOM_POSITION(position, speed, duration);
+    return SET_ZOOM_POSITION(position, speed, makeDurationValid(axis_identifier_zoom, duration, position));
 }
 
 bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
@@ -982,7 +984,21 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
         duration = durationForMove(kFlagMovePan | kFlagMoveTilt, panPosition, tiltPosition, kUnusedPosition);
     }
 
-    return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, duration);
+    return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed,
+                                 makeDurationValid(axis_identifier_pan, duration, panPosition),
+                                 makeDurationValid(axis_identifier_tilt, duration, tiltPosition));
+}
+
+double makeDurationValid(axis_identifier_t axis, double duration, int64_t position) {
+  double slowestDuration = slowestMoveForAxisToPosition(axis, position);
+  if (duration > slowestDuration) {
+    duration = slowestDuration;
+  }
+  double fastestDuration = fastestMoveForAxisToPosition(axis, position);
+  if (duration < fastestDuration) {
+    duration = fastestDuration;
+  }
+  return duration;
 }
 
 /**
@@ -1172,8 +1188,8 @@ double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   return (double)distance / (double)minimumPositionsPerSecond;
 }
 
-bool setAxisSpeed(axis_identifier_t axis, int64_t speed, bool debug) {
-  return setAxisSpeedInternal(axis, speed, debug, false);
+bool setAxisSpeed(axis_identifier_t axis, int64_t coreSpeed, bool debug) {
+  return setAxisSpeedInternal(axis, coreSpeed, debug, false);
 }
 
 bool setAxisSpeedRaw(axis_identifier_t axis, int64_t speed, bool debug) {

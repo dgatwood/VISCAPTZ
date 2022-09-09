@@ -117,7 +117,7 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
             panaGetPanTiltPosition(panPositionRef, tiltPositionRef)
         #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed, isRaw) \
             panaSetPanSpeed(panSpeed, tiltSpeed, isRaw)
-        #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, time) 
+        #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, panTime, tiltTime) 
             panaSetPanTiltPosition(panPosition, panSpeed, tiltPosition, tiltSpeed)
         #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
         #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
