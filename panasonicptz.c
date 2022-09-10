@@ -434,8 +434,9 @@ int64_t panaGetZoomPosition(void) {
         last_zoom_position = value;
         if (localDebug) fprintf(stderr, "Zoom position: %" PRId64 "\n", last_zoom_position);
         free(response);
+    } else {
+        if (localDebug) fprintf(stderr, "Did not get response from CGI.  Returning last value.\n");
     }
-    if (localDebug) fprintf(stderr, "Did not get response from CGI.  Returning last value.\n");
     return last_zoom_position;
 }
 
