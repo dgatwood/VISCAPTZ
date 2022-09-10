@@ -2319,7 +2319,8 @@ bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, i
 }
 
 int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
-    int64_t startPosition, int64_t endPosition, int speed, float dutyCycle) {
+    int64_t startPosition, int64_t endPosition, int speed, float dutyCycle,
+    bool pollingIsSlow) {
   bool localDebug = false;
   int attempts = 0;
   int64_t motionStartPosition = 0;
@@ -2351,6 +2352,7 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
 
     // Run the motors for a while before computing the speed.
     float dutyCycleMultiplier = (dutyCycle < .25) ? 2 : (dutyCycle < .50) ? 1.5 : 1;
+    if (pollingIsSlow) dutyCycleMultiplier *= 5;
     int delay = ((inMotion || movedTooFast) ? 100000 : 200000) * dutyCycleMultiplier;
 
     if (spinAxis(axis, delay, startPosition, endPosition, direction)) {
@@ -2396,7 +2398,8 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int64_t startPosition,
                                      int64_t endPosition,
                                      int32_t minSpeed,
-                                     int32_t maxSpeed) {
+                                     int32_t maxSpeed,
+                                     bool pollingIsSlow) {
   bool localDebug = false;
   if (localDebug) {
     fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
@@ -2427,7 +2430,8 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
       int64_t sameValue = -1;
       for (int i = 0 ; i < NUM_SAMPLES; i++) {
         int64_t value =
-            calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, speed, dutyCycle);
+            calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, speed, dutyCycle,
+                                             pollingIsSlow);
         positionsPerSecond[i] = value;
         if (i == 0) {
           sameValue = value;

@@ -4,6 +4,7 @@
 #include <curl/curl.h>
 #include <fcntl.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -16,6 +17,12 @@
 #include "main.h"
 #include "constants.h"
 
+// Panasonic's web server implementation leaves much to be desired, as does
+// the rest of their networking stack.  Between the multi-minute freezes when
+// talking to it from macOS and data corruption when hitting it with multiple
+// simultaneous requests (I'm assuming this isn't a pthreads bug), it makes
+// me want to cry.  But this fixes the misbehavior, so whatever.
+pthread_mutex_t globalPanasonicURLLock = PTHREAD_MUTEX_INITIALIZER;
 
 #pragma mark - Data types
 
@@ -46,7 +53,7 @@ void runPanasonicTests(void);
 #pragma mark - Global variables
 
 /** If true, enables extra debugging. */
-static bool pana_enable_debugging = true;
+static bool pana_enable_debugging = false;
 
 /** The last zoom speed that was set. */
 static int64_t gLastZoomSpeed = 0;
@@ -297,6 +304,7 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
  */
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix) {
+    pthread_mutex_lock(&globalPanasonicURLLock);
     CURL *curlQueryHandle = curl_easy_init();
 
     // For thread safety.
@@ -333,11 +341,15 @@ char *sendCommand(const char *group, const char *command, char *values[],
     asprintf(&URL, "http://%s/cgi-bin/aw_%s?cmd=%s%s&res=1",
              g_cameraIPAddr, group, encoded_command, valueString);
 
-    if (localDebug) {
+    if (localDebug || 1) {
         fprintf(stderr, "Fetching URL: %s\n", URL);
     }
 
     curl_buffer_t *data = fetchURLWithCURL(URL, curlQueryHandle);
+
+    if (localDebug || 1) {
+        fprintf(stderr, "URL fetch raw return is \"%s\"\n", data->data);
+    }
 
     char *retval = NULL;
     if (data != NULL) {
@@ -360,6 +372,7 @@ char *sendCommand(const char *group, const char *command, char *values[],
 
     curl_easy_cleanup(curlQueryHandle);
 
+    pthread_mutex_unlock(&globalPanasonicURLLock);
     return retval;
 }
 
@@ -426,7 +439,7 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
 //
 // Gets the camera's current zoom position.
 int64_t panaGetZoomPosition(void) {
-    bool localDebug = pana_enable_debugging || false;
+    bool localDebug = pana_enable_debugging || true;
     static int64_t last_zoom_position = 0;
     char *response = sendCommand("ptz", "#GZ", NULL, 0, "gz");
     if (response != NULL && strlen(response)) {
@@ -622,7 +635,7 @@ void panaModuleCalibrate(void) {
   setZoomEncoderReversed(true);
 
   int64_t *zoomCalibrationData = calibrationDataForMoveAlongAxis(
-      axis_identifier_zoom, maximumZoom, minimumZoom, 0, ZOOM_SCALE_HARDWARE);
+      axis_identifier_zoom, maximumZoom, minimumZoom, 0, ZOOM_SCALE_HARDWARE, true);
 
   writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE);
 }

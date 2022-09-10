@@ -45,6 +45,9 @@ bool setTallyOff(void);
  *                      be used during calibration.
  * @param maxSpeed      The maximum (hardware-scale speed that should
  *                      be used during calibration.
+ * @param pollingIsSlow True for sources where checking the motor position
+ *                      is slow.  This allows for longer durations per
+ *                      measurement to get a more precise value.
  *
  * @result Returns an array where position 0 is the number of positions
  *         moved in one second at minSpeed, position 1 is at minSpeed + 1,
@@ -54,7 +57,8 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                          int64_t startPosition,
                                          int64_t endPosition,
                                          int32_t minSpeed,
-                                         int32_t maxSpeed);
+                                         int32_t maxSpeed,
+                                         bool pollingIsSlow);
 
 /**
  * Reads the calibration data for the specified axis from the

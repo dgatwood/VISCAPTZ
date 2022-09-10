@@ -628,9 +628,9 @@ void motorModuleCalibrate(void) {
   fprintf(stderr, "Calibrating pan and tilt motors.  This takes about 40 minutes.\n");
 
   int64_t *panCalibrationData = calibrationDataForMoveAlongAxis(
-      axis_identifier_pan, leftLimit, rightLimit, 0, PAN_TILT_SCALE_HARDWARE);
+      axis_identifier_pan, leftLimit, rightLimit, 0, PAN_TILT_SCALE_HARDWARE, false);
   int64_t *tiltCalibrationData = calibrationDataForMoveAlongAxis(
-      axis_identifier_tilt, topLimit, bottomLimit, 0, PAN_TILT_SCALE_HARDWARE);
+      axis_identifier_tilt, topLimit, bottomLimit, 0, PAN_TILT_SCALE_HARDWARE, false);
 
   writeCalibrationDataForAxis(axis_identifier_pan, panCalibrationData, PAN_TILT_SCALE_HARDWARE);
   writeCalibrationDataForAxis(axis_identifier_tilt, tiltCalibrationData, PAN_TILT_SCALE_HARDWARE);
