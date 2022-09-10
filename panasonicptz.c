@@ -348,7 +348,7 @@ char *sendCommand(const char *group, const char *command, char *values[],
     curl_buffer_t *data = fetchURLWithCURL(URL, curlQueryHandle);
 
     if (localDebug || 1) {
-        fprintf(stderr, "URL fetch raw return is \"%s\"\n", data->data);
+        fprintf(stderr, "URL fetch raw return is \"%s\"\n", data ? data->data : NULL);
     }
 
     char *retval = NULL;
