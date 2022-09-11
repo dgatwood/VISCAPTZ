@@ -519,7 +519,8 @@ void populateZoomNonlinearityTable(void) {
   // Turn on debugging in printZoomNonlinearityComputation(), convert the table into
   // a third-degree equation with a polynomial solver (e.g. https://arachnoid.com/polysolve/)
   // and update the values in scaleLinearZoomToRawZoom(), guarding your changes with a
-  // compile-time flag.
+  // compile-time flag.  You can get the raw points by defining the
+  // SHOW_NONLINEARITY_DATA_POINTS macro.
 
   fprintf(stderr, "%d <= %lld\n", (int)floor(scaledPosition),  minZoom);
   assert(floor(scaledPosition) <= minZoom);
@@ -761,37 +762,46 @@ void panaModuleCalibrate(void) {
   // Zoom all the way out, in preparation for capturing calibration data on the
   // way back out.
   panaSetZoomSpeed(-ZOOM_SCALE_HARDWARE, true);
-  timed_position_t *positionArray = NULL;
-  int count = 0;
   waitForZoomStop(NULL, NULL);
 
   setConfigKeyInteger(kZoomOutInternalLimitKey, panaGetZoomPositionRaw());
 
-  // Zoom all the way in to determine the upper zoom limit and capture
-  // calibration data to determine the nonlinearity of the zoom position data.
-  panaSetZoomSpeed(/*ZOOM_SCALE_HARDWARE / 8 */ 2, true);
-  fprintf(stderr, "Capturing positions per second for nonlinearity.");
-  waitForZoomStop(&positionArray, &count);
-  fprintf(stderr, "Done capturing positions per second for nonlinearity.");
+  #ifdef SHOW_NONLINEARITY_DATA_POINTS
+    int count = 0;
+    timed_position_t *positionArray = NULL;
 
-  setConfigKeyInteger(kZoomInInternalLimitKey, panaGetZoomPositionRaw());
+    // By default, generate a smallish number of points.  You can use a
+    // smaller number like 2 for more data.  The original equation was
+    // computed at a speed of 2.
+    const nonlinearityComputationSpeed = ZOOM_SCALE_HARDWARE / 2;
 
-  // Currently, I have a hard-coded computation based on the data gathered here.
-  // At some point, we could maybe automate this, but for now, just print the data.
-  printZoomNonlinearityComputation(positionArray, count);
-  free(positionArray);
+    // Zoom all the way in to determine the upper zoom limit and capture
+    // calibration data to determine the nonlinearity of the zoom position data.
+    panaSetZoomSpeed(/*ZOOM_SCALE_HARDWARE / 8 */ 2, true);
+    fprintf(stderr, "Capturing positions per second for nonlinearity.");
+    waitForZoomStop(&positionArray, &count);
+    fprintf(stderr, "Done capturing positions per second for nonlinearity.");
 
-  // Populate the nonlinearity table.
+    setConfigKeyInteger(kZoomInInternalLimitKey, panaGetZoomPositionRaw());
+
+    // Currently, I have a hard-coded computation based on the data gathered here.
+    // At some point, we could maybe automate this, but for now, just print the data.
+    printZoomNonlinearityComputation(positionArray, count);
+    free(positionArray);
+
+    // Zoom all the way back out to determine the minimum zoom after applying the
+    // nonlinearity compensation.
+    panaSetZoomSpeed(-nonlinearityComputationSpeed, true);
+    waitForZoomStop(&positionArray, &count);
+
+    // Print in the reverse direction for comparison.
+    printZoomNonlinearityComputation(positionArray, count);
+    free(positionArray);
+  #endif
+
+  // Populate the nonlinearity table so that panaGetZoomPosition() will provide
+  // linearized values below.
   populateZoomNonlinearityTable();
-
-  // Zoom all the way back out to determine the minimum zoom after applying the
-  // nonlinearity compensation.
-  panaSetZoomSpeed(/*-ZOOM_SCALE_HARDWARE / 2 */ -2, true);
-  waitForZoomStop(&positionArray, &count);
-
-  // Print in the reverse direction for comparison.
-  printZoomNonlinearityComputation(positionArray, count);
-  free(positionArray);
 
   int64_t minimumZoom = panaGetZoomPosition();
 

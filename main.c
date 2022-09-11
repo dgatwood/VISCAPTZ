@@ -2295,7 +2295,8 @@ bool pastEnd(int64_t currentPosition, int64_t startPosition, int64_t endPosition
   }
 }
 
-bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, int64_t endPosition,
+// Returns number of seconds before last valid sample (with ~10,000 usec precision).
+double spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, int64_t endPosition,
               int direction) {
   bool localDebug = false;
 
@@ -2310,9 +2311,9 @@ bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, i
     int64_t currentPosition = getAxisPosition(axis);
     if (pastEnd(currentPosition, startPosition, endPosition, direction)) {
       if (localDebug) {
-        fprintf(stderr, "Failed spinning (out of bounds)\n");
+        fprintf(stderr, "Stopped spinning early (out of bounds)\n");
       }
-      return false;
+      return (endTime - startTime);
     }
 
     endTime = timeStamp();
@@ -2325,18 +2326,16 @@ bool spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, i
     fprintf(stderr, "Done spinning\n");
   }
 
-  return true;
+  return (endTime - startTime);
 }
 
-int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
+double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     int64_t startPosition, int64_t endPosition, int speed, float dutyCycle,
     bool pollingIsSlow) {
   bool localDebug = false;
   int attempts = 0;
   int64_t motionStartPosition = 0;
-  double startTime = 0;
   int64_t motionEndPosition = 1;
-  double endTime = 1;
 
   // If the motor was already moving in the right direction, don't wait as long.
   static bool inMotion = false;
@@ -2351,6 +2350,7 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
 
   static int direction = -1;
 
+  double actualDuration = 0;
   while (attempts++ < 5) {
     if (localDebug) {
       fprintf(stderr, "Setting axis %d to speed %d direction %d\n", axis, speed, direction);
@@ -2363,14 +2363,20 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     // Run the motors for a while before computing the speed.
     float dutyCycleMultiplier = (dutyCycle < .25) ? 2 : (dutyCycle < .50) ? 1.5 : 1;
     if (pollingIsSlow) dutyCycleMultiplier *= 5;
-    int delay = ((inMotion || movedTooFast) ? 100000 : 200000) * dutyCycleMultiplier;
+    int delay = (inMotion ? 0 : movedTooFast ? 1000000 : 2000000) * dutyCycleMultiplier;
 
-    if (spinAxis(axis, delay, startPosition, endPosition, direction)) {
+    if (spinAxis(axis, delay, startPosition, endPosition, direction) >=
+        (delay * 1.0 / USEC_PER_SEC)) {
       motionStartPosition = getAxisPosition(axis);
-      startTime = timeStamp();
 
-      int duration = 1000000;
-      if (spinAxis(axis, duration, startPosition, endPosition, direction)) {
+      // Try to sample data for 2 seconds, and throw it away if we can't get at least 1.5
+      // seconds of data.  Lower the threshold if we fail twice in a row, because that
+      // means it takes less than 2 seconds to move the full distance.  (This shouldn't
+      // ever occur in practice.)
+      const int duration = movedTooFast ? 1000000 : 2000000;
+      const double minValidInterval = movedTooFast ? 1 : 1.5;
+      actualDuration = spinAxis(axis, duration, startPosition, endPosition, direction);
+      if (actualDuration >= minValidInterval) {
         if (localDebug) {
           fprintf(stderr, "Got speed data.\n");
         }
@@ -2391,13 +2397,11 @@ int64_t calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     attempts++;
   }
   motionEndPosition = getAxisPosition(axis);
-  endTime = timeStamp();
 
   int64_t distance = llabs(motionEndPosition - motionStartPosition);
-  double duration = endTime - startTime;
 
   inMotion = true;
-  double distancePerSecond = (int64_t)((double)distance / duration);
+  double distancePerSecond = ((double)distance / actualDuration);
   if (localDebug) {
     fprintf(stderr, "Returning distance per second %lf\n", distancePerSecond);
   }
@@ -2431,15 +2435,15 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
 #define NUM_SAMPLES 10
 #define MIN_SAMPLES 4
 
-    int64_t positionsPerSecond[NUM_SAMPLES];
-    int64_t positionsPerSecondAverage = 0;
+    double positionsPerSecond[NUM_SAMPLES];
+    double positionsPerSecondAverage = 0;
     while (!done) {
       // No need to invert the drive direction.  The motor driver should already be
       // handling that.
       int64_t min = 0, max = 0;
       int64_t sameValue = -1;
       for (int i = 0 ; i < NUM_SAMPLES; i++) {
-        int64_t value =
+        double value =
             calibrationValueForMoveAlongAxis(axis, startPosition, endPosition, speed, dutyCycle,
                                              pollingIsSlow);
         positionsPerSecond[i] = value;
@@ -2452,11 +2456,12 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
         } else if (value < min) {
           min = value;
         }
-        fprintf(stderr, "Positions per second at speed %d [%d]: %" PRId64 "\n",
+        fprintf(stderr, "Positions per second at speed %d [%d]: %lf\n",
                 speed, i, positionsPerSecond[i]);
 
-        // If we get four identical values immediately (common at slow speeds, when
-        // not moving), don't bother getting more values.
+        // If we get MIN_SAMPLES identical values immediately (realistically because this uses
+        // a floating-point value, this always means that the motor isn't moving), don't bother
+        // getting any more values.
         if (value == sameValue && i == (MIN_SAMPLES - 1)) {
           // We got MIN_SAMPLES with identical values.  Bail early.
           done = true;
@@ -2494,14 +2499,6 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
               fprintf(stderr, "Discarding outlier %" PRId64 ".\n", value);
               continue;
             }
-            // if (value == tempmin) {
-              // tempmin = -1;
-              // continue;
-            // }
-            // if (value == tempmax) {
-              // tempmax = -1;
-              // continue;
-            // }
             total += value;
             if (newmin == -1 || value < newmin) {
               newmin = value;
@@ -2511,25 +2508,31 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
             }
             count++;
           }
-          positionsPerSecondAverage = round((double)total / count);
+          positionsPerSecondAverage = (double)total / count;
   
           double error = (double)newmax - newmin;
           double errorPercent = error / newmax;
           if (error <= 2 || errorPercent < .1) {
             done = true;
+          } else {
+            fprintf(stderr, "Total error %lf > 2 and error percent %lf >= .1.  Trying again.\n",
+                    error, errorPercent);
           }
         }
       }
     }
 
     int index = speed - minSpeed;
-    data[index] = positionsPerSecondAverage;
-    fprintf(stderr, "Positions per second at speed %d (average): %" PRId64 "\n",
-            index, positionsPerSecondAverage);
+    data[index] = round(positionsPerSecondAverage);
+    fprintf(stderr, "Positions per second at speed %d (average): %lf (%lld)\n",
+            index, positionsPerSecondAverage, data[index]);
 
     // The motor may stall at low voltages, but once it gets moving, it should get faster
     // for each increase in voltage.  If not, something went wrong, and our results are invalid.
-    if (speed >= 1 && data[index] <= data[index - 1] && data[index] > 0) {
+    // In some cases (e.g. for zoom motors hidden behind software), two speed values might result
+    // in identical speeds, so it's potentially okay for it to not speed up, but it should never
+    // slow down.
+    if (speed >= 1 && data[index] < data[index - 1] && data[index] > 0) {
       fprintf(stderr, "Motor slowed down.  Recomputing previous position and current position.\n");
       speed -= 2;
     }
