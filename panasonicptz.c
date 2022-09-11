@@ -466,6 +466,8 @@ int64_t panaMakeZoomLinear(int64_t zoomPosition) {
   return retval;
 }
 
+// This is essentially the reverse of panaMakeZoomLinear(), but is exact rather than
+// table-based, and is used in creating the table used by panaMakeZoomLinear().
 uint64_t scaleLinearZoomToRawZoom(uint64_t linearZoom) {
   // After capturing zoom data from my camera in both directions, I computed
   // for a series of samples the sum of the opposite endpoint values and
