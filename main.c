@@ -938,6 +938,11 @@ int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed) {
       speedValues[maxSpeed] - speedValues[maxSpeed - 1];
   int64_t scale_max =
       speedValues[maxSpeed] + (last_scale_step_size / 2);
+  if (scale_max == 0) {
+      fprintf(stderr, "Defective speed data detected.  Using fake numbers.\n");
+      fprintf(stderr, "You should recalibrate immediately\n");
+      scale_max = maxSpeed;
+  }
   int32_t *outputValues =
       (int32_t *)malloc((maxSpeed + 1) * sizeof(int32_t));
   for (int i = 0; i <= maxSpeed; i++) {
@@ -2248,12 +2253,12 @@ void do_calibration(void) {
   gCalibrationModeVISCADisabled = false;
   gCalibrationMode = false;
 
-  if (motorModuleReload()) {
-    fprintf(stderr, "Panasonic module reload failed.  Bailing.\n");
+  if (!motorModuleReload()) {
+    fprintf(stderr, "Motor module reload failed.  Bailing.\n");
     exit(1);
   }
 
-  if (panaModuleReload()) {
+  if (!panaModuleReload()) {
     fprintf(stderr, "Panasonic module reload failed.  Bailing.\n");
     exit(1);
   }
