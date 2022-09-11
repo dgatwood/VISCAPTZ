@@ -2624,8 +2624,10 @@ bool resetCalibration(void) {
   bool retval = true;
   retval = removeConfigKey(kPanMotorReversedKey) && retval;
   retval = removeConfigKey(kTiltMotorReversedKey) && retval;
+  retval = removeConfigKey(kZoomMotorReversedKey) && retval;
   retval = removeConfigKey(kPanEncoderReversedKey) && retval;
   retval = removeConfigKey(kTiltEncoderReversedKey) && retval;
+  retval = removeConfigKey(kZoomEncoderReversedKey) && retval;
   retval = removeConfigKey(kPanLimitLeftKey) && retval;
   retval = removeConfigKey(kPanLimitRightKey) && retval;
   retval = removeConfigKey(kTiltLimitTopKey) && retval;
