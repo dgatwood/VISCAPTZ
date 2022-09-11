@@ -64,6 +64,9 @@ const char *kZoomEncoderReversedKey = "zoom_encoder_reversed";
 /** String key containing the camera IP address for the Panasonic module. */
 const char *kCameraIPKey = "camera_ip_address";
 
+/** Boolean key indicating that the zoom motor uses larger values to zoom out. */
+const char *kZoomMotorReversedKey = "zoom_motor_reversed";
+
 #if USE_TRICASTER_TALLY_SOURCE
   /** String key containing the switcher IP address for the Tricaster module. */
   const char *kTricasterIPKey = "tricaster_ip_address";
@@ -2631,6 +2634,10 @@ bool tiltMotorReversed(void) {
   return getConfigKeyBool(kTiltMotorReversedKey);
 }
 
+bool zoomMotorReversed(void) {
+  return getConfigKeyBool(kZoomMotorReversedKey);
+}
+
 bool panEncoderReversed(void) {
   return getConfigKeyBool(kPanEncoderReversedKey);
 }
@@ -2665,6 +2672,10 @@ int64_t setZoomOutLimit(int64_t limit) {
 
 int64_t setZoomEncoderReversed(bool isReversed) {
   return setConfigKeyBool(kZoomEncoderReversedKey, isReversed);
+}
+
+int64_t setZoomMotorReversed(bool isReversed) {
+  return setConfigKeyBool(kZoomMotorReversedKey, isReversed);
 }
 
 int64_t zoomInLimit(void) {

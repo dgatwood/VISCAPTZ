@@ -4,6 +4,9 @@
 
 #pragma mark - Base implementation functions, callable from modules.
 
+/** Returns seconds since January 1, 1970 with microsecond precision. */
+double timeStamp(void);
+
 /** True when in calibration mode. */
 extern bool gCalibrationMode;
 
@@ -117,6 +120,9 @@ bool panMotorReversed(void);
 /** True if the tilt motor moves to down when sent positive speed values. */
 bool tiltMotorReversed(void);
 
+/** True if the zoom motor zooms out when sent positive speed values. */
+bool zoomMotorReversed(void);
+
 /** True if the pan encoder values increase when moving to the right. */
 bool panEncoderReversed(void);
 
@@ -133,6 +139,13 @@ int64_t zoomEncoderReversed(void);
  *                   when zooming out, else false.
  */
 int64_t setZoomEncoderReversed(bool isReversed);
+
+/**
+ * Sets the value returned by zoomMotorReversed.
+ *
+ * @param isReversed True if positive values zoom out, else false.
+ */
+int64_t setZoomMotorReversed(bool isReversed);
 
 /** The leftmost position used during calibration. */
 int64_t leftPanLimit(void);
