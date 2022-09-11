@@ -1274,7 +1274,9 @@ bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, boo
     }
   }
 
-  bool reversed = (axis == axis_identifier_pan) ? panMotorReversed() : tiltMotorReversed();
+  bool reversed = (axis == axis_identifier_pan) ? panMotorReversed() :
+                  (axis == axis_identifier_tilt) ? tiltMotorReversed() :
+                  zoomMotorReversed();
   if (debug) {
     fprintf(stderr, "Reverse motor direction for axis %d: %s\n", axis, reversed ? "YES" : "NO");
   }
