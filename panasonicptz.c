@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "main.h"
+#include "configurator.h"
 #include "constants.h"
 
 #pragma mark - Data types
@@ -25,12 +26,24 @@ typedef struct {
   size_t len;
 } curl_buffer_t;
 
+/** A motor/zoom position at a given time. */
+typedef struct {
+  int64_t position;
+  double timeStamp;
+} timed_position_t;
+
+/** Integer key providing the zoomed in limit for calibration and recalibration. */
+static const char *kZoomInInternalLimitKey = "zoom_in_internal_limit";
+
+/** Integer key providing the zoomed out limit for calibration and recalibration. */
+static const char *kZoomOutInternalLimitKey = "zoom_out_internal_limit";
+
 
 #pragma mark - Function prototypes
 
 #define FREEMULTI(array) freeMulti(array, sizeof(array) / sizeof(array[0]))
 void freeMulti(char **array, ssize_t count);
- 
+
 char *panaIntString(uint64_t value, int digits, bool hex);
 
 void freeURLBuffer(curl_buffer_t *buffer);
@@ -40,10 +53,15 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
 char *sendCommand(const char *group, const char *command, char *values[],
                   int numValues, const char *responsePrefix);
 
+void populateZoomNonlinearityTable(void);
+
 void runPanasonicTests(void);
 
 
 #pragma mark - Global variables
+
+static int64_t *zoom_position_map;
+static int zoom_position_map_count;
 
 /** If true, enables extra debugging. */
 static bool pana_enable_debugging = false;
@@ -95,6 +113,8 @@ bool panaModuleInit(void) {
 #else
     if (pana_enable_debugging) fprintf(stderr, "Panasonic module init skipped\n");
 #endif
+
+    populateZoomNonlinearityTable();
     return panaModuleReload();
 }
 
@@ -389,9 +409,9 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     char *intSpeedString = panaIntString(intSpeed, 2, false);
 
     if (localDebug) {
-        fprintf(stderr, "Core speed %" PRId64 "\n", speed);
-        fprintf(stderr, "Speed %d\n", intSpeed);
-        fprintf(stderr, "Speed string %s\n", intSpeedString);
+        fprintf(stderr, "Zoom Core speed %" PRId64 "\n", speed);
+        fprintf(stderr, "Zoom Speed %d\n", intSpeed - 50);
+        fprintf(stderr, "Zoom Speed string %s\n", intSpeedString);
     }
 
     bool retval = true;
@@ -426,10 +446,104 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
     return retval;
 }
 
-// Public function.  Docs in header.
+// Holy &)*@^(& @^$&!  Panasonic's zoom positions aren't even linear.  Zooming out
+// from the longest zoom position at the slowest speed moves at 48 positions per
+// second, but zooming in at the slowest speed from the widest zoom position moves
+// at only *4* positions per second!  I think it might actually be exponential or
+// something insane.  This means we have to find some way to convert that into a
+// linear range before we can do *anything* with it.  AAAAAAAARGH!
 //
-// Gets the camera's current zoom position.
-int64_t panaGetZoomPosition(void) {
+// Anyway, this converts a hardware zoom value into something roughly linear.
+int64_t panaMakeZoomLinear(int64_t zoomPosition) {
+  if (zoom_position_map_count == 0) return zoomPosition;
+
+  // Use the hardware zoom value as the baseline.
+  int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
+  int64_t entry = zoomPosition - minZoom;  // Subtract the base.
+
+  int64_t retval = zoom_position_map[entry];
+  fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", zoomPosition, retval);
+  return retval;
+}
+
+uint64_t scaleLinearZoomToRawZoom(uint64_t linearZoom) {
+  // After capturing zoom data from my camera in both directions, I computed
+  // for a series of samples the sum of the opposite endpoint values and
+  // the difference in their timestamps from the starting time, then moving
+  // in opposite directions in the array.  Luckily, they had the same number
+  // of items.  This gave an approximate average of the speed between the
+  // two directions.
+  //
+  // From there, I determined that the fourth-degree polynomial of best fit was:
+  //
+  // f(x) =  1.3650286222285520e+003 * x^0
+  //          +  3.8889564218704376e+000 * x^1
+  //          +  1.2969582507813382e-002 * x^2
+  //          + -1.8952897135302623e-004 * x^3
+  //          +  2.7173948297895539e-006 * x^4
+  //
+  // This was with a range from 0 to 176 seconds.
+
+  // Scale that range up by 100 so we go from 1 to 18k or so, thus stretching the
+  // scale rather than compressing it.
+  double scale = 0.01;
+
+  double scaledZoom = linearZoom * scale;
+
+  return 1.3650286222285520e+003
+     +  3.8889564218704376 * scaledZoom
+     +  0.012969582507813382 * pow(scaledZoom, 2)
+     + -0.00018952897135302623 * pow(scaledZoom, 3)
+     +  0.0000027173948297895539 * pow(scaledZoom, 4);
+}
+
+void populateZoomNonlinearityTable(void) {
+  int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
+  int64_t maxZoom = getConfigKeyInteger(kZoomInInternalLimitKey);
+
+  fprintf(stderr, "In populate: %lld %lld\n", minZoom, maxZoom);
+  if (minZoom >= maxZoom || maxZoom == 0) {
+    // Implausible data.
+    return;
+  }
+
+  zoom_position_map_count = maxZoom - minZoom + 1;
+  zoom_position_map = malloc(zoom_position_map_count * sizeof(int64_t));
+
+  int64_t position = 0;
+  int64_t scaledPosition = scaleLinearZoomToRawZoom(position);
+
+  // If this assertion fails, your camera will require a different nonlinearity map.
+  // Turn on debugging in printZoomNonlinearityComputation(), convert the table into
+  // a third-degree equation with a polynomial solver (e.g. https://arachnoid.com/polysolve/)
+  // and update the values in scaleLinearZoomToRawZoom(), guarding your changes with a
+  // compile-time flag.
+
+  fprintf(stderr, "%d <= %lld\n", (int)floor(scaledPosition),  minZoom);
+  assert(floor(scaledPosition) <= minZoom);
+
+  int lastPosition = minZoom - 1;
+  while (scaledPosition <= maxZoom) {
+    // fprintf(stderr, "min/max: %lld %lld\n", minZoom, maxZoom);
+    // fprintf(stderr, "pos %lld scaled %lld (between %lld and %lld, inclusive)\n",
+    // position, scaledPosition, minZoom, maxZoom);
+    if (scaledPosition > lastPosition) {
+      lastPosition++;
+      uint64_t index = lastPosition - minZoom;
+      zoom_position_map[index] = position;
+
+      fprintf(stderr, "zoom_position_map[%lld] = %lld\n", index,
+              zoom_position_map[index]);
+    }
+
+    position++;
+    scaledPosition = scaleLinearZoomToRawZoom(position);
+  }
+}
+
+// Similar to panaGetZoomPosition, but does not correct for the nonlinearity of
+// the position data.  [redacted swearing at Panasonic]
+int64_t panaGetZoomPositionRaw(void) {
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_zoom_position = 0;
     char *response = sendCommand("ptz", "#GZ", NULL, 0, "gz");
@@ -442,6 +556,14 @@ int64_t panaGetZoomPosition(void) {
         if (localDebug) fprintf(stderr, "Did not get response from CGI.  Returning last value.\n");
     }
     return last_zoom_position;
+}
+
+// Public function.  Docs in header.
+//
+// Gets the camera's current zoom position.
+int64_t panaGetZoomPosition(void) {
+    int64_t nonlinearZoomPosition = panaGetZoomPositionRaw();
+    return panaMakeZoomLinear(nonlinearZoomPosition);
 }
 
 // Public function.  Docs in header.
@@ -524,9 +646,9 @@ curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
 
   curl_easy_setopt(handle, CURLOPT_URL, URL);
   curl_easy_setopt(handle, CURLOPT_WRITEDATA, (void *)chunk);
- 
+
   CURLcode res = curl_easy_perform(handle);
- 
+
   if(res != CURLE_OK) {
     fprintf(stderr, "curl_easy_perform() failed: %s\n",
         curl_easy_strerror(res));
@@ -549,18 +671,18 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
 {
   size_t totalSize = chunkSize * nChunks;
   curl_buffer_t *chunk = (curl_buffer_t *)userp;
- 
+
   char *ptr = realloc(chunk->data, chunk->len + totalSize + 1);
   if(!ptr) {
     fprintf(stderr, "Out of memory in realloc\n");
     return 0;
   }
- 
+
   chunk->data = ptr;
   bcopy(contents, &(chunk->data[chunk->len]), totalSize);
   chunk->len += totalSize;
   chunk->data[chunk->len] = 0;
- 
+
   return totalSize;
 }
 
@@ -568,18 +690,27 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
 #pragma mark - Calibration
 
 /** Polls the zoom position 5x per second until it stops for at least a second. */
-void waitForZoomStop(void) {
-  bool localDebug = false;
-  int64_t lastPosition = panaGetZoomPosition();
+void waitForZoomStop(timed_position_t **dataPointsOut, int *dataPointCountOut) {
+  bool localDebug = true;
+  int64_t lastPosition = panaGetZoomPositionRaw();
   int stoppedCount = 0;
+
+  int dataPointCount = 1;
+  timed_position_t *dataPoints = (dataPointsOut == NULL) ? NULL : malloc(sizeof(timed_position_t));
+
+  if (dataPointsOut != NULL) {
+    dataPoints[0].position = lastPosition;
+    dataPoints[0].timeStamp = timeStamp();
+  }
 
   if (localDebug) {
     fprintf(stderr, "Initial position: %" PRId64 "\n", lastPosition);
   }
 
-  // If no motion for a second, we're done.
-  while (stoppedCount < 5) {
-    int64_t currentPosition = panaGetZoomPosition();
+  // If no motion for a second, we're done, unless we never stated, in which
+  // case wait a little longer.
+  while (stoppedCount < ((dataPointCount <= 1) ? 50 : 5)) {
+    int64_t currentPosition = panaGetZoomPositionRaw();
 
     if (localDebug) {
       fprintf(stderr, "Current position: %" PRId64 "\n", currentPosition);
@@ -589,9 +720,30 @@ void waitForZoomStop(void) {
       stoppedCount++;
     } else {
       stoppedCount = 0;
+      dataPointCount++;
+      if (dataPointsOut != NULL) {
+        dataPoints = realloc(dataPoints, dataPointCount * sizeof(timed_position_t));
+        dataPoints[dataPointCount - 1].position = currentPosition;
+        dataPoints[dataPointCount - 1].timeStamp = timeStamp();
+      }
     }
     lastPosition = currentPosition;
     usleep(200000);
+  }
+  if (dataPointsOut != NULL) {
+    *dataPointsOut = dataPoints;
+  }
+  if (dataPointCountOut != NULL) {
+    *dataPointCountOut = dataPointCount;
+  }
+}
+
+void printZoomNonlinearityComputation(timed_position_t *positionArray, int count) {
+  fprintf(stderr, "NLC\n");
+  for (int i = 0 ; i < count; i++) {
+    fprintf(stderr, "%d\t%lf\t%lld\n", i,
+            positionArray[i].timeStamp - positionArray[0].timeStamp,
+            positionArray[i].position);
   }
 }
 
@@ -600,30 +752,70 @@ void waitForZoomStop(void) {
 // Creates speed tables indicating how fast the zoom axis moves at various
 // speeds (in positions per second).
 void panaModuleCalibrate(void) {
-  bool localDebug = false;
+  bool localDebug = true;
 
   fprintf(stderr, "Calibrating zoom motors.  This takes about 20 minutes.\n");
 
-  // Zoom all the way out.
+  // Zoom all the way out, in preparation for capturing calibration data on the
+  // way back out.
   panaSetZoomSpeed(-ZOOM_SCALE_HARDWARE, true);
-  waitForZoomStop();
+  timed_position_t *positionArray = NULL;
+  int count = 0;
+  waitForZoomStop(NULL, NULL);
+
+  setConfigKeyInteger(kZoomOutInternalLimitKey, panaGetZoomPositionRaw());
+
+  // Zoom all the way in to determine the upper zoom limit and capture
+  // calibration data to determine the nonlinearity of the zoom position data.
+  panaSetZoomSpeed(/*ZOOM_SCALE_HARDWARE / 8 */ 2, true);
+  fprintf(stderr, "Capturing positions per second for nonlinearity.");
+  waitForZoomStop(&positionArray, &count);
+  fprintf(stderr, "Done capturing positions per second for nonlinearity.");
+
+  setConfigKeyInteger(kZoomInInternalLimitKey, panaGetZoomPositionRaw());
+
+  // Currently, I have a hard-coded computation based on the data gathered here.
+  // At some point, we could maybe automate this, but for now, just print the data.
+  printZoomNonlinearityComputation(positionArray, count);
+  free(positionArray);
+
+  // Populate the nonlinearity table.
+  populateZoomNonlinearityTable();
+
+  // Zoom all the way back out to determine the minimum zoom after applying the
+  // nonlinearity compensation.
+  panaSetZoomSpeed(/*-ZOOM_SCALE_HARDWARE / 2 */ -2, true);
+  waitForZoomStop(&positionArray, &count);
+
+  // Print in the reverse direction for comparison.
+  printZoomNonlinearityComputation(positionArray, count);
+  free(positionArray);
+
   int64_t minimumZoom = panaGetZoomPosition();
 
   if (localDebug) {
+    fprintf(stderr, "Minimum zoom (raw): %" PRId64 "\n", panaGetZoomPositionRaw());
     fprintf(stderr, "Minimum zoom: %" PRId64 "\n", minimumZoom);
   }
-  
+
+  // Zoom all the way back in to determine the maximum zoom after applying the
+  // nonlinearity compensation.
   panaSetZoomSpeed(ZOOM_SCALE_HARDWARE, true);
-  waitForZoomStop();
+  waitForZoomStop(NULL, NULL);
+
   int64_t maximumZoom = panaGetZoomPosition();
 
   if (localDebug) {
+    fprintf(stderr, "Maximum zoom (raw): %" PRId64 "\n", panaGetZoomPositionRaw());
     fprintf(stderr, "Maximum zoom: %" PRId64 "\n", maximumZoom);
   }
-  
+
   setZoomOutLimit(minimumZoom);
-  setZoomInLimit(minimumZoom);
+  setZoomInLimit(maximumZoom);
   setZoomEncoderReversed(true);
+  setZoomMotorReversed(false);
+
+  fprintf(stderr, "Done determining endpoints.\n");
 
   int64_t *zoomCalibrationData = calibrationDataForMoveAlongAxis(
       axis_identifier_zoom, maximumZoom, minimumZoom, 0, ZOOM_SCALE_HARDWARE, false);
