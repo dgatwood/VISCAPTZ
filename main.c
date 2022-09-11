@@ -2522,7 +2522,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
 
     int index = speed - minSpeed;
     data[index] = positionsPerSecondAverage;
-    fprintf(stderr, "Positions per second at speed %d: %" PRId64 "\n",
+    fprintf(stderr, "Positions per second at speed %d (average): %" PRId64 "\n",
             index, positionsPerSecondAverage);
 
     // The motor may stall at low voltages, but once it gets moving, it should get faster

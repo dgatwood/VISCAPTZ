@@ -462,7 +462,7 @@ int64_t panaMakeZoomLinear(int64_t zoomPosition) {
   int64_t entry = zoomPosition - minZoom;  // Subtract the base.
 
   int64_t retval = zoom_position_map[entry];
-  fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", zoomPosition, retval);
+  // fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", zoomPosition, retval);
   return retval;
 }
 
