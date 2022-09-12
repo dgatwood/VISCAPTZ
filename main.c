@@ -2437,6 +2437,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
 
     double positionsPerSecond[NUM_SAMPLES];
     double positionsPerSecondAverage = 0;
+    int failures = 0;
     while (!done) {
       // No need to invert the drive direction.  The motor driver should already be
       // handling that.
@@ -2514,9 +2515,13 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
           double errorPercent = error / newmax;
           if (error <= 2 || errorPercent < .1) {
             done = true;
+          } else if (failures >= 3) {
+            done = true;
+            fprintf(stderr, "Total error is still too large, but too many retries, so giving up.\n");
           } else {
             fprintf(stderr, "Total error %lf > 2 and error percent %lf >= .1.  Trying again.\n",
                     error, errorPercent);
+            failures++;
           }
         }
       }
