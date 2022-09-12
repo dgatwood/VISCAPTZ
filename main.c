@@ -1483,7 +1483,7 @@ visca_response_t *completedVISCAResponse(void) {
 visca_response_t *tallyEnabledResponse(int tallyState) {
   static visca_response_t response;
   uint8_t data[] = { 0x10, 0x50, 0x00, 0xff };
-  data[2] = (tallyState == 0) ? 2 : 3;
+  data[2] = tallyState;
   SET_RESPONSE(&response, data);
   return &response;
 }
@@ -1517,6 +1517,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
               // 8x 09 7E 01 0A FF -> y0 50 0p FF
               response = tallyModeResponse(tallyState);
             } else {
+              fprintf(stderr, "Unknown tally request\n");
               break;
             }
             while (!sendVISCAResponse(response, sequenceNumber, sock, client, structLength));
