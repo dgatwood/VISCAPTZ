@@ -15,7 +15,7 @@ hex_nut_size = 3.45;  // Measured at 6.35 tip-to-tip (5.56 across), but we lose 
 // Edge is 2.5mm in from edge of body.
 
 // Uncomment to generate 2D projection for printing a flat screw template
-// projection() 
+// projection()
 union() {
     // Plate 1: Replacement motor mount.
     translate(plate_1_translate) rotate([0, 180, 0]) difference() {
@@ -23,16 +23,16 @@ union() {
             // Square part of plate 1
             cube([41, 36, 8]);
             translate([0, 18, 4]) cylinder(h=8, r=18, center=true, $fn = circle_facets);
-            
+
             // Expansion of plate to hold encoder post
-            translate([19, -54, 0]) cube([22, 55, 8]);        
+            translate([19, -74, 0]) cube([22, 75, 8]);
 
             // Post for encoder
             // 11.8 width
             // 15 down
             // 40 across
-            translate([32.5, -46.5, -1.05]) cylinder(h=18, r=5.95, center=true, $fn = circle_facets);
-        
+            translate([32.5, -66.5, -1.05]) cylinder(h=18, r=5.95, center=true, $fn = circle_facets);
+
         }
         union() {  // Holes in plate 1
             // Motor hole
@@ -53,7 +53,7 @@ union() {
 
             // Clamp gap
             translate([31, 13.5, -1]) cube([3, 23, 10]);
-            
+
             // Clamp screw hole M6 (unthreaded, 6.1mm)
             translate([32.5, 28.95, 4]) rotate([0,90,0]) cylinder(h = 100, r = 3.1, $fn = circle_facets);
 
@@ -87,7 +87,7 @@ union() {
             // Screw circle is 15mm radius
             // Edge of circle is at 33
             // This is 270 degrees from the X axis.
-            
+
             // ---- Encoder screw holes ----
 
             // Encoder screw hole #1
@@ -98,14 +98,14 @@ union() {
             // 150 degrees from x axis: x = -12.99, y = 7.5
             translate([-7.01, 25.5, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
             translate([-7.01, 25.5, 3]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
-            
+
             // Encoder screw hole #3
             // 30 degrees from x axis:  x = 12.99, y = 7.5
             translate([-32.99, 25.5, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
             translate([-32.99, 25.5, 3]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
-            
+
             // ---- Screw holes between parts ----
-            
+
             // Screw hole #4 (through hole between parts)
             translate([5, 33, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
 
@@ -142,7 +142,7 @@ union() {
                 translate([41, 29, 12]) rotate([0,90,0]) cylinder(h = 100, r = 2.5, $fn = circle_facets);
             }  // Plate 3 clamp holes
         };  // Clamp part of plate 3
-        
+
         rotate([0, 0, 0]) difference() {
             // Through-screw part of plate
             translate(plate_3_translate) translate([0, -3, 8]) cube([41, 42, 8]);
