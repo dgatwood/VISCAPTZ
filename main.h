@@ -106,7 +106,7 @@ bool writeCalibrationDataForAxis(axis_identifier_t axis,
  *                    the array --- typically the value of
  *                    a *_SCALE_HARDWARE constant.
  */
-int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed);
+int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed, axis_identifier_t axis);
 
 /**
  * Returns the first nonzero value in the provided calibration data, or 0 if data is nil

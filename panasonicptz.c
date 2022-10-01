@@ -129,7 +129,8 @@ bool panaModuleReload(void) {
         readCalibrationDataForAxis(axis_identifier_zoom, &maxSpeed);
     if (maxSpeed == ZOOM_SCALE_HARDWARE) {
         panasonicScaledZoomCalibrationData =
-            convertSpeedValues(panasonicZoomCalibrationData, ZOOM_SCALE_HARDWARE);
+            convertSpeedValues(panasonicZoomCalibrationData, ZOOM_SCALE_HARDWARE,
+                               axis_identifier_zoom);
         if (localDebug) {
           for (int i=0;i<ZOOM_SCALE_HARDWARE;i++) {
             fprintf(stderr, "%d: raw: %" PRId64 "\n", i, panasonicZoomCalibrationData[i]);
@@ -146,14 +147,16 @@ bool panaModuleReload(void) {
           readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
       if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
           pana_pan_scaled_data =
-              convertSpeedValues(pana_pan_data, PAN_TILT_SCALE_HARDWARE);
+              convertSpeedValues(pana_pan_data, PAN_TILT_SCALE_HARDWARE,
+                               axis_identifier_pan);
       }
 
       pana_tilt_data =
           readCalibrationDataForAxis(axis_identifier_tilt, &maxSpeed);
       if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
           pana_tilt_scaled_data =
-              convertSpeedValues(pana_tilt_data, PAN_TILT_SCALE_HARDWARE);
+              convertSpeedValues(pana_tilt_data, PAN_TILT_SCALE_HARDWARE,
+                               axis_identifier_tilt);
       }
     #endif  // !PANASONIC_PTZ_ZOOM_ONLY
   #endif  // USE_PANASONIC_PTZ
@@ -400,7 +403,7 @@ int64_t panaGetZoomSpeed(void) {
 //
 // Sets the camera's zoom speed.
 bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
-    bool localDebug = false;
+    bool localDebug = false || pana_enable_debugging;
     gLastZoomSpeed = speed;
 
     int intSpeed =
@@ -830,7 +833,7 @@ void panaModuleCalibrate(void) {
   fprintf(stderr, "Done determining endpoints.\n");
 
   int64_t *zoomCalibrationData = calibrationDataForMoveAlongAxis(
-      axis_identifier_zoom, maximumZoom, minimumZoom, 0, ZOOM_SCALE_HARDWARE, false);
+      axis_identifier_zoom, maximumZoom, minimumZoom, 0, ZOOM_SCALE_HARDWARE, true);
 
   writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE);
 }

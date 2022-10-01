@@ -121,14 +121,16 @@ bool motorModuleReload(void) {
         readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
     if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
         motor_pan_scaled_data =
-            convertSpeedValues(motor_pan_data, PAN_TILT_SCALE_HARDWARE);
+            convertSpeedValues(motor_pan_data, PAN_TILT_SCALE_HARDWARE,
+                               axis_identifier_pan);
     }
 
     motor_tilt_data =
         readCalibrationDataForAxis(axis_identifier_tilt, &maxSpeed);
     if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
         motor_tilt_scaled_data =
-            convertSpeedValues(motor_tilt_data, PAN_TILT_SCALE_HARDWARE);
+            convertSpeedValues(motor_tilt_data, PAN_TILT_SCALE_HARDWARE,
+                               axis_identifier_tilt);
     }
   #endif  // USE_MOTOR_PAN_AND_TILT
   return true;

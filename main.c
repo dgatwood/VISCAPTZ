@@ -927,7 +927,7 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
   return toScale * sign;
 }
 
-int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed) {
+int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed, axis_identifier_t axis) {
   assert(maxSpeed > 0);
 
   // Compute the size of the last scale step between the fastest
@@ -939,7 +939,7 @@ int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed) {
   int64_t scale_max =
       speedValues[maxSpeed] + (last_scale_step_size / 2);
   if (scale_max == 0) {
-      fprintf(stderr, "Defective speed data detected.  Using fake numbers.\n");
+      fprintf(stderr, "Defective speed data detected for axis %d.  Using fake numbers.\n", axis);
       fprintf(stderr, "You should recalibrate immediately\n");
       scale_max = maxSpeed;
   }
@@ -2539,8 +2539,13 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     // in identical speeds, so it's potentially okay for it to not speed up, but it should never
     // slow down.
     if (speed >= 1 && data[index] < data[index - 1] && data[index] > 0) {
-      fprintf(stderr, "Motor slowed down.  Recomputing previous position and current position.\n");
-      speed -= 2;
+      if (pollingIsSlow) {
+        fprintf(stderr, "Motor slowed down.  Assuming speed is unchanged.\n");
+        data[index] = data[index - 1];
+      } else {
+        fprintf(stderr, "Motor slowed down.  Recomputing previous position and current position.\n");
+        speed -= 2;
+      }
     }
   }
   setAxisSpeedRaw(axis, 0, false);
@@ -2789,7 +2794,7 @@ void runStartupTests(void) {
     assert(fakeData[i] == fakeData2[i]);
   }
 
-  int32_t *translatedData = convertSpeedValues(fakeData, 3);
+  int32_t *translatedData = convertSpeedValues(fakeData, 3, 0);
   int32_t expectedResuls[] = { 0, 285, 571, 857 };
   assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)));
 
