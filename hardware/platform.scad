@@ -139,7 +139,7 @@ union() {
                 translate([52.5, 28.95, 12]) rotate([0,90,0]) cylinder(h = 100, r = 3.1, $fn = circle_facets);
 
                 // Clamp screw hole M6 (threaded, 5mm)
-                translate(plate_3_translate) translate([41, 29, 12]) rotate([0,90,0]) cylinder(h = 100, r = 2.5, $fn = circle_facets);
+                translate([41, 29, 12]) rotate([0,90,0]) cylinder(h = 100, r = 2.5, $fn = circle_facets);
             }  // Plate 3 clamp holes
         };  // Clamp part of plate 3
         
