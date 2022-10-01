@@ -1,0 +1,10 @@
+These are plates for attaching BRT38-COM4069D24-RT1 rotary encoders or similar to a
+Vidpro MH-430 motorized pan and tilt gimbal.
+
+The alternate plate 3 is an earlier version of plate 3 that can be used for the
+tilt axis to make it visually obvious which encoder goes on which axis.  (The
+two encoders are not interchangeable unless you modify the code to use two
+separate CAN buses.)
+
+Note: The alternate plate 3 cannot be used for the pan encoder, because it bumps
+into the vertical post that holds up the gimbal.
