@@ -37,7 +37,7 @@ bool setTallyOff(void);
  * This takes a significant amount of time, and should be performed
  * only when the hardware changes.
  *
- * @param axis          
+ * @param axis
  * @param startPosition The leftmost or topmost position or most zoomed
  *                      out position used during calibration.  The
  *                      calibration code moves the axis back and forth

@@ -134,6 +134,9 @@ typedef struct {
 
 // General state
 
+/** True if VISCA commands use core scale, else false. */
+bool gVISCAUsesCoreScale = false;
+
 /** True if in calibration mode, else false. */
 bool gCalibrationMode = false;
 
@@ -369,7 +372,7 @@ double timeStamp(void);
 
 
 /**
- * Sends the provided VISCA response, modified to use the specified sequence number, 
+ * Sends the provided VISCA response, modified to use the specified sequence number,
  * over the specified socket, using the specified source address and source address
  * length.
  */
@@ -818,7 +821,7 @@ void handleRecallUpdates(void) {
         }
         gAxisMoveInProgress[axis] = false;
         setAxisSpeed(axis, 0, false);
-      } else {      
+      } else {
         // Compute the target speed based on the current pan progress.
         //
         // If we do not have calibration data, specify a floor (MIN_PAN_TILT_SPEED) to
@@ -956,8 +959,11 @@ int64_t scaleVISCAPanTiltSpeedToCoreSpeed(int speed) {
 }
 
 int64_t scaleVISCAZoomSpeedToCoreSpeed(int speed) {
-  // fprintf(stderr, "VISCA speed %d\n", speed);
-  return scaleSpeed(speed, ZOOM_SCALE_VISCA, SCALE_CORE, NULL);
+  if (gVISCAUsesCoreScale) {
+    return speed;
+  }
+  int64_t retval = scaleSpeed(speed, ZOOM_SCALE_VISCA, SCALE_CORE, NULL);
+  return retval;
 }
 
 int64_t getAxisPosition(axis_identifier_t axis) {
@@ -1244,7 +1250,7 @@ double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   // This computes the maximum possible duration that the axis can spend reaching a
   // given position by dividing the number of positions by the number of positions
   // per second at the slowest native speed.
-  // 
+  //
   // As with the fastest move computation, we ignore any ramp time to the slowest
   // speed, both because it would be too hard to compute that ramp time, and
   // because in practice, the ramp time to the slowest native speed is usually
@@ -1401,7 +1407,7 @@ void *runNetworkThread(void *argIgnored) {
     timeout.tv_usec = 10000;  // Update the speed of automatic recall operations 100x per second (10 ms).
 
     if (select(sock + 1, &read_fds, NULL, NULL, &timeout) > 0) {
-      int bytes_received = recvfrom(sock, &command, sizeof(visca_cmd_t), 0, 
+      int bytes_received = recvfrom(sock, &command, sizeof(visca_cmd_t), 0,
         (struct sockaddr *) &client, &structLength);
 
       if (bytes_received < 0) {
@@ -1505,6 +1511,20 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
   switch(command[1]) {
     case 0x09:
       switch(command[2]) {
+        case 0x04:
+          if (command[3] == 0x07 && command[4] == 0xFF) {
+            while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
+            static visca_response_t response;
+            uint8_t data[] = {
+                0x10, 0x50, 0xde, 0xad, 0xbe, 0xef, 0xfe, 0xed, 0xba, 0xbe,
+                (SCALE_CORE >> 8) & 0xff, SCALE_CORE & 0xff, 0xff
+            };
+            SET_RESPONSE(&response, data);
+            while (!sendVISCAResponse(&response, sequenceNumber, sock, client, structLength));
+
+            gVISCAUsesCoreScale = true;
+            return true;
+          }
         case 0x7e:
           if (command[3] == 0x01 && command[4] == 0x0a) {
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
@@ -1645,13 +1665,26 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 if (zoomCmd == 2) zoomCmd = 0x23;
                 if (zoomCmd == 3) zoomCmd = 0x33;
 
-                int8_t zoomSpeed = 0;
-                if (zoomCmd != 0) {  // Leave the speed at zero if the command is "zoom stop".
-                    int8_t zoomRawSpeed = command[4] & 0xf;
+                uint32_t zoomSpeed = 0;
+                if (gVISCAUsesCoreScale && (zoomCmd == 0x2f || zoomCmd == 0x3f)) {
+                    // Nonstandard zoom command.  Supported only after asking for the maximum
+                    // allowable zoom speed.
 
-                    // VISCA zoom speeds go from 0 to 7, but the output speed's 0 is stopped, so
-                    // immediately convert the range to be from 1 to 8 instead.
-                    zoomSpeed = ((zoomCmd & 0xf0) == 0x20) ? zoomRawSpeed + 1 : - (zoomRawSpeed + 1);
+                    zoomSpeed = (command[5] << 8) | command[6];
+
+                    if (zoomCmd == 0x3f) {
+                      zoomSpeed = -zoomSpeed;
+                    }
+fprintf(stderr, "Speed: %d\n", zoomSpeed);
+
+                } else {
+                    if (zoomCmd != 0) {  // Leave the speed at zero if the command is "zoom stop".
+                        int8_t zoomRawSpeed = command[4] & 0xf;
+
+                        // VISCA zoom speeds go from 0 to 7, but the output speed's 0 is stopped, so
+                        // immediately convert the range to be from 1 to 8 instead.
+                        zoomSpeed = ((zoomCmd & 0xf0) == 0x20) ? zoomRawSpeed + 1 : - (zoomRawSpeed + 1);
+                    }
                 }
                 // If there is a move (recall or position set) in progress, ignore any
                 // requests to set the zoom speed to zero, because that means the
@@ -1835,7 +1868,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                     tiltPosition += relativeTiltPosition;
 
                     cancelRecallIfNeeded("Pan/tilt relative command received");
-                    if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed), 
+                    if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
                                             tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
                                             0)) {
                         return false;
@@ -2511,7 +2544,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
             count++;
           }
           positionsPerSecondAverage = (double)total / count;
-  
+
           double error = (double)newmax - newmin;
           double errorPercent = error / newmax;
           if (error <= 2 || errorPercent < .1) {

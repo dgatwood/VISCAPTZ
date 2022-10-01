@@ -259,7 +259,7 @@ int motorOpenCANSock(void) {
         perror("socket PF_CAN failed");
         return 1;
     }
-    
+
     struct ifreq interfaceRequest;
     strcpy(interfaceRequest.ifr_name, "can0");
     int retval = ioctl(sock, SIOCGIFINDEX, &interfaceRequest);
@@ -276,7 +276,7 @@ int motorOpenCANSock(void) {
         perror("bind failed");
         return -1;
     }
-    
+
     if (localDebug) fprintf(stderr, "done\n");
     return sock;
 }
