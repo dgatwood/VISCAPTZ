@@ -503,10 +503,11 @@ uint64_t scaleLinearZoomToRawZoom(uint64_t linearZoom) {
 }
 
 void populateZoomNonlinearityTable(void) {
+  bool localDebug = false || pana_enable_debugging;
   int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
   int64_t maxZoom = getConfigKeyInteger(kZoomInInternalLimitKey);
 
-  fprintf(stderr, "In populate: %lld %lld\n", minZoom, maxZoom);
+  if (localDebug) fprintf(stderr, "In populate: %lld %lld\n", minZoom, maxZoom);
   if (minZoom >= maxZoom || maxZoom == 0) {
     // Implausible data.
     return;
@@ -525,7 +526,7 @@ void populateZoomNonlinearityTable(void) {
   // compile-time flag.  You can get the raw points by defining the
   // SHOW_NONLINEARITY_DATA_POINTS macro.
 
-  fprintf(stderr, "%d <= %lld\n", (int)floor(scaledPosition),  minZoom);
+  if (localDebug) fprintf(stderr, "%d <= %lld\n", (int)floor(scaledPosition),  minZoom);
   assert(floor(scaledPosition) <= minZoom);
 
   int lastPosition = minZoom - 1;
@@ -538,8 +539,10 @@ void populateZoomNonlinearityTable(void) {
       uint64_t index = lastPosition - minZoom;
       zoom_position_map[index] = position;
 
-      fprintf(stderr, "zoom_position_map[%lld] = %lld\n", index,
-              zoom_position_map[index]);
+      if (localDebug) {
+        fprintf(stderr, "zoom_position_map[%lld] = %lld\n", index,
+                zoom_position_map[index]);
+      }
     }
 
     position++;
