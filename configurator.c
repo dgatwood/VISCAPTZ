@@ -45,6 +45,7 @@ int64_t getConfigKeyInteger(const char *key) {
 // Returns the value of the specified key as a Boolean value.
 bool getConfigKeyBool(const char *key) {
   char *stringValue = getConfigKey(key);
+
   if (stringValue == NULL) {
     if (configuratorDebug) {
       fprintf(stderr, "Request for non-existent key %s as bool.  Returning false.\n", key);
@@ -162,7 +163,7 @@ bool setConfigKey(const char *key, const char *value) {
       error = error || (fprintf(fq, "%s", buf) == -1);
     }
   }
-  if (!found) {
+  if ((!found) && value != NULL) {
     error = error || (fprintf(fq, "%s=%s\n", key, value) == -1);
   }
 
