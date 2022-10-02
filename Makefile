@@ -17,7 +17,6 @@ USE_OBS_TALLY_SOURCE=0
 # Use a Tricaster as the tally source.
 USE_TRICASTER_TALLY_SOURCE=0
 
-
 ### There are no user-configurable values below this line.  ###
 
 UNAME := $(shell uname)

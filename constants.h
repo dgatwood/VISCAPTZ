@@ -63,4 +63,8 @@ typedef enum {
   extern const char *kTallySourceName;
 #endif
 
+#if USE_MOTOR_PAN_AND_TILT
+  extern const char *kMotorsAreSwappedKey;
+#endif
+
 #endif  // __CONSTANTS_H__

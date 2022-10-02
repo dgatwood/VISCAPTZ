@@ -100,5 +100,4 @@ int64_t motorMaximumTiltPositionsPerSecond(void);
     #define MIN_TILT_POSITIONS_PER_SECOND() motorMinimumTiltPositionsPerSecond();
     #define MAX_PAN_POSITIONS_PER_SECOND() motorMaximumPanPositionsPerSecond();
     #define MAX_TILT_POSITIONS_PER_SECOND() motorMaximumTiltPositionsPerSecond();
-
 #endif

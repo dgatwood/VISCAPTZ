@@ -465,6 +465,16 @@ int main(int argc, char *argv[]) {
       gCalibrationModeZoomOnly = true;
     } else if (!strcmp(argv[1], "--recenter")) {
       gRecenter = true;
+#if USE_MOTOR_PAN_AND_TILT
+    } else if (!strcmp(argv[1], "--setswappedmotors")) {
+      if (argc < 3) {
+        fprintf(stderr, "Usage: viscaptz --setswappedmotors [0|1]\n");
+        exit(1);
+      }
+      setConfigKeyBool(kMotorsAreSwappedKey, atoi(argv[2]));
+
+      exit(0);
+#endif
 #if TALLY_SOURCE_NAME_REQUIRED
     } else if (!strcmp(argv[1], "--settallysourcename")) {
       if (argc < 3) {
@@ -553,6 +563,11 @@ int main(int argc, char *argv[]) {
 
   if (gCalibrationMode) {
     fprintf(stderr, "Starting calibration.\n");
+    fprintf(stderr, "Starting calibration.  Move the camera as far to the left as possible, then as far to the\n");
+    fprintf(stderr, "right as possible.  Then move the camera as far up as possible, then as far down as possible.\n");
+    fprintf(stderr, "The order is important.  Make sure that your last horizontal move is to the right, and your\n");
+    fprintf(stderr, "last vertical move is downwards.\n\n");
+    fprintf(stderr, "When you are done, wait for a few seconds, and calibration will begin automatically.\n");
     do_calibration();
   }
 
@@ -1280,23 +1295,24 @@ bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, boo
     }
   }
 
-  bool reversed = (axis == axis_identifier_pan) ? panMotorReversed() :
-                  (axis == axis_identifier_tilt) ? tiltMotorReversed() :
-                  zoomMotorReversed();
+  int panReversed = panMotorReversed() ? -1 : 1;
+  int tiltReversed = tiltMotorReversed() ? -1 : 1;
+  int zoomReversed = zoomMotorReversed() ? -1 : 1;
+
   if (debug) {
-    fprintf(stderr, "Reverse motor direction for axis %d: %s\n", axis, reversed ? "YES" : "NO");
+    fprintf(stderr, "Reverse motor direction for pan: %s tilt: %s zoom: %s\n",
+            panReversed ? "YES" : "NO", tiltReversed ? "YES" : "NO", zoomReversed ? "YES" : "NO");
   }
 
   gAxisLastMoveSpeed[axis] = speed;
 
-  int64_t speedReversedIfNeeded = reversed ? -speed : speed;
   switch(axis) {
     case axis_identifier_pan:
-        return SET_PAN_TILT_SPEED(speedReversedIfNeeded, gAxisLastMoveSpeed[axis_identifier_tilt], isRaw);
+        return SET_PAN_TILT_SPEED(speed * panReversed, gAxisLastMoveSpeed[axis_identifier_tilt] * tiltReversed, isRaw);
     case axis_identifier_tilt:
-        return SET_PAN_TILT_SPEED(gAxisLastMoveSpeed[axis_identifier_pan], speedReversedIfNeeded, isRaw);
+        return SET_PAN_TILT_SPEED(gAxisLastMoveSpeed[axis_identifier_pan] * panReversed, speed * tiltReversed, isRaw);
     case axis_identifier_zoom:
-        return SET_ZOOM_SPEED(speedReversedIfNeeded, isRaw);
+        return SET_ZOOM_SPEED(speed * zoomReversed, isRaw);
   }
   return false;
 }
@@ -2118,7 +2134,7 @@ double currentRecallTime(void) {
 
 // Computes a map between motor speed and encoder positions per second for each axis.
 void do_calibration(void) {
-  int localDebug = 0;
+  int localDebug = 1;
   int64_t lastPosition[NUM_AXES];
   int64_t maxPosition[NUM_AXES];
   int64_t minPosition[NUM_AXES];
@@ -2168,7 +2184,7 @@ void do_calibration(void) {
         // See if the position has moved (by enough to matter).
         int64_t value = getAxisPosition(axis);
         bool axisMoved = false;
-        if (llabs(lastPosition[axis] - value) > 5) {
+        if (llabs(lastPosition[axis] - value) > 50) {
           lastMoveTime = timeStamp();
           axisHasMoved[axis] = true;
           axisMoved = true;

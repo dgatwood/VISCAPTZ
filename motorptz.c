@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "main.h"
+#include "configurator.h"
 #include "constants.h"
 
 #define ENABLE_STATUS_DEBUGGING 0
@@ -69,6 +70,8 @@ static volatile int64_t g_last_pan_position = 0;
 static volatile int64_t g_last_tilt_position = 0;
 
 static volatile bool g_pan_tilt_raw = false;
+
+const char *kMotorsAreSwappedKey = "motors_are_swapped";
 
 #if USE_MOTOR_PAN_AND_TILT
   int64_t *motor_pan_data = NULL;
@@ -560,13 +563,15 @@ void *runMotorControlThread(void *argIgnored) {
 
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
 
+    bool motorsAreSwapped = getConfigKeyBool(kMotorsAreSwappedKey);
+
     // Set the pan motor speed.
     if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
-    Motor_Run(MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
+    Motor_Run(motorsAreSwapped ? MOTORB : MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
 
     // Set the tilt motor speed.
     if (localDebug) fprintf(stderr, "Setting motor B speed to %d.\n", scaledTiltSpeed);
-    Motor_Run(MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
+    Motor_Run(motorsAreSwapped ? MOTORA : MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
 
     if (localDebug) fprintf(stderr, "Done.\n");
 
@@ -626,6 +631,13 @@ void motorModuleCalibrate(void) {
   int64_t rightLimit = rightPanLimit();
   int64_t topLimit = topTiltLimit();
   int64_t bottomLimit = bottomTiltLimit();
+
+  if (motor_enable_debugging) {
+    fprintf(stderr, "LeftPanLimit: %" PRId64 "\n", leftLimit);
+    fprintf(stderr, "RightPanLimit: %" PRId64 "\n", rightLimit);
+    fprintf(stderr, "TopTiltLimit: %" PRId64 "\n", topLimit);
+    fprintf(stderr, "BottomTiltLimit: %" PRId64 "\n", bottomLimit);
+  }
 
   fprintf(stderr, "Calibrating pan and tilt motors.  This takes about 40 minutes.\n");
 
