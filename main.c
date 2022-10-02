@@ -2184,7 +2184,7 @@ void do_calibration(void) {
         // See if the position has moved (by enough to matter).
         int64_t value = getAxisPosition(axis);
         bool axisMoved = false;
-        if (llabs(lastPosition[axis] - value) > 50) {
+        if (llabs(lastPosition[axis] - value) > 200) {
           lastMoveTime = timeStamp();
           axisHasMoved[axis] = true;
           axisMoved = true;
