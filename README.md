@@ -201,8 +201,15 @@ Motor Configuration:
 --------------------
 
 Assuming you configure this software to use absolute positioning, the next thing
-you must do is calibrate the motors and encoders.  This process takes most of an
-hour under normal circumstances.  To do this, type:
+you must do is calibrate the motors and encoders.  This process can take several
+hours.
+
+If you are using the exact same hardware as I used, you can save time by using
+the provided sample configuration (viscaptz.conf-example), adjusting the reversed
+motor direction flags and the swapped motor flag as needed, and copying it to
+~/.viscaptz.conf.
+
+Otherwise, to begin calibrating, type:
 
     ./viscaptz --calibrate
 
@@ -210,6 +217,8 @@ hour under normal circumstances.  To do this, type:
        Once you start this operation, any existing
        calibration data is immediately discarded,
        because it would interfere with recalibration.
+       Make a backup of your .viscaptz.conf file before
+       you start, just in case the calibration fails.
 
 This software will ask you to move the gimbal first left, then right, then up, and
 then down.  This defines the boundaries of motion for calibration purposes.  If
@@ -259,4 +268,4 @@ change cameras, you need to recalibrate the zoom portion.  To do this, type:
 
     ./viscaptz --zoomcalibrate
 
-This saves about forty minutes calibrating the pan and tilt motors.
+This saves potentially a couple of hours calibrating the pan and tilt motors.
