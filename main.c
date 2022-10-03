@@ -2440,6 +2440,8 @@ double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     }
     if (localDebug || 1) {
       fprintf(stderr, "Reached end position while computing speed %d.  Reversing direction.\n", speed);
+      setAxisSpeedRaw(axis, 0, false);
+      usleep(500000);
     }
     direction = -direction;
 
