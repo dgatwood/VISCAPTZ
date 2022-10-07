@@ -124,7 +124,7 @@ bool panaModuleInit(void) {
 bool panaModuleReload(void) {
   #if USE_PANASONIC_PTZ
     int maxSpeed = 0;
-    bool localDebug = false;
+    bool localDebug = true;
     panasonicZoomCalibrationData =
         readCalibrationDataForAxis(axis_identifier_zoom, &maxSpeed);
     if (maxSpeed == ZOOM_SCALE_HARDWARE) {
@@ -132,7 +132,7 @@ bool panaModuleReload(void) {
             convertSpeedValues(panasonicZoomCalibrationData, ZOOM_SCALE_HARDWARE,
                                axis_identifier_zoom);
         if (localDebug) {
-          for (int i=0;i<ZOOM_SCALE_HARDWARE;i++) {
+          for (int i=0; i<=ZOOM_SCALE_HARDWARE; i++) {
             fprintf(stderr, "%d: raw: %" PRId64 "\n", i, panasonicZoomCalibrationData[i]);
             fprintf(stderr, "%d: scaled: %d\n", i, panasonicScaledZoomCalibrationData[i]);
           }
@@ -402,8 +402,9 @@ int64_t panaGetZoomSpeed(void) {
 // Public function.  Docs in header.
 //
 // Sets the camera's zoom speed.
+int64_t panaGetZoomPositionRaw(void);
 bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
-    bool localDebug = false || pana_enable_debugging;
+    bool localDebug = true || pana_enable_debugging;
     gLastZoomSpeed = speed;
 
     int intSpeed =
@@ -458,7 +459,10 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
 //
 // Anyway, this converts a hardware zoom value into something roughly linear.
 int64_t panaMakeZoomLinear(int64_t zoomPosition) {
-  if (zoom_position_map_count == 0) return zoomPosition;
+  if (zoom_position_map_count == 0) {
+    fprintf(stderr, "WARNING: Zoom position map empty.\n");
+    return zoomPosition;
+  }
 
   // Use the hardware zoom value as the baseline.
   int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
@@ -510,6 +514,7 @@ void populateZoomNonlinearityTable(void) {
   if (localDebug) fprintf(stderr, "In populate: %lld %lld\n", minZoom, maxZoom);
   if (minZoom >= maxZoom || maxZoom == 0) {
     // Implausible data.
+    fprintf(stderr, "Zoom range is broken (%lld to %lld).  Bailing.\n", minZoom, maxZoom);
     return;
   }
 
@@ -571,8 +576,13 @@ int64_t panaGetZoomPositionRaw(void) {
 //
 // Gets the camera's current zoom position.
 int64_t panaGetZoomPosition(void) {
+    bool localDebug = false;
     int64_t nonlinearZoomPosition = panaGetZoomPositionRaw();
-    return panaMakeZoomLinear(nonlinearZoomPosition);
+    int64_t retval = panaMakeZoomLinear(nonlinearZoomPosition);
+    if (localDebug) {
+        fprintf(stderr, "ZOOMPOS: %" PRId64 "\n", retval);
+    }
+    return retval;
 }
 
 // Public function.  Docs in header.
@@ -803,10 +813,22 @@ void panaModuleCalibrate(void) {
     // Print in the reverse direction for comparison.
     printZoomNonlinearityComputation(positionArray, count);
     free(positionArray);
+  #else
+
+    // We have to provide kZoomInInternalLimitKey whether we're printing the
+    // data for computing a new table or not!
+    panaSetZoomSpeed(ZOOM_SCALE_HARDWARE, true);
+    waitForZoomStop(NULL, NULL);
+    setConfigKeyInteger(kZoomInInternalLimitKey, panaGetZoomPositionRaw());
+
+    panaSetZoomSpeed(-ZOOM_SCALE_HARDWARE, true);
+    waitForZoomStop(NULL, NULL);
+
   #endif
 
   // Populate the nonlinearity table so that panaGetZoomPosition() will provide
   // linearized values below.
+  fprintf(stderr, "Populating nonlinearity table.\n");
   populateZoomNonlinearityTable();
 
   int64_t minimumZoom = panaGetZoomPosition();
@@ -830,7 +852,7 @@ void panaModuleCalibrate(void) {
 
   setZoomOutLimit(minimumZoom);
   setZoomInLimit(maximumZoom);
-  setZoomEncoderReversed(true);
+  setZoomEncoderReversed(false);
   setZoomMotorReversed(false);
 
   fprintf(stderr, "Done determining endpoints.\n");

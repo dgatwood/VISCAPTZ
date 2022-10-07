@@ -238,6 +238,9 @@ int gVISCARecallSpeed = 0;
 
 #pragma mark - Prototypes
 
+/** Returns a printable string containing the name of an axis. */
+const char *nameForAxis(axis_identifier_t axis);
+
 // Absolute positioning/recall prototypes
 
 /** Returns true if absolute positioning is supported for the specified axis. */
@@ -286,6 +289,9 @@ int64_t getAxisPosition(axis_identifier_t axis);
 
 /** Updates the speed of axes that are being moved incrementally under programmatic control. */
 void handleRecallUpdates(void);
+
+/** Returns the number of positions that a given axis moves in a second at its maximum speed. */
+int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis);
 
 /**
  * Sets the position of an axis to the specified position.
@@ -760,9 +766,11 @@ void handleRecallUpdates(void) {
       if (localDebug) {
         fprintf(stderr, "UPDATING AXIS %d\n", axis);
       }
+      int64_t startPosition = gAxisMoveStartPosition[axis];
+      int64_t targetPosition = gAxisMoveTargetPosition[axis];
 
       // Compute how far into the motion we are (with a range of 0 to 1,000).
-      int direction = (gAxisMoveTargetPosition[axis] > gAxisMoveStartPosition[axis]) ? 1 : -1;
+      int direction = (targetPosition > startPosition) ? 1 : -1;
       if (localDebug) {
         fprintf(stderr, "Axis %d direction %d\n", axis, direction);
       }
@@ -792,44 +800,83 @@ void handleRecallUpdates(void) {
         fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
       }
       int64_t axisPosition = getAxisPosition(axis);
-      int panProgressByPosition = actionProgress(axis, gAxisMoveStartPosition[axis], axisPosition,
-                                                 gAxisMoveTargetPosition[axis], gAxisPreviousPosition[axis],
-                                                 &gAxisStalls[axis]);
+      int moveProgressByPosition = actionProgress(axis, startPosition, axisPosition,
+                                                  targetPosition, gAxisPreviousPosition[axis],
+                                                  &gAxisStalls[axis]);
 #if EXPERIMENTAL_TIME_PROGRESS
       double currentTime = timeStamp();
-      double remainingTime = currentTime - gAxisStartTime[axis];
       double duration = gAxisDuration[axis];
+      double remainingTime = gAxisStartTime[axis] + duration - currentTime;
 
       // Time-based computation can be slightly imprecise.  If the progress based on position is
       // 1000, we're done with this axis no matter what the wall clock says.  And of course, if
       // there's no computed duration, we use the position-based approach, and if the duration
       // is actually zero (no motion needed), then we also use the position-based approach to
       // guarantee that we don't move.
-      bool usingPositionBasedProgress = (duration == 0 || panProgressByPosition == 1000);
+      bool usingPositionBasedProgress = (duration == 0 || moveProgressByPosition == 1000);
 
-      int panProgressByTime = usingPositionBasedProgress ? 0 : (1000.0 * remainingTime ) / duration;
-      int panProgress = usingPositionBasedProgress ? panProgressByPosition : panProgressByTime;
+      int moveProgressByTime = usingPositionBasedProgress ? 0 : 1000 - ((1000.0 * remainingTime ) / duration);
+      int moveProgress = usingPositionBasedProgress ? moveProgressByPosition : moveProgressByTime;
 
       if (usingPositionBasedProgress && localDebug) {
         fprintf(stderr, "WARNING: NO DURATION AVAILABLE FOR RECALL COMMAND.\n");
       } else if (localDebug) {
-        fprintf(stderr, "START: %lf END: %lf CURRENT: %lf REMAINING: %lf\n"
+        fprintf(stderr, "Axis %s START: %lf END: %lf CURRENT: %lf REMAINING: %lf\n"
                         "DURATION: %lf PROGRESS: %d\n",
+                nameForAxis(axis),
                 gAxisStartTime[axis], gAxisStartTime[axis] + duration,
                 currentTime, remainingTime,
-                duration, panProgressByTime);
+                duration, moveProgressByTime);
+        fprintf(stderr, "Axis %s STARTPOS: %" PRId64 " ENDPOS: %" PRId64
+                        " CURRENTPOS: %" PRId64 " REMAININGPOS: %" PRId64 "\n",
+                nameForAxis(axis),
+                startPosition, targetPosition,
+                axisPosition, targetPosition - axisPosition);
       }
-      int peakSpeed = usingPositionBasedProgress ? 1000 :
-          peakSpeedForMove(axis, gAxisMoveStartPosition[axis], gAxisMoveTargetPosition[axis], duration);
 
+      int peakSpeed = usingPositionBasedProgress ? 1000 :
+          peakSpeedForMove(axis, startPosition, targetPosition, duration);
+
+
+      // In the middle part of the move, make sure we don't run behind or ahead too much.
+      // We know when we plan to start slowing down, and that's a good enough goalpost.
+      if ((!usingPositionBasedProgress) && moveProgressByTime > 100 && moveProgressByTime < 900) {
+
+          // When the slowdown begins, it should be at 95% of the final position, because it will move
+          // at, on average, half speed for 10% of the duration.
+          int64_t moveDistanceBeforeStartOfSlowdown =
+              0.95 * llabs(targetPosition - startPosition);
+
+          // First some debugging data.
+          int expectedMoveProgressByPosition = moveProgressByTime - 50;
+          fprintf(stderr, "Axis %s expected progress: %d actual: %d\n", nameForAxis(axis),
+                  expectedMoveProgressByPosition, moveProgressByPosition);
+          fprintf(stderr, "Axis %s peak speed before adjustment: %d\n", nameForAxis(axis), peakSpeed);
+
+          // Compute how long we have left to move at peak speed.
+          double timeBeforeSlowingDown = MAX(remainingTime - (0.1 * duration), 0);
+          fprintf(stderr, "Axis %s time before slowing down: %lf\n", nameForAxis(axis), timeBeforeSlowingDown);
+
+          // Update the peak speed.
+          int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
+          int64_t distanceMoved = llabs(axisPosition - startPosition);
+          int64_t distanceLeft = llabs(moveDistanceBeforeStartOfSlowdown - distanceMoved);
+
+          fprintf(stderr, "Axis %s max PPS for axis: %" PRId64" remaining distance: %" PRId64 "\n",
+                  nameForAxis(axis), maxPPSForAxis, distanceLeft);
+
+          peakSpeed = (1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown);
+
+          fprintf(stderr, "Axis %s peak speed after adjustment: %d\n", nameForAxis(axis), peakSpeed);
+      }
 #else
       bool usingPositionBasedProgress = true;
-      int panProgress = panProgressByPosition;
+      int moveProgress = moveProgressByPosition;
       int peakSpeed = 1000;
 #endif
       gAxisPreviousPosition[axis] = axisPosition;
 
-      if (panProgress == 1000) {
+      if (moveProgress == 1000) {
         // If we have reached the target position, stop all motion on the axis.
         if (localDebug) {
             fprintf(stderr, "AXIS %d MOTION COMPLETE\n", axis);
@@ -837,7 +884,7 @@ void handleRecallUpdates(void) {
         gAxisMoveInProgress[axis] = false;
         setAxisSpeed(axis, 0, false);
       } else {
-        // Compute the target speed based on the current pan progress.
+        // Compute the target speed based on the current move progress.
         //
         // If we do not have calibration data, specify a floor (MIN_PAN_TILT_SPEED) to
         // ensure that the motion does not get stuck.  The reason for this is because
@@ -848,12 +895,13 @@ void handleRecallUpdates(void) {
         // Do not use a minimum speed if we are using wall clock time, because computed
         // progress doesn't depend on the motors changing the encoder position.
         int speed = usingPositionBasedProgress ?
-            MAX(computeSpeed(panProgress, peakSpeed), MIN_PAN_TILT_SPEED) :
-            computeSpeed(panProgress, peakSpeed);
+            MAX(computeSpeed(moveProgress, peakSpeed), MIN_PAN_TILT_SPEED) :
+            computeSpeed(moveProgress, peakSpeed);
+
         setAxisSpeed(axis, speed * direction, localDebug);
         if (localDebug) {
-            fprintf(stderr, "AXIS %d SPEED NOW %d * %d (%d)\n",
-                    axis, speed, direction, speed * direction);
+            fprintf(stderr, "AXIS %d SPEED NOW %d * %d (%d) at %d\n",
+                    axis, speed, direction, speed * direction, moveProgress);
         }
       }
     } else if (localDebug > 1) {
@@ -1047,23 +1095,26 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
     fprintf(stderr, "makeDurationValid(axis %d, duration %lf, position: %lld)\n",
       axis, duration, (long long)position);
     int64_t currentPosition = getAxisPosition(axis);
-    fprintf(stderr, "    Current position: %lld\n", currentPosition);
+    fprintf(stderr, "    Current position: %lld for %s\n", currentPosition,
+            nameForAxis(axis));
   }
   double slowestDuration = slowestMoveForAxisToPosition(axis, position);
   if (duration > slowestDuration) {
     duration = slowestDuration;
     if (localDebug) {
-      fprintf(stderr, "Clamped to %lf (slowest duration)\n", slowestDuration);
+      fprintf(stderr, "Axis %s clamped to %lf (slowest duration)\n", nameForAxis(axis),
+              slowestDuration);
     }
   }
   double fastestDuration = fastestMoveForAxisToPosition(axis, position);
   if (duration < fastestDuration) {
     duration = fastestDuration;
     if (localDebug) {
-      fprintf(stderr, "Clamped to %lf (fastest duration)\n", fastestDuration);
+      fprintf(stderr, "Axis %s clamped to %lf (fastest duration)\n", nameForAxis(axis),
+               fastestDuration);
     }
   }
-  fprintf(stderr, "Final value: %lf\n", duration);
+  fprintf(stderr, "Axis %s final value: %lf\n", nameForAxis(axis), duration);
   return duration;
 }
 
@@ -1181,6 +1232,10 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
 
   if (recallTime > (1.25 * originalRecallTime) ||
       recallTime < (.75 * originalRecallTime)) {
+    if (localDebug) {
+      fprintf(stderr, "Clamped time too extreme.  Returning unclamped time %lf.\n",
+              originalRecallTime);
+    }
     return originalRecallTime;
   }
 
@@ -1233,8 +1288,10 @@ int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPos
   fprintf(stderr, "Peak points per second for move along axis %d from %lld to %lld over time %lf is %lf\n",
           axis, fromPosition, toPosition, time, peakPositionsPerSecond);
 
-  int peakSpeed = (peakPositionsPerSecond * 1000) / maximumPositionsPerSecondForAxis(axis);
-  fprintf(stderr, "Peak speed: %d\n", peakSpeed);
+  int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
+  int peakSpeed = (peakPositionsPerSecond * 1000) / maxPPSForAxis;
+  fprintf(stderr, "Peak speed: %d (max PPS is %" PRId64 ", peakPPS is %lf)\n",
+          peakSpeed, maxPPSForAxis, peakPositionsPerSecond);
 
   return peakSpeed;
 }
@@ -2071,7 +2128,8 @@ bool recallPreset(int presetNumber) {
     bool retval = setPanTiltPosition(preset.panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
                                      preset.tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
                                      duration);
-    bool retval2 = setZoomPosition(preset.zoomPosition, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed), 0);
+    bool retval2 = setZoomPosition(preset.zoomPosition, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed),
+                                   duration);
 
     if (retval && retval2) {
         fprintf(stderr, "Loaded preset %d\n", presetNumber);
@@ -2101,6 +2159,9 @@ double currentRecallTime(void) {
   // VISCA (or at least PTZOptics) allows a range of 1 to 24.  This maps those into speeds.
   // These speeds are just sort of arbitrary mappings.
   int recallSpeed = gRecallSpeedSet ? gVISCARecallSpeed : getVISCAZoomSpeedFromTallyState();
+  fprintf(stderr, "Recall speed set: %s\n", gRecallSpeedSet ? "YES" : "NO");
+  if (gRecallSpeedSet) fprintf(stderr, "Requested recall speed: %d\n", gVISCARecallSpeed);
+  fprintf(stderr, "Tally-based speed: %d\n", getVISCAZoomSpeedFromTallyState());
 
   // Slowest speed is 1, which maps to 30 seconds.
   // Fastest speed is 24, which maps to 2 seconds.
@@ -2605,6 +2666,20 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
   }
 
   return data;
+}
+
+const char *nameForAxis(axis_identifier_t axis) {
+  switch (axis) {
+    case axis_identifier_pan:
+      return "pan";
+    case axis_identifier_tilt:
+      return "tilt";
+      break;
+    case axis_identifier_zoom:
+      return "zoom";
+    default:
+      return "unknown";
+  }
 }
 
 const char *calibrationDataKeyNameForAxis(axis_identifier_t axis) {
