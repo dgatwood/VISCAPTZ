@@ -170,9 +170,19 @@ OBS:
 
 Tricaster:
     If you are using a Tricaster switcher as your tally source, you must also
-    provide its IP address.  To do this, type:
+    provide its IP address and input name.  To do this, type:
 
-        ./viscaptz --settricasterip "IP address"
+        ./viscaptz --settricasterip "192.168.105.1"
+        ./viscaptz --settallysourcename "INPUT5"
+
+    Note that you MUST use IP addresses.  This tool makes no attempt to do
+    any DNS lookups.
+
+    You must also use the *input* name, which is NOT the same as the user-
+    visible name.  It is usually something like "INPUT1".  If you can't
+    guess it, set the tricasterDebug constant to true inside the file
+    tricaster_tally.c and recompile this tool.  After doing so, you should
+    see the raw messages sent back from the Tricaster.
 
 Panasonic camera:
     If you are using a Panasonic IP camera's pan, tilt, or zoom control or

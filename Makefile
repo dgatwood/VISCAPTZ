@@ -9,13 +9,13 @@
 ### the source of truth.
 
 # Use a Panasonic camera as the tally source.
-USE_PANASONIC_TALLY_SOURCE=1
+USE_PANASONIC_TALLY_SOURCE=0
 
 # Use OBS as the tally source.
 USE_OBS_TALLY_SOURCE=0
 
 # Use a Tricaster as the tally source.
-USE_TRICASTER_TALLY_SOURCE=0
+USE_TRICASTER_TALLY_SOURCE=1
 
 ### There are no user-configurable values below this line.  ###
 
