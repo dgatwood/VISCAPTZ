@@ -185,7 +185,7 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
 /**
  * The main loop of the position monitor thread.
  *
- * This function polls the encoder hardware 100x per second.
+ * This function polls the encoder hardware 500x per second.
  */
 void *runPositionMonitorThread(void *argIgnored) {
 #if ENABLE_HARDWARE
@@ -229,7 +229,7 @@ void *runPositionMonitorThread(void *argIgnored) {
         updatePositionsSerial(pan_fd, tilt_fd)
     #endif  // USE_CANBUS
 #endif  // ENABLE_HARDWARE
-    usleep(10000);  // Update 100x per second (latency-critical).
+    usleep(2000);  // Update 500x per second (latency-critical).
   }
 #if ENABLE_HARDWARE
   #if USE_CANBUS
@@ -657,7 +657,7 @@ void motorModuleCalibrate(void) {
 // Returns the minimum nonzero number of positions per second that the pan axis moves
 // at its slowest non-stalled speed.
 int64_t motorMinimumPanPositionsPerSecond(void) {
-  return minimumPositionsPerSecondForData(motor_pan_data, ZOOM_SCALE_HARDWARE);
+  return minimumPositionsPerSecondForData(motor_pan_data, PAN_TILT_SCALE_HARDWARE);
 }
 
 // Public function.  Docs in header.
@@ -665,7 +665,7 @@ int64_t motorMinimumPanPositionsPerSecond(void) {
 // Returns the minimum nonzero number of positions per second that the tilt axis moves
 // at its slowest non-stalled speed.
 int64_t motorMinimumTiltPositionsPerSecond(void) {
-  return minimumPositionsPerSecondForData(motor_tilt_data, ZOOM_SCALE_HARDWARE);
+  return minimumPositionsPerSecondForData(motor_tilt_data, PAN_TILT_SCALE_HARDWARE);
 }
 
 // Public function.  Docs in header.
@@ -673,7 +673,7 @@ int64_t motorMinimumTiltPositionsPerSecond(void) {
 // Returns the number of positions per second that the pan axis moves at its fastest
 // speed.
 int64_t motorMaximumPanPositionsPerSecond(void) {
-  return motor_pan_data[ZOOM_SCALE_HARDWARE];
+  return motor_pan_data[PAN_TILT_SCALE_HARDWARE];
 }
 
 // Public function.  Docs in header.
@@ -681,5 +681,5 @@ int64_t motorMaximumPanPositionsPerSecond(void) {
 // Returns the number of positions per second that the tilt axis moves at its fastest
 // speed.
 int64_t motorMaximumTiltPositionsPerSecond(void) {
-  return motor_tilt_data[ZOOM_SCALE_HARDWARE];
+  return motor_tilt_data[PAN_TILT_SCALE_HARDWARE];
 }

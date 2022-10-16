@@ -90,7 +90,29 @@ const char *kTallySourceName = "tally_source_name";
  * The maximum number of times we will try to move the motor if the
  * encoder value does not change.
  */
-static int kAxisStallThreshold = 100;
+static const int kAxisStallThreshold = 100;
+
+/**
+ * The decipercentage of the motion that should be used for ramping up or down.
+ */
+static const int kRampUpPeriodEnd = 200;
+
+// Do not change.  The ramp up and ramp down periods must be equal.
+static const int kRampDownPeriodStart = 1000 - kRampUpPeriodEnd;
+
+// During the ramp up/down period, the axis moves at half speed, so each of these periods
+// moves half the distance. Therefore, the percentage of the total distance moved at maximum
+// speed is halfway between 100% and the percentage of time spent at maximum speed.  So for
+// a ramp-up/ramp-down period of 10%, it moves at maximum speed for 90% of the distance.
+//
+// Thus, the slowdown begins after the initial ramp-up period's 5% plus that 90%, or 95%.
+//
+// Assuming the ramp-up period and ramp-down period are equal, this can be simplified to
+// one minus half of the ramp-up period.
+static const double moveDistanceFractionBeforeSlowdown = 1 - ((kRampUpPeriodEnd / 1000) / 2);
+
+// The time fraction mefore slowdown is just kRampDownPeriodStart / 1000.
+static const double moveTimeFractionBeforeSlowdown = (kRampDownPeriodStart / 1000.0);
 
 /**
  * A constant that indicates that a value (pan, tilt, or zoom) in a move
@@ -200,6 +222,12 @@ static int64_t gAxisLastMoveSpeed[NUM_AXES];
 static int64_t gAxisPreviousPosition[NUM_AXES];
 
 /**
+ * The timestamp when gAxisPreviousPosition was last updated.  Used for debugging
+ * speed calculations.
+ */
+static double gAxisPreviousPositionTimestamp[NUM_AXES];
+
+/**
  * The desired duration of the move on the specified axis in seconds (relative
  * to gAxisStartTime).
  */
@@ -269,8 +297,8 @@ double currentRecallTime(void);
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition);
 
 /**
- * Computes the maximum speed that the motor should use reach when moving the specified
- * distance over the specified time.
+ * Computes the maximum speed (in core speed) that the motor should reach
+ * when moving the specified distance over the specified time.
  */
 int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPosition, double time);
 
@@ -589,8 +617,8 @@ int main(int argc, char *argv[]) {
 #pragma mark - Generic move routines
 
 int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t endPosition,
-                   int64_t previousPosition, int *stalls) {
-  bool localDebug = false;
+                   int64_t previousPosition, int *stalls, bool usingTimeComputation) {
+  bool localDebug = true;
   int64_t progress = llabs(curPosition - startPosition);
   int64_t total = llabs(endPosition - startPosition);
 
@@ -613,14 +641,23 @@ int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t
 
   int tenth_percent = (int)llabs((1000 * progress) / total);  // Value will never be much over 1000.
 
-  // If we're moving too quickly, hit the brakes.
-  int64_t increment = llabs(curPosition - previousPosition);
-  if ((increment + progress) > total) {
-    tenth_percent = MAX(975, tenth_percent);
-  } else if ((increment + (2 * progress)) > total) {
-    tenth_percent = MAX(950, tenth_percent);
-  } else if ((increment + (4 * progress)) > total) {
-    tenth_percent = MAX(900, tenth_percent);
+  // If we're moving too quickly, hit the brakes.  Don't do this if we have exact motor speed data
+  // and are using time-based measurements to compute the speed, because it needs to know the exact
+  // position to determine if it is deviating too much from the expected position, and this would
+  // cause the motor to slow down way too early.
+  if (!usingTimeComputation) {
+    int64_t increment = llabs(curPosition - previousPosition);
+    if ((increment + progress) > total) {
+      tenth_percent = MAX(975, tenth_percent);
+    } else if ((progress + (2 * increment)) > total) {
+      tenth_percent = MAX(950, tenth_percent);
+    } else if ((progress + (4 * increment)) > total) {
+      tenth_percent = MAX(kRampDownPeriodStart, tenth_percent);
+    }
+    if (localDebug) {
+      fprintf(stderr, "actionProgress: increment=% "PRId64 ", previous=%" PRId64 "\n",
+              increment, previousPosition);
+    }
   }
 
   if (localDebug) {
@@ -640,8 +677,8 @@ int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t
 ///     @param peakSpeed        The computed maximum speed for the move, computed by
 ///                             a prior call to peakSpeedForMove().
 int computeSpeed(int progress, int peakSpeed) {
-    if (progress < 100 || progress > 900) {
-        int distance_to_nearest_endpoint = (progress >= 900) ? (1000 - progress) : progress;
+    if (progress < kRampUpPeriodEnd || progress > kRampDownPeriodStart) {
+        int decipercentProgressToStartOrEnd = (progress >= kRampDownPeriodStart) ? (1000 - progress) : progress;
 
         // Depending on whether you run this function before or after calibrating the
         // motor speed, the progress value is either based on the percentage of progress
@@ -652,7 +689,7 @@ int computeSpeed(int progress, int peakSpeed) {
         // After you calibrate the motor speed, this uses a time-based curve.  The explanation
         // below tells how this works.
         //
-        // From 10% to 90%, the motor moves at its maximum speed.  On either end, the motor's
+        // From 20% to 80%, the motor moves at its maximum speed.  On either end, the motor's
         // speed is computed based on an s-curve, computed as follows:
         //
         // With vertical acccuracy of ± .1% at the two endpoints (i.e. 0.001 at the bottom,
@@ -677,7 +714,9 @@ int computeSpeed(int progress, int peakSpeed) {
         //
         //   ((maxPositionsPerSecond * 800) + (0.5 * maxPositionsPerSecond * 200)) / 1000
         //
-        // which can be simplified to 0.9 * maxPositionsPerSecond.
+        // which can be simplified to 0.9 * maxPositionsPerSecond.  The same thing applies
+        // proportionally if the ramp period is longer, i.e. the average speed is equal to
+        // (1 - rampFraction) * maxPositionsPerSecond.
         //
         // So if we know that we want a motion to take 10 seconds (for example), and if
         // that motion is 5000 units of distance, it needs to move 500 units per second,
@@ -741,7 +780,10 @@ int computeSpeed(int progress, int peakSpeed) {
         // the scaling function then can use the scaled values to determine how close
         // each hardware speed is to the expected values, and can adjust them accordingly.
 
-        double exponent = 7.0 - ((7.0 * distance_to_nearest_endpoint) / 50.0);
+        // The value of decipercentProgressToStartOrEnd is in the range 0..kRampUpPeriodEnd.
+        // Convert that to the range 0..100.
+        double percentOfRampDuration = (decipercentProgressToStartOrEnd * 100.0) / kRampUpPeriodEnd;
+        double exponent = 7.0 - ((7.0 * percentOfRampDuration) / 50.0);
         double speedFromProgress = 1 / (1 + pow(M_E, exponent));
         return round(speedFromProgress * 1.0 * peakSpeed);
     } else {
@@ -800,12 +842,16 @@ void handleRecallUpdates(void) {
         fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
       }
       int64_t axisPosition = getAxisPosition(axis);
+#if EXPERIMENTAL_TIME_PROGRESS
+      double duration = gAxisDuration[axis];
+#else
+      double duration = 0;
+#endif
       int moveProgressByPosition = actionProgress(axis, startPosition, axisPosition,
                                                   targetPosition, gAxisPreviousPosition[axis],
-                                                  &gAxisStalls[axis]);
+                                                  &gAxisStalls[axis], (duration != 0));
 #if EXPERIMENTAL_TIME_PROGRESS
       double currentTime = timeStamp();
-      double duration = gAxisDuration[axis];
       double remainingTime = gAxisStartTime[axis] + duration - currentTime;
 
       // Time-based computation can be slightly imprecise.  If the progress based on position is
@@ -831,24 +877,32 @@ void handleRecallUpdates(void) {
                         " CURRENTPOS: %" PRId64 " REMAININGPOS: %" PRId64 "\n",
                 nameForAxis(axis),
                 startPosition, targetPosition,
-                axisPosition, targetPosition - axisPosition);
+                axisPosition, llabs(targetPosition - axisPosition));
       }
 
       int peakSpeed = usingPositionBasedProgress ? 1000 :
           peakSpeedForMove(axis, startPosition, targetPosition, duration);
 
-
       // In the middle part of the move, make sure we don't run behind or ahead too much.
       // We know when we plan to start slowing down, and that's a good enough goalpost.
-      if ((!usingPositionBasedProgress) && moveProgressByTime > 100 && moveProgressByTime < 900) {
+      if ((!usingPositionBasedProgress) && moveProgressByTime >= kRampUpPeriodEnd &&
+          moveProgressByTime <= kRampDownPeriodStart) {
 
-          // When the slowdown begins, it should be at 95% of the final position, because it will move
-          // at, on average, half speed for 10% of the duration.
+          // When the slowdown begins at the 80% mark, it should be at 90% of the final position,
+          // because it will move at, on average, half speed for 20% of the duration.
           int64_t moveDistanceBeforeStartOfSlowdown =
-              0.95 * llabs(targetPosition - startPosition);
+              moveDistanceFractionBeforeSlowdown * llabs(targetPosition - startPosition);
 
           // First some debugging data.
-          int expectedMoveProgressByPosition = moveProgressByTime - 50;
+          double kFullSpeedPeriodByTime = kRampDownPeriodStart - kRampUpPeriodEnd;
+          double kFullSpeedPeriodByDistance = kRampUpPeriodEnd;
+          int expectedMoveProgressByPosition =
+              // Progress during first kRampUpPeriodEnd positions
+              50 +
+              // Progress from 20 to 80 scaled to be from 10 to 90.
+              ((moveProgressByTime - kRampUpPeriodEnd) * kFullSpeedPeriodByDistance / kFullSpeedPeriodByTime);
+
+          fprintf(stderr, "Axis %s progressByTime: %d\n", nameForAxis(axis), moveProgress);
           fprintf(stderr, "Axis %s expected progress: %d actual: %d\n", nameForAxis(axis),
                   expectedMoveProgressByPosition, moveProgressByPosition);
           fprintf(stderr, "Axis %s peak speed before adjustment: %d\n", nameForAxis(axis), peakSpeed);
@@ -860,7 +914,7 @@ void handleRecallUpdates(void) {
           // Update the peak speed.
           int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
           int64_t distanceMoved = llabs(axisPosition - startPosition);
-          int64_t distanceLeft = llabs(moveDistanceBeforeStartOfSlowdown - distanceMoved);
+          int64_t distanceLeft = moveDistanceBeforeStartOfSlowdown - distanceMoved;
 
           fprintf(stderr, "Axis %s max PPS for axis: %" PRId64" remaining distance: %" PRId64 "\n",
                   nameForAxis(axis), maxPPSForAxis, distanceLeft);
@@ -869,20 +923,60 @@ void handleRecallUpdates(void) {
 
           fprintf(stderr, "Axis %s peak speed after adjustment: %d\n", nameForAxis(axis), peakSpeed);
       }
+      bool creeping = (moveProgress == 1000) && (moveProgressByPosition < 1000);
 #else
       bool usingPositionBasedProgress = true;
       int moveProgress = moveProgressByPosition;
       int peakSpeed = 1000;
+      bool creeping = false;
 #endif
-      gAxisPreviousPosition[axis] = axisPosition;
+
+      bool axisPositionHasChanged = (gAxisPreviousPosition[axis] != axisPosition);
+
+      if (axisPositionHasChanged) {
+        double deltaTimeSinceLastChange = currentTime - gAxisPreviousPositionTimestamp[axis];
+        uint64_t deltaPositionSinceLastChange = axisPosition - gAxisPreviousPosition[axis];
+        int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
+        double targetPPS = peakSpeed * maxPPSForAxis / 1000.0;
+
+        fprintf(stderr, "POSITION CHANGE: %" PRId64 "\n", deltaPositionSinceLastChange);
+        fprintf(stderr, "TIME CHANGE: %lf\n", deltaTimeSinceLastChange);
+        fprintf(stderr, "COMPUTED SPEED: %lf pps EXPECTED: %lf pps\n",
+                (double)((int)deltaPositionSinceLastChange / deltaTimeSinceLastChange),
+                targetPPS);
+
+        gAxisPreviousPosition[axis] = axisPosition;
+        gAxisPreviousPositionTimestamp[axis] = currentTime;
+      }
+
 
       if (moveProgress == 1000) {
-        // If we have reached the target position, stop all motion on the axis.
-        if (localDebug) {
+        if (creeping) {
+          // If we have reached the expected elapsed time but have not yet hit the target position,
+          // creep as slowly as possible.  To do this, set the axis speed to +/-1 (the minimum nonzero
+          // value).  The scaling function will increase that value as needed to ensure that the motor
+          // does not stall.
+          if (localDebug) {
+            fprintf(stderr, "CREEPING TO FINAL POSITION AT MINIMUM SPEED\n");
+          }
+          setAxisSpeed(axis, 1 * direction, false);
+
+          if (localDebug) {
+            fprintf(stderr, "SPEEDINFO AXIS: %d POS: %04d TIME: %04d SPEED: %d (CREEP)\n",
+                    axis, moveProgressByPosition, usingPositionBasedProgress ? -1 : moveProgress, 1 * direction);
+          }
+        } else {
+          // If we have reached the target position, stop all motion on the axis.
+          if (localDebug) {
             fprintf(stderr, "AXIS %d MOTION COMPLETE\n", axis);
+          }
+          gAxisMoveInProgress[axis] = false;
+          setAxisSpeed(axis, 0, false);
+          if (localDebug) {
+            fprintf(stderr, "SPEEDINFO AXIS: %d POS: %04d TIME: %04d SPEED: %d (stopped)\n",
+                    axis, moveProgressByPosition, usingPositionBasedProgress ? -1 : moveProgress, 0 * direction);
+          }
         }
-        gAxisMoveInProgress[axis] = false;
-        setAxisSpeed(axis, 0, false);
       } else {
         // Compute the target speed based on the current move progress.
         //
@@ -898,8 +992,17 @@ void handleRecallUpdates(void) {
             MAX(computeSpeed(moveProgress, peakSpeed), MIN_PAN_TILT_SPEED) :
             computeSpeed(moveProgress, peakSpeed);
 
-        setAxisSpeed(axis, speed * direction, localDebug);
+        if (axisPositionHasChanged || usingPositionBasedProgress || moveProgress < kRampUpPeriodEnd ||
+            moveProgress > kRampDownPeriodStart || gAxisLastMoveSpeed[axis] == 0) {
+          setAxisSpeed(axis, speed * direction, localDebug);
+        } else if (localDebug) {
+          fprintf(stderr, "Skipping speed change to avoid feedback drift because axis position has not changed.\n");
+        }
         if (localDebug) {
+            fprintf(stderr, "SPEEDINFO AXIS: %d POS: %04d TIME: %04d SPEED: %d (%s)\n",
+                    axis, moveProgressByPosition, usingPositionBasedProgress ? -1 : moveProgress, speed * direction,
+                    (moveProgress < kRampUpPeriodEnd) ? "RAMP UP" :
+                        (moveProgress > kRampDownPeriodStart) ? "RAMP DOWN" : "NORMAL");
             fprintf(stderr, "AXIS %d SPEED NOW %d * %d (%d) at %d\n",
                     axis, speed, direction, speed * direction, moveProgress);
         }
@@ -965,7 +1068,11 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
   // target speed.
   for (int i = 0; i <= toScale; i++) {
     if (scaleData[i] == absSpeed) {
-      return i * sign;
+      int retval = i * sign;
+      fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+              speed, retval, abs(absSpeed - scaleData[i]),
+              100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+      return retval;
     } else if (scaleData[i] > absSpeed) {
       // The native speed at `i` is the smallest speed
       // greater than the target core speed.  If the
@@ -978,7 +1085,11 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       // not the responsiblity of the VISCA interpreter/
       // motor controller.)
       if (scaleData[i - 1] == 0) {
-        return i * sign;
+        int retval = i * sign;
+        fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+                speed, retval, abs(absSpeed - scaleData[i]),
+                100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+        return retval;
       }
       // Both the current native speed value and the
       // native speed value below this one are nonzero.
@@ -986,11 +1097,21 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       // if the speed value at i-1 is zero.
       int distanceBelow = absSpeed - scaleData[i-1];
       int distanceAbove = scaleData[i] - absSpeed;
-      return ((distanceAbove < distanceBelow) ? i : i-1) * sign;
+      int chosenIndex = ((distanceAbove < distanceBelow) ? i : i-1);
+      int retval = chosenIndex * sign;
+      fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+              speed, retval, abs(absSpeed - scaleData[chosenIndex]),
+              100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+      return retval;
     }
   }
   // If we ran off the end, return the maximum speed.
-  return toScale * sign;
+  int chosenIndex = toScale;
+  int retval = chosenIndex * sign;
+  fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+          speed, retval, abs(absSpeed - scaleData[chosenIndex]),
+          100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+  return retval;
 }
 
 int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed, axis_identifier_t axis) {
@@ -1278,19 +1399,23 @@ int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis) {
   return 0;
 }
 
-// We calculate the peak speed such that 80% of the time spent moving between two positions
-// is at that speed.  We know that the average speed will be 90% of this speed.
+// Returns the maximum core speed that the motor should move once the initial ramp-up period
+// is over, and prior to the ramp-down period beginning.
+//
+// Per the explanation in the comments for computeSpeed(), we can compute this by determining
+// the average speed and dividing by a value halfway between the total move time and the
+// time spent at full speed (because the ramp periods average 50% speed).
 //
 // We start by computing the number of positions per second given the time and distance.
-// We then divide by 0.9.
+// We then divide by moveTimeFractionBeforeSlowdown.
 int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPosition, double time) {
-  double peakPositionsPerSecond = (llabs(fromPosition - toPosition) / time) / 0.9;
+  double peakPositionsPerSecond = (llabs(fromPosition - toPosition) / time) / moveTimeFractionBeforeSlowdown;
   fprintf(stderr, "Peak points per second for move along axis %d from %lld to %lld over time %lf is %lf\n",
           axis, fromPosition, toPosition, time, peakPositionsPerSecond);
 
   int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
   int peakSpeed = (peakPositionsPerSecond * 1000) / maxPPSForAxis;
-  fprintf(stderr, "Peak speed: %d (max PPS is %" PRId64 ", peakPPS is %lf)\n",
+  fprintf(stderr, "Peak speed: %d (max PPS for axis is %" PRId64 ", peakPPS is %lf)\n",
           peakSpeed, maxPPSForAxis, peakPositionsPerSecond);
 
   return peakSpeed;
@@ -1303,7 +1428,9 @@ double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   // minimum speed for the motors, but we ignore that to make the computation reasonable.
   //
   // Based on that, we can take the maximum number of positions per second that the axis is
-  // capable of moving at maximum speed, mutiply times 0.9, and get the maximum average speed.
+  // capable of moving at maximum speed, mutiply times moveTimeFractionBeforeSlowdown, and
+  // get the maximum average speed.
+  //
   // You can then divide the total move distance by that number, and that gives you the
   // minimum number of seconds that the camera can spend reaching that destination (using
   // our s-curve algorithm; it is, of course, possible to achieve a slightly shorter
@@ -1315,7 +1442,7 @@ double fastestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
   }
   int64_t currentPosition = getAxisPosition(axis);
   int64_t distance = llabs(position - currentPosition);
-  return (double)distance / ((double)maximumPositionsPerSecond * 0.9);
+  return (double)distance / ((double)maximumPositionsPerSecond * moveTimeFractionBeforeSlowdown);
 }
 
 double slowestMoveForAxisToPosition(axis_identifier_t axis, int64_t position) {
@@ -2156,6 +2283,9 @@ void setRecallSpeedVISCA(int value) {
  * or the speed set via VISCA.
  */
 double currentRecallTime(void) {
+
+return 10.0;
+
   // VISCA (or at least PTZOptics) allows a range of 1 to 24.  This maps those into speeds.
   // These speeds are just sort of arbitrary mappings.
   int recallSpeed = gRecallSpeedSet ? gVISCARecallSpeed : getVISCAZoomSpeedFromTallyState();
