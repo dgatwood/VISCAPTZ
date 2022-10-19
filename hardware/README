@@ -1,10 +1,25 @@
 These are plates for attaching BRT38-COM4069D24-RT1 rotary encoders or similar to a
 Vidpro MH-430 motorized pan and tilt gimbal.
 
-The alternate plate 3 is an earlier version of plate 3 that can be used for the
-tilt axis to make it visually obvious which encoder goes on which axis.  (The
-two encoders are not interchangeable unless you modify the code to use two
-separate CAN buses.)
+Note: The two STL files are generated from the same OpenSCAD file.  The only
+difference is which text string ("PAN" or "TILT") was uncommented at the time
+of export.
 
-Note: The alternate plate 3 cannot be used for the pan encoder, because it bumps
-into the vertical post that holds up the gimbal.
+Screws:
+
+* The screws holding the two plastic parts together are M3 16mm screws with M3
+  nuts.
+* The screws holding the spring are M3 12mm screws.  One post has M3 and M4
+  washers to give a better grip on the spring.  The other side hooks over
+  after assembly.
+* The spring is 5/16" x 1 1/8".  (Initially, I tried a 11/32" x 1 7/16" spring,
+  but it didn't quite provide enough tension.)
+* The threaded thumb screw on the clamp is M6, to match the thread of the
+  original wing screws (so that you don't have to remember which tap to use).
+  You will need two extra washers on the original screw and four washers
+  on the new screw, because the hole isn't deep enough for plastic strength
+  reasons.
+* The motor screws are M3 12mm.  The original motor screws are too short
+  without making the plastic unacceptably thin.  (I actually had one of the
+  heads pull through with the previous design.  Even now, do not overtorque 
+  any of the screws!)

@@ -6,6 +6,13 @@ circle_facets = 40;
 clamp_hole_size = 6.25;  // Measured at 6, but we lose about .5mm from PETG bleed.
 hex_nut_size = 3.45;  // Measured at 6.35 tip-to-tip (5.56 across), but we lose slightly more than .5mm from PETG bleed.
 
+module rotate_around_center_point(angles, center_point) {
+    translate(center_point)
+        rotate(angles)
+            translate(-center_point)
+                children();   
+}
+
 // Encoder details:
 // Body is 38mm wide (measured), 39mm per spec.
 // Raised ring around shaft is 20mm wide.
@@ -33,18 +40,25 @@ union() {
             // 40 across
             translate([32.5, -66.5, -1.05]) cylinder(h=18, r=5.95, center=true, $fn = circle_facets);
 
+            // Extra tip for fastening spring
+            translate([-26, 18, 4]) cylinder(h=8, r=6, center=true, $fn = circle_facets);
+            translate([-26, 12, 0]) cube([10, 12, 8]);
         }
         union() {  // Holes in plate 1
             // Motor hole
-            translate([0, 18, -10]) cylinder(h = 100, r = 11, $fn = circle_facets);
+            translate([0, 18, -10]) cylinder(h = 100, r = 10, $fn = circle_facets);
 
-            // Motor screw hole #1
-            translate([0, 3.5, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
-            translate([0, 3.5, 3]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+            rotate_around_center_point([0, 0, 45], [0, 18, -10]) {
+                // Motor screw hole #1
+                rotate([0, 0, 0]) {
+                    translate([0, 4.0, -10]) cylinder(h = 100, r = 1.6, $fn = circle_facets);
+                    translate([0, 4.0, 6]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
 
-            // Motor screw hole #2
-            translate([0, 32.5, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
-            translate([0, 32.5, 3]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+                // Motor screw hole #2
+                    translate([0, 32.0, -10]) cylinder(h = 100, r = 1.6, $fn = circle_facets);
+                    translate([0, 32.0, 6]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+                }
+            }
 
             // ---- Clamp holes ----
 
@@ -60,6 +74,10 @@ union() {
             // Clamp screw hole M6 (threaded, 5mm)
             translate([21, 29, 4]) rotate([0,90,0]) cylinder(h = 100, r = 2.5, $fn =
  circle_facets);
+ 
+             // ---- Spring hole ----
+            translate([-26, 18, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
+            translate([-26, 18, 5.3]) rotate([0, 0, 30]) cylinder(h = 5.01, r = hex_nut_size, $fn = 6);
         }; // Holes in plate 1
     };
 
@@ -72,6 +90,9 @@ union() {
 
             // Round part of plate
             translate([-20, 18, 4]) cylinder(h=8, r=21, center=true, $fn = circle_facets);
+            
+            // Extra tip for fastening spring
+            translate([-44, 18, 4]) cylinder(h=8, r=10, center=true, $fn = circle_facets);
         }
         union() {  // Encoder mount plate holes
             // Encoder hole
@@ -92,17 +113,17 @@ union() {
 
             // Encoder screw hole #1
             translate([-20, 3.5, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
-            translate([-20, 3.5, 3]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+            translate([-20, 3.5, 6]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
 
             // Encoder screw hole #2
             // 150 degrees from x axis: x = -12.99, y = 7.5
             translate([-7.01, 25.5, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
-            translate([-7.01, 25.5, 3]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+            translate([-7.01, 25.5, 6]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
 
             // Encoder screw hole #3
             // 30 degrees from x axis:  x = 12.99, y = 7.5
             translate([-32.99, 25.5, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
-            translate([-32.99, 25.5, 3]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+            translate([-32.99, 25.5, 6]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
 
             // ---- Screw holes between parts ----
 
@@ -117,6 +138,14 @@ union() {
 
             // Screw hole #5 (hex nut) 2.54mm thick, but allow 2.7 for bleed.
             translate([5, 3, 5.3]) cylinder(h = 5.01, r = hex_nut_size, $fn = 6);
+            
+            // ---- Spring hole ----
+            translate([-44, 18, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
+            translate([-44, 18, 4]) rotate([0, 0, 30]) cylinder(h = 5.01, r = hex_nut_size, $fn = 6);
+            
+            // ---- Position badge ----
+            // translate([5, 18, 4]) rotate([0, 0, 90]) linear_extrude(height = 5) { text("PAN", size = 7, font = "Verdana", halign = "center", valign = "center", $fn = 16); }
+            translate([5, 18, 4]) rotate([0, 0, 90]) linear_extrude(height = 5) { text("TILT", size = 7, font = "Verdana", halign = "center", valign = "center", $fn = 16); }
         }  // Encoder mount plate holes
     };
 
@@ -150,12 +179,12 @@ union() {
             // Screw holes
             union() {
                 // Screw hole #4 (head bore)
-                translate(plate_3_translate) translate([5, 33, 11]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+                translate(plate_3_translate) translate([5, 33, 14]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
                 // Screw hole #4 (main bore between parts)
                 translate(plate_3_translate) translate([5, 33, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
 
                 // Screw hole #5 (head bore)
-                translate(plate_3_translate) translate([5, 3, 11]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
+                translate(plate_3_translate) translate([5, 3, 14]) cylinder(h = 5.01, r = 3, $fn = circle_facets);
                 // Screw hole #5 (main bore between parts)
                 translate(plate_3_translate) translate([5, 3, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
             };
