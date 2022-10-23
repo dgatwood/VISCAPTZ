@@ -203,8 +203,7 @@ static int64_t gAxisMoveStartPosition[NUM_AXES];
 static int64_t gAxisMoveTargetPosition[NUM_AXES];
 
 /**
- * The maximum speed of a given axis for the currently active move.  This appears
- * to be completely unused.
+ * The maximum speed of a given axis for the currently active move.
  */
 static int64_t gAxisMoveMaxSpeed[NUM_AXES];
 
@@ -324,10 +323,14 @@ int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis);
 /**
  * Sets the position of an axis to the specified position.
  *
- * @param maxSpeed The maximum speed for the axis.  This value appears to be unused.
- * @param duration The target duration.
+ * @param axis      The axis to move.
+ * @param position  The target position.
+ * @param maxSpeed  The maximum speed for the axis (used only if duration is 0).
+ * @param duration  The desired move duration, or 0 to use position-based progress
+                    prior to or during calibration.
+ * @param startTime The timestamp when motion should begin, or zero to start immediately.
  */
-bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration);
+bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration, double startTime);
 
 /** Sets the axis speed, using core scale speed values. */
 bool setAxisSpeed(axis_identifier_t axis, int64_t coreSpeed, bool debug);
@@ -856,6 +859,13 @@ void handleRecallUpdates(void) {
       double currentTime = timeStamp();
       double remainingTime = gAxisStartTime[axis] + duration - currentTime;
 
+      if (gAxisStartTime[axis] > currentTime) { 
+        if (localDebug) {
+          fprintf(stderr, "Axis start time is in the future.  Doing nothing.\n");
+        }
+        continue;  // Go on the the next axis.
+      }
+
       // Time-based computation can be slightly imprecise.  If the progress based on position is
       // 1000, we're done with this axis no matter what the wall clock says.  And of course, if
       // there's no computed duration, we use the position-based approach, and if the duration
@@ -884,6 +894,11 @@ void handleRecallUpdates(void) {
 
       int peakSpeed = usingPositionBasedProgress ? 1000 :
           peakSpeedForMove(axis, startPosition, targetPosition, duration);
+
+      // Cap the maximum speed if we don't have calibration data.
+      if (usingPositionBasedProgress && gAxisMoveMaxSpeed[axis] != 0) {
+        peakSpeed = MIN(peakSpeed, gAxisMoveMaxSpeed[axis]);
+      }
 
       // In the middle part of the move, make sure we don't run behind or ahead too much.
       // We know when we plan to start slowing down, and that's a good enough goalpost.
@@ -1195,7 +1210,7 @@ int64_t getAxisPosition(axis_identifier_t axis) {
   return 0;
 }
 
-bool setZoomPosition(int64_t position, int64_t speed, double duration) {
+bool setZoomPosition(int64_t position, int64_t speed, double duration, double startTime) {
     bool localDebug = false;
 
     if (localDebug) {
@@ -1206,11 +1221,12 @@ bool setZoomPosition(int64_t position, int64_t speed, double duration) {
         duration = durationForMove(kFlagMoveZoom, kUnusedPosition, kUnusedPosition, position);
     }
 
-    return SET_ZOOM_POSITION(position, speed, makeDurationValid(axis_identifier_zoom, duration, position));
+    return SET_ZOOM_POSITION(position, speed, makeDurationValid(axis_identifier_zoom, duration, position), startTime);
 }
 
 bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
-                        int64_t tiltPosition, int64_t tiltSpeed, double duration) {
+                        int64_t tiltPosition, int64_t tiltSpeed, double duration,
+                        double panStartTime, double tiltStartTime) {
     bool localDebug = false;
 
     if (localDebug) {
@@ -1235,7 +1251,8 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
 
     return SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed,
                                  makeDurationValid(axis_identifier_pan, duration, panPosition),
-                                 makeDurationValid(axis_identifier_tilt, duration, tiltPosition));
+                                 makeDurationValid(axis_identifier_tilt, duration, tiltPosition),
+                                 panStartTime, tiltStartTime);
 }
 
 double makeDurationValid(axis_identifier_t axis, double duration, int64_t position) {
@@ -1563,7 +1580,8 @@ void cancelRecallIfNeeded(char *context) {
   }
 }
 
-bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration) {
+bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration,
+                                  double startTime) {
   bool localDebug = false;
 
   if (localDebug) {
@@ -1581,7 +1599,7 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
   }
 
   gAxisMoveInProgress[axis] = true;
-  gAxisStartTime[axis] = timeStamp();
+  gAxisStartTime[axis] = startTime ?: timeStamp();
   gAxisDuration[axis] = duration;
   gAxisMoveStartPosition[axis] = getAxisPosition(axis);
   gAxisMoveTargetPosition[axis] = position;
@@ -2000,7 +2018,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 uint8_t speed = ((command[len - 2] & 0xf0) == 0) ? ((command[8] & 0xf) + 1) :
                     getVISCAZoomSpeedFromTallyState();
                 cancelRecallIfNeeded("setZoomPosition");
-                setZoomPosition(position, scaleVISCAZoomSpeedToCoreSpeed(speed), 0);
+                setZoomPosition(position, scaleVISCAZoomSpeedToCoreSpeed(speed), 0, 0);
 
                 // If (command[9] & 0xf0) == 0, then the low bytes of 9-12 are focus position,
                 // and speed is at position 13, shared with focus.  If we ever add support for
@@ -2074,7 +2092,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 cancelRecallIfNeeded("Pan/tilt absolute command received");
                 if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
                                         tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
-                                        0)) {
+                                        0, 0, 0)) {
                     return false;
                 }
 
@@ -2107,7 +2125,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                     cancelRecallIfNeeded("Pan/tilt relative command received");
                     if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
                                             tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
-                                            0)) {
+                                            0, 0, 0)) {
                         return false;
                     }
                 } else {
@@ -2290,12 +2308,16 @@ bool recallPreset(int presetNumber) {
         fprintf(stderr, "WARNING: durationForMove returned 0\n");
     }
 
+    double zoomStartTime = 0;
+    double panStartTime = 0;
+    double tiltStartTime = 0;
+
     cancelRecallIfNeeded("recallPreset");
     bool retval = setPanTiltPosition(preset.panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
                                      preset.tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
-                                     duration);
+                                     duration, panStartTime, tiltStartTime);
     bool retval2 = setZoomPosition(preset.zoomPosition, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed),
-                                   duration);
+                                   duration, zoomStartTime);
 
     if (retval && retval2) {
         fprintf(stderr, "Loaded preset %d\n", presetNumber);
@@ -2702,7 +2724,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
   }
 
   int64_t *data = (int64_t *)malloc(sizeof(int64_t) * (maxSpeed - minSpeed + 1));
-  setAxisPositionIncrementally(axis, startPosition, SCALE_CORE, 0);  // Move as quickly as possible.
+  setAxisPositionIncrementally(axis, startPosition, SCALE_CORE, 0, 0);  // Move as quickly as possible.
   waitForAxisMove(axis);
 
   if (localDebug) {

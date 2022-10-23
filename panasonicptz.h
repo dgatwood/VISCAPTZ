@@ -100,8 +100,8 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
     // zoom position.  Others don't provide speed control, so you may not want to
     // use the zoom command anyway.
     #if PANASONIC_PTZ_ZOOM_ONLY || PANASONIC_DISABLE_ZOOM_COMMAND
-        #define SET_ZOOM_POSITION(position, maxSpeed, time) \
-            setAxisPositionIncrementally(axis_identifier_zoom, position, maxSpeed, time)
+        #define SET_ZOOM_POSITION(position, maxSpeed, time, startTime) \
+            setAxisPositionIncrementally(axis_identifier_zoom, position, maxSpeed, time, startTime)
     #else  // !(PANASONIC_PTZ_ZOOM_ONLY || PANASONIC_DISABLE_ZOOM_COMMAND)
         #define SET_ZOOM_POSITION(position, maxSpeed, time) \
             panaSetZoomPosition(axis_identifier_zoom, position, maxSpeed)
@@ -117,7 +117,8 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
             panaGetPanTiltPosition(panPositionRef, tiltPositionRef)
         #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed, isRaw) \
             panaSetPanSpeed(panSpeed, tiltSpeed, isRaw)
-        #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, panTime, tiltTime)
+        #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, \
+                                      panDuration, tiltDuration, panStartTime, tiltStartTime) \
             panaSetPanTiltPosition(panPosition, panSpeed, tiltPosition, tiltSpeed)
         #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
         #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
