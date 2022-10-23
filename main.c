@@ -618,13 +618,15 @@ int main(int argc, char *argv[]) {
 
 int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t endPosition,
                    int64_t previousPosition, int *stalls, bool usingTimeComputation) {
-  bool localDebug = true;
+  bool localDebug = false;
   int64_t progress = llabs(curPosition - startPosition);
   int64_t total = llabs(endPosition - startPosition);
 
   if (total == 0) {
-    fprintf(stderr, "Axis %d End position (%" PRId64 ") = start position (%" PRId64 ").  Doing nothing.\n",
-            axis, startPosition, endPosition);
+    if (localDebug) {
+      fprintf(stderr, "Axis %d End position (%" PRId64 ") = start position (%" PRId64 ").  Doing nothing.\n",
+              axis, startPosition, endPosition);
+    }
     return 1000;
   }
 
@@ -801,7 +803,7 @@ bool moveInProgress(void) {
 }
 
 void handleRecallUpdates(void) {
-  int localDebug = 1;
+  int localDebug = 0;
 
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
     if (gAxisMoveInProgress[axis]) {
@@ -902,26 +904,34 @@ void handleRecallUpdates(void) {
               // Progress from 20 to 80 scaled to be from 10 to 90.
               ((moveProgressByTime - kRampUpPeriodEnd) * kFullSpeedPeriodByDistance / kFullSpeedPeriodByTime);
 
-          fprintf(stderr, "Axis %s progressByTime: %d\n", nameForAxis(axis), moveProgress);
-          fprintf(stderr, "Axis %s expected progress: %d actual: %d\n", nameForAxis(axis),
-                  expectedMoveProgressByPosition, moveProgressByPosition);
-          fprintf(stderr, "Axis %s peak speed before adjustment: %d\n", nameForAxis(axis), peakSpeed);
+          if (localDebug) {
+            fprintf(stderr, "Axis %s progressByTime: %d\n", nameForAxis(axis), moveProgress);
+            fprintf(stderr, "Axis %s expected progress: %d actual: %d\n", nameForAxis(axis),
+                    expectedMoveProgressByPosition, moveProgressByPosition);
+            fprintf(stderr, "Axis %s peak speed before adjustment: %d\n", nameForAxis(axis), peakSpeed);
+          }
 
           // Compute how long we have left to move at peak speed.
           double timeBeforeSlowingDown = MAX(remainingTime - (0.1 * duration), 0);
-          fprintf(stderr, "Axis %s time before slowing down: %lf\n", nameForAxis(axis), timeBeforeSlowingDown);
+          if (localDebug) {
+            fprintf(stderr, "Axis %s time before slowing down: %lf\n", nameForAxis(axis), timeBeforeSlowingDown);
+          }
 
           // Update the peak speed.
           int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
           int64_t distanceMoved = llabs(axisPosition - startPosition);
           int64_t distanceLeft = moveDistanceBeforeStartOfSlowdown - distanceMoved;
 
-          fprintf(stderr, "Axis %s max PPS for axis: %" PRId64" remaining distance: %" PRId64 "\n",
-                  nameForAxis(axis), maxPPSForAxis, distanceLeft);
+          if (localDebug) {
+            fprintf(stderr, "Axis %s max PPS for axis: %" PRId64" remaining distance: %" PRId64 "\n",
+                    nameForAxis(axis), maxPPSForAxis, distanceLeft);
+          }
 
           peakSpeed = (1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown);
 
-          fprintf(stderr, "Axis %s peak speed after adjustment: %d\n", nameForAxis(axis), peakSpeed);
+          if (localDebug) {
+            fprintf(stderr, "Axis %s peak speed after adjustment: %d\n", nameForAxis(axis), peakSpeed);
+          }
       }
       bool creeping = (moveProgress == 1000) && (moveProgressByPosition < 1000);
 #else
@@ -939,11 +949,13 @@ void handleRecallUpdates(void) {
         int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
         double targetPPS = peakSpeed * maxPPSForAxis / 1000.0;
 
-        fprintf(stderr, "POSITION CHANGE: %" PRId64 "\n", deltaPositionSinceLastChange);
-        fprintf(stderr, "TIME CHANGE: %lf\n", deltaTimeSinceLastChange);
-        fprintf(stderr, "COMPUTED SPEED: %lf pps EXPECTED: %lf pps\n",
-                (double)((int)deltaPositionSinceLastChange / deltaTimeSinceLastChange),
-                targetPPS);
+        if (localDebug) {
+          fprintf(stderr, "POSITION CHANGE: %" PRId64 "\n", deltaPositionSinceLastChange);
+          fprintf(stderr, "TIME CHANGE: %lf\n", deltaTimeSinceLastChange);
+          fprintf(stderr, "COMPUTED SPEED: %lf pps EXPECTED: %lf pps\n",
+                  (double)((int)deltaPositionSinceLastChange / deltaTimeSinceLastChange),
+                  targetPPS);
+        }
 
         gAxisPreviousPosition[axis] = axisPosition;
         gAxisPreviousPositionTimestamp[axis] = currentTime;
@@ -1045,6 +1057,8 @@ double absceil(double value) {
 // If fromScale is not the core scale, the value is first converted
 // to that scale.
 int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
+  bool localDebug = false;
+
   if (scaleData == NULL) {
     return absceil((speed * 1.0 * toScale) / fromScale);
   }
@@ -1069,9 +1083,11 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
   for (int i = 0; i <= toScale; i++) {
     if (scaleData[i] == absSpeed) {
       int retval = i * sign;
-      fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
-              speed, retval, abs(absSpeed - scaleData[i]),
-              100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+      if (localDebug) {
+        fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+                speed, retval, abs(absSpeed - scaleData[i]),
+                100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+      }
       return retval;
     } else if (scaleData[i] > absSpeed) {
       // The native speed at `i` is the smallest speed
@@ -1086,9 +1102,11 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       // motor controller.)
       if (scaleData[i - 1] == 0) {
         int retval = i * sign;
-        fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
-                speed, retval, abs(absSpeed - scaleData[i]),
-                100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+        if (localDebug) {
+          fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+                  speed, retval, abs(absSpeed - scaleData[i]),
+                  100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+        }
         return retval;
       }
       // Both the current native speed value and the
@@ -1099,18 +1117,22 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       int distanceAbove = scaleData[i] - absSpeed;
       int chosenIndex = ((distanceAbove < distanceBelow) ? i : i-1);
       int retval = chosenIndex * sign;
-      fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
-              speed, retval, abs(absSpeed - scaleData[chosenIndex]),
-              100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+      if (localDebug) {
+        fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+                speed, retval, abs(absSpeed - scaleData[chosenIndex]),
+                100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+      }
       return retval;
     }
   }
   // If we ran off the end, return the maximum speed.
   int chosenIndex = toScale;
   int retval = chosenIndex * sign;
-  fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
-          speed, retval, abs(absSpeed - scaleData[chosenIndex]),
-          100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+  if (localDebug) {
+    fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
+            speed, retval, abs(absSpeed - scaleData[chosenIndex]),
+            100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+  }
   return retval;
 }
 
@@ -1174,7 +1196,11 @@ int64_t getAxisPosition(axis_identifier_t axis) {
 }
 
 bool setZoomPosition(int64_t position, int64_t speed, double duration) {
-    fprintf(stderr, "@@@ setZoomPosition: %" PRId64 " Speed: %" PRId64 "\n", position, speed);
+    bool localDebug = false;
+
+    if (localDebug) {
+      fprintf(stderr, "@@@ setZoomPosition: %" PRId64 " Speed: %" PRId64 "\n", position, speed);
+    }
 
     if (duration == 0) {
         duration = durationForMove(kFlagMoveZoom, kUnusedPosition, kUnusedPosition, position);
@@ -1187,13 +1213,15 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
                         int64_t tiltPosition, int64_t tiltSpeed, double duration) {
     bool localDebug = false;
 
-    if (duration == 0 && localDebug) {
+    if (localDebug) {
+      if (duration == 0) {
         fprintf(stderr, "WARNING: NO DURATION AVAILABLE FOR PAN/TILT SET COMMAND.\n");
-    }
+      }
 
-    fprintf(stderr, "@@@ setPanTiltPosition: Pan position %" PRId64 " speed %" PRId64 "\n"
-                    "                        Tilt position %" PRId64 " speed %" PRId64 "\n",
-                    panPosition, panSpeed, tiltPosition, tiltSpeed);
+      fprintf(stderr, "@@@ setPanTiltPosition: Pan position %" PRId64 " speed %" PRId64 "\n"
+                      "                        Tilt position %" PRId64 " speed %" PRId64 "\n",
+                      panPosition, panSpeed, tiltPosition, tiltSpeed);
+    }
 
     if (!absolutePositioningSupportedForAxis(axis_identifier_pan) ||
         !absolutePositioningSupportedForAxis(axis_identifier_tilt)) {
@@ -1211,7 +1239,7 @@ bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
 }
 
 double makeDurationValid(axis_identifier_t axis, double duration, int64_t position) {
-  bool localDebug = true;
+  bool localDebug = false;
   if (localDebug) {
     fprintf(stderr, "makeDurationValid(axis %d, duration %lf, position: %lld)\n",
       axis, duration, (long long)position);
@@ -1235,7 +1263,9 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
                fastestDuration);
     }
   }
-  fprintf(stderr, "Axis %s final value: %lf\n", nameForAxis(axis), duration);
+  if (localDebug) {
+    fprintf(stderr, "Axis %s final value: %lf\n", nameForAxis(axis), duration);
+  }
   return duration;
 }
 
@@ -1254,7 +1284,7 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
  * fast axis (or a very short move) from changing things too severely.
  */
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition) {
-  bool localDebug = true;
+  bool localDebug = false;
 
   double recallTime = currentRecallTime();
   double originalRecallTime = recallTime;
@@ -1409,14 +1439,21 @@ int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis) {
 // We start by computing the number of positions per second given the time and distance.
 // We then divide by moveTimeFractionBeforeSlowdown.
 int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPosition, double time) {
+  bool localDebug = false;
   double peakPositionsPerSecond = (llabs(fromPosition - toPosition) / time) / moveTimeFractionBeforeSlowdown;
-  fprintf(stderr, "Peak points per second for move along axis %d from %lld to %lld over time %lf is %lf\n",
-          axis, fromPosition, toPosition, time, peakPositionsPerSecond);
+
+  if (localDebug) {
+    fprintf(stderr, "Peak points per second for move along axis %d from %lld to %lld over time %lf is %lf\n",
+            axis, fromPosition, toPosition, time, peakPositionsPerSecond);
+  }
 
   int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
   int peakSpeed = (peakPositionsPerSecond * 1000) / maxPPSForAxis;
-  fprintf(stderr, "Peak speed: %d (max PPS for axis is %" PRId64 ", peakPPS is %lf)\n",
-          peakSpeed, maxPPSForAxis, peakPositionsPerSecond);
+
+  if (localDebug) {
+    fprintf(stderr, "Peak speed: %d (max PPS for axis is %" PRId64 ", peakPPS is %lf)\n",
+            peakSpeed, maxPPSForAxis, peakPositionsPerSecond);
+  }
 
   return peakSpeed;
 }
@@ -1527,7 +1564,7 @@ void cancelRecallIfNeeded(char *context) {
 }
 
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration) {
-  bool localDebug = true;
+  bool localDebug = false;
 
   if (localDebug) {
     fprintf(stderr, "setAxisPositionIncrementally for axis %d\n", axis);
@@ -2206,7 +2243,7 @@ int getVISCAZoomSpeedFromTallyState(void) {
 }
 
 bool recallPreset(int presetNumber) {
-    bool localDebug = true;
+    bool localDebug = false;
 
     // Do not attempt to recall positions in calibration mode!
     if (gCalibrationMode) {
@@ -2243,7 +2280,9 @@ bool recallPreset(int presetNumber) {
                 ((preset.tiltPosition != currentTiltPosition) ? kFlagMoveTilt : 0) |
                 ((preset.zoomPosition != currentZoomPosition) ? kFlagMoveZoom : 0);
 
-    fprintf(stderr, "flags: %d\n", flags);
+    if (localDebug) {
+      fprintf(stderr, "flags: %d\n", flags);
+    }
 
     double duration = durationForMove(flags, preset.panPosition, preset.tiltPosition, preset.zoomPosition);
 
@@ -2325,7 +2364,7 @@ return 10.0;
 
 // Computes a map between motor speed and encoder positions per second for each axis.
 void do_calibration(void) {
-  int localDebug = 1;
+  int localDebug = 0;
   int64_t lastPosition[NUM_AXES];
   int64_t maxPosition[NUM_AXES];
   int64_t minPosition[NUM_AXES];

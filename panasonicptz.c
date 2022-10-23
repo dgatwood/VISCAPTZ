@@ -124,7 +124,7 @@ bool panaModuleInit(void) {
 bool panaModuleReload(void) {
   #if USE_PANASONIC_PTZ
     int maxSpeed = 0;
-    bool localDebug = true;
+    bool localDebug = false;
     panasonicZoomCalibrationData =
         readCalibrationDataForAxis(axis_identifier_zoom, &maxSpeed);
     if (maxSpeed == ZOOM_SCALE_HARDWARE) {
@@ -404,7 +404,7 @@ int64_t panaGetZoomSpeed(void) {
 // Sets the camera's zoom speed.
 int64_t panaGetZoomPositionRaw(void);
 bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
-    bool localDebug = true || pana_enable_debugging;
+    bool localDebug = false || pana_enable_debugging;
     gLastZoomSpeed = speed;
 
     int intSpeed =
@@ -710,7 +710,7 @@ static size_t writeMemoryCallback(void *contents, size_t chunkSize, size_t nChun
 
 /** Polls the zoom position 5x per second until it stops for at least a second. */
 void waitForZoomStop(timed_position_t **dataPointsOut, int *dataPointCountOut) {
-  bool localDebug = true;
+  bool localDebug = false;
   int64_t lastPosition = panaGetZoomPositionRaw();
   int stoppedCount = 0;
 
@@ -771,7 +771,7 @@ void printZoomNonlinearityComputation(timed_position_t *positionArray, int count
 // Creates speed tables indicating how fast the zoom axis moves at various
 // speeds (in positions per second).
 void panaModuleCalibrate(void) {
-  bool localDebug = true;
+  bool localDebug = false;
 
   fprintf(stderr, "Calibrating zoom motors.  This takes about 20 minutes.\n");
 
