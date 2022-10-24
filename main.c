@@ -2260,6 +2260,8 @@ int getVISCAZoomSpeedFromTallyState(void) {
     return onProgram ? 2 : 8;
 }
 
+double adjustedStartTimeForMove(double totalDuration, double shortMoveDuration, bool alignToEnd);
+
 bool recallPreset(int presetNumber) {
     bool localDebug = false;
 
@@ -2308,9 +2310,31 @@ bool recallPreset(int presetNumber) {
         fprintf(stderr, "WARNING: durationForMove returned 0\n");
     }
 
+    bool isZoomingOut = zoomEncoderReversed() ? (preset.zoomPosition > currentZoomPosition) :
+        (currentZoomPosition > preset.zoomPosition);
+
     double zoomStartTime = 0;
     double panStartTime = 0;
     double tiltStartTime = 0;
+
+    double panDuration = makeDurationValid(axis_identifier_pan, duration, preset.panPosition);
+    double tiltDuration = makeDurationValid(axis_identifier_tilt, duration, preset.tiltPosition);
+    double zoomDuration = makeDurationValid(axis_identifier_zoom, duration, preset.zoomPosition);
+
+    // If the camera is zooming out, align pans and tilts with the end of the zoom operation so that
+    // they are less distractiong.  If the camera is zooming in, align them with the beginning of
+    // of the zoom operation for the same reason.
+    if (panDuration < duration && zoomDuration > panDuration) {
+      panStartTime = adjustedStartTimeForMove(duration, panDuration, isZoomingOut);
+    }
+    if (tiltDuration < duration && zoomDuration > tiltDuration) {
+      tiltStartTime = adjustedStartTimeForMove(duration, tiltDuration, isZoomingOut);
+    }
+    if (zoomDuration < duration) {
+      // We prefer to zoom in at the end of the move or zoom out at the beginning, so reverse the
+      // boolean when adjusting the zoom start time.
+      zoomStartTime = adjustedStartTimeForMove(duration, zoomDuration, !isZoomingOut);
+    }
 
     cancelRecallIfNeeded("recallPreset");
     bool retval = setPanTiltPosition(preset.panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
@@ -2333,6 +2357,12 @@ bool recallPreset(int presetNumber) {
 
     return retval && retval2;
 }
+
+double adjustedStartTimeForMove(double totalDuration, double shortMoveDuration, bool alignToEnd) {
+  double currentTime = timeStamp();
+  return alignToEnd ? (currentTime + totalDuration - shortMoveDuration) : currentTime;
+}
+
 
 void setRecallSpeedVISCA(int value) {
   gRecallSpeedSet = true;
