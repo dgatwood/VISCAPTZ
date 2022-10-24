@@ -2344,9 +2344,6 @@ void setRecallSpeedVISCA(int value) {
  * or the speed set via VISCA.
  */
 double currentRecallTime(void) {
-
-return 10.0;
-
   // VISCA (or at least PTZOptics) allows a range of 1 to 24.  This maps those into speeds.
   // These speeds are just sort of arbitrary mappings.
   int recallSpeed = gRecallSpeedSet ? gVISCARecallSpeed : getVISCAZoomSpeedFromTallyState();
