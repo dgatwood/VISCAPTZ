@@ -21,16 +21,37 @@ int64_t getConfigKeyInteger(const char *key);
 
 /**
  * Sets the value of the specified configuration key.
- * Keys must not contain equals signs.
- * Values must not contain newlines.
+ *
+ * IMPORTANT: These functions perform NO synchronization.  Although
+ * writes are atomic against reads, they are NOT atomic against
+ * other writes.
+ *
+ * These functions should ONLY be called during calibration or while
+ * handling command-line arguments at launch time, to ensure that
+ * concurrent writes from multiple threads cannot happen.
+ *
+ * @property key   The name of the key.  This key must not contain
+ *                 any equals signs.
+ * @property value The vale for the key.  This value must not
+ *                 contain any newline characters.  If the value
+ *                 is NULL, the key is removed.
  */
 bool setConfigKey(const char *key, const char *value);
 
-/** Sets the specified configuration key to 0/1. */
+/**
+ * Sets the specified configuration key to 0/1.
+ * See setConfigKey for more details.
+ */
 bool setConfigKeyBool(const char *key, bool value);
 
-/** Sets the specified configuration key to 0/1. */
+/**
+ * Sets the specified configuration key to 0/1.
+ * See setConfigKey for more details.
+ */
 bool setConfigKeyInteger(const char *key, int64_t value);
 
-/** Removes the value for the specified configuration key. */
+/**
+ * Removes the value for the specified configuration key.
+ * See setConfigKey for more details.
+ */
 bool removeConfigKey(const char *key);

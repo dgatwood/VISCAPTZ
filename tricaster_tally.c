@@ -35,6 +35,8 @@ void handleTag(char *tag);
 void *runTricasterTallyThread(void *argIgnored);
 void teardown(int sock);
 
+static char *gTricasterIPAddress = NULL;
+
 // Public function.  Docs in header.
 //
 // Initializes the Tricaster tally module.
@@ -42,7 +44,8 @@ bool tricasterModuleInit(void) {
   #if USE_TRICASTER_TALLY_SOURCE
     tally_source_name = getConfigKey(kTallySourceName);
 
-    if (getConfigKey(kTricasterIPKey) == NULL) {
+    gTricasterIPAddress = getConfigKey(kTricasterIPKey);
+    if (gTricasterIPAddress == NULL) {
       fprintf(stderr, "Tricaster IP not set.  Initialization failed.\n");
       fprintf(stderr, "Run 'viscaptz --settricasterip <IP address>' to fix.\n");
       return false;
@@ -86,11 +89,14 @@ tallyState tricaster_getTallyState(void) {
 
       memset((char *) &address, 0, sizeof(address));
       address.sin_family = AF_INET;
-      address.sin_addr.s_addr = inet_addr(getConfigKey(kTricasterIPKey));
+
+      address.sin_addr.s_addr = inet_addr(gTricasterIPAddress);
+
       address.sin_port = htons(port);
 
       if (connect(sock, (struct sockaddr *)&address, sizeof(address)) != 0) {
           fprintf(stderr, "tricaster_tally: Tricaster connection failed.  Sleeping a bit.\n");
+          teardown(sock);
           usleep(RECONNECT_DELAY);
 	  continue;
       } else if (tricasterDebug) {
