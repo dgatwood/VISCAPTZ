@@ -14,6 +14,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -475,6 +476,8 @@ void do_calibration(void);
 bool debug_verbose = false;
 
 int main(int argc, char *argv[]) {
+
+  signal(SIGPIPE, SIG_IGN);
 
   runStartupTests();
 
