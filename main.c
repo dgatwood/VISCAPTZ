@@ -278,17 +278,6 @@ bool absolutePositioningSupportedForAxis(axis_identifier_t axis);
 void cancelRecallIfNeeded(char *context);
 
 /**
- * Returns the duration that should be used for a recall if performed right now,
- * By default, this returns a duration based on whether the camera is in preview
- * mode or program mode.  If a maximum speed is set via VISCA, that speed takes
- * precedence.
- *
- * This function ignores whether the duraton is actually possible.  For that,
- * you should call durationForMove.
- */
-double currentRecallTime(void);
-
-/**
  * Computes the duration for a move to the specified positions on the specified axes.
  *
  * @param flags A set of flags that defines which axes are used.
@@ -377,9 +366,17 @@ char *VISCAMessageDebugString(uint8_t *command, uint8_t len);
 
 /**
  * Gets a default zoom speed (in VISCA range) based on the current tally state,
- * e.g. the speed is slower when the camera is live.
+ * i.e. the speed is slower when the camera is live.
  */
 int getVISCAZoomSpeedFromTallyState(void);
+
+/**
+ * Returns the speed (in VISCA range) that should be used for a preset recall.
+ * If the controller has set an explicit speed, it returns that value.  Otherwise,
+ * it returns a speed based on the current tally state, i.e. the speed is slower
+ * when the camera is live.
+ */
+int getVISCARecallSpeed(void);
 
 /** Processes a single VISCA command or inquiry packet. */
 bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, socklen_t structLength);
@@ -636,14 +633,25 @@ int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t
     return 1000;
   }
 
-  if ((startPosition != curPosition) && (previousPosition == curPosition)) {
+  // For position-based computation, we don't count stalls before the
+  // motor starts moving.  For time-based computation, we count all
+  // stalls equally.
+  if ( (usingTimeComputation || (startPosition != curPosition)) &&
+       (previousPosition == curPosition) ) {
     // We may have slowed down to the point where the motors no longer move.
     // Don't keep wasting power and heating up the motors.
     *stalls = (*stalls) + 1;
+    if (localDebug) {
+      fprintf(stderr, "Axis %d STALLED (count = %d)\n", axis, *stalls);
+    }
     if (*stalls > kAxisStallThreshold) {
       return 1000;
     }
   } else {
+    if (localDebug) {
+      fprintf(stderr, "Axis %d NOT STALLED (%" PRId64 " == %" PRId64 " && %" PRId64 " != %" PRId64 ")\n",
+              axis, startPosition, curPosition, previousPosition, curPosition);
+    }
     *stalls = 0;
   }
 
@@ -1306,7 +1314,96 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition) {
   bool localDebug = false;
 
-  double recallTime = currentRecallTime();
+  // VISCA (or at least the PTZOptics dialect thereof) allows a range of 1 to 24.  This
+  // maps those into speeds.
+
+  // These speeds are just sort of arbitrary mappings.
+  int recallSpeed = getVISCARecallSpeed();
+  fprintf(stderr, "Recall speed: %d\n", getVISCARecallSpeed());
+  fprintf(stderr, "Recall speed set: %s\n", gRecallSpeedSet ? "YES" : "NO");
+  if (gRecallSpeedSet) fprintf(stderr, "Requested recall speed: %d\n", gVISCARecallSpeed);
+
+#ifdef OLD_STATIC_DURATIONS
+  // Slowest speed is 1, which maps to 30 seconds.
+  // Fastest speed is 24, which maps to 2 seconds.
+  //
+  // From there, we compute an equation to find the other values.
+  //
+  // k - 24n = 2
+  // k - 1n = 30
+  // ---------------
+  // 24k - 24n = 720
+  // -k + 24n = -2
+  // 23k     = 718
+  // k = 718/23
+  // ---------------
+  // k - n = 30
+  // 718/23 - n = 30
+  // 718/23 = 30 + n
+  // n = 718/23 - 30
+  // n = 28/23  (about 1.2173)
+
+  double multiplier = 28.0/23.0;
+  double computed_max = 718.0/23.0;
+  double duration = computed_max - (multiplier * recallSpeed);
+  double recallTime = (duration > 30) ? 30 :
+         (duration < 2) ? 2 :
+         duration;
+#else
+  // Compute the duration based on fractions of the speed that the axes can actually move,
+  // in a manner of speaking, with a capped maximum duration of 30 seconds.
+  double longestPanDuration = slowestMoveForAxisToPosition(axis_identifier_pan, panPosition);
+  double longestTiltDuration = slowestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
+  double longestZoomDuration = slowestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
+
+  double shortestPanDuration = fastestMoveForAxisToPosition(axis_identifier_pan, panPosition);
+  double shortestTiltDuration = fastestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
+  double shortestZoomDuration = fastestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
+
+  if (localDebug) {
+    fprintf(stderr, "longestPanDuration: %lf\n", longestPanDuration);
+    fprintf(stderr, "longestTiltDuration: %lf\n", longestTiltDuration);
+    fprintf(stderr, "longestZoomDuration: %lf\n", longestZoomDuration);
+    fprintf(stderr, "shortestPanDuration: %lf\n", shortestPanDuration);
+    fprintf(stderr, "shortestTiltDuration: %lf\n", shortestTiltDuration);
+    fprintf(stderr, "shortestZoomDuration: %lf\n", shortestZoomDuration);
+  }
+
+  // First, compute the maximum duration when the slowest axis moves at its minimum speed.
+  // This is the absolute maximum possible duration.
+  double maximumDurationOnSlowestAxis = MAX(MAX(longestPanDuration, longestTiltDuration), longestZoomDuration);
+
+  // Cap the slowest recall time at 30 seconds.  Although the motors CAN go
+  // slowly enough to spend four minutes turning the cameras 90 degrees, it
+  // probably isn't useful to do so....
+  if (maximumDurationOnSlowestAxis > 30) {
+    maximumDurationOnSlowestAxis = 30;
+  }
+
+  // Next, compute the shortest duration that can be achieved, ignoring any axes that
+  // might stop sooner.  For example, if one axis can't move for more than half a second,
+  // its shortest time would be unachievable on most axes, and it would be silly to
+  // care how quickly that axis can move, because obviously it isn't moving very far.
+  // So we only care about the slowest axis (the one that takes the longest to reach
+  // the destination at its maximum speed).
+  double minimumDurationOnSlowestAxis = MAX(MAX(shortestPanDuration, shortestTiltDuration), shortestZoomDuration);
+
+  // Finally, map the speed range so that 1 produces the slowest speed and 24 produces
+  // the fastest speed.
+  double durationRange = maximumDurationOnSlowestAxis - minimumDurationOnSlowestAxis;
+  double fractionPerIncrement = durationRange / 23.0;  // Possible values of recallSpeed are 1 to 24.
+  double recallTime = minimumDurationOnSlowestAxis + (fractionPerIncrement * (25 - recallSpeed));
+
+  if (localDebug) { 
+    fprintf(stderr, "maximumDurationOnSlowestAxis: %lf\n", maximumDurationOnSlowestAxis);
+    fprintf(stderr, "minimumDurationOnSlowestAxis: %lf\n", minimumDurationOnSlowestAxis);
+    fprintf(stderr, "durationRange: %lf\n", durationRange);
+    fprintf(stderr, "fractionPerIncrement: %lf\n", fractionPerIncrement);
+    fprintf(stderr, "recallTime: %lf\n", recallTime);
+  }
+
+#endif
+
   double originalRecallTime = recallTime;
 
   if (localDebug) {
@@ -1763,7 +1860,7 @@ visca_response_t *tallyModeResponse(int tallyState) {
 bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
   if (debug_verbose) fprintf(stderr, "GOT VISCA INQUIRY %s\n", VISCAMessageDebugString(command, len));
 
-  // All VISCA inquiries start with 0x90.
+  // All VISCA inquiries start with 0x81.  Responses start with 0x90.
   if(command[0] != 0x81) return false;
 
   switch(command[1]) {
@@ -2258,9 +2355,19 @@ bool savePreset(int presetNumber) {
 }
 
 int getVISCAZoomSpeedFromTallyState(void) {
-    int tallyState = GET_TALLY_STATE();
+    // int tallyState = GET_TALLY_STATE();
+    int tallyState = kTallyStateRed;
     bool onProgram = (tallyState == kTallyStateRed);
     return onProgram ? 2 : 8;
+}
+
+int getVISCARecallSpeed(void) {
+  if (gRecallSpeedSet) {
+    return gVISCARecallSpeed;
+  }
+  // Recall speed range is from 1 to 24.  Zoom range is 1 to 8.
+  // Multiply by 3.
+  return getVISCAZoomSpeedFromTallyState() * 3;
 }
 
 double adjustedStartTimeForMove(double totalDuration, double shortMoveDuration, bool alignToEnd);
@@ -2370,45 +2477,6 @@ double adjustedStartTimeForMove(double totalDuration, double shortMoveDuration, 
 void setRecallSpeedVISCA(int value) {
   gRecallSpeedSet = true;
   gVISCARecallSpeed = value;
-}
-
-/**
- * Returns the duration that a recall should take based on either the current tally state
- * or the speed set via VISCA.
- */
-double currentRecallTime(void) {
-  // VISCA (or at least PTZOptics) allows a range of 1 to 24.  This maps those into speeds.
-  // These speeds are just sort of arbitrary mappings.
-  int recallSpeed = gRecallSpeedSet ? gVISCARecallSpeed : getVISCAZoomSpeedFromTallyState();
-  fprintf(stderr, "Recall speed set: %s\n", gRecallSpeedSet ? "YES" : "NO");
-  if (gRecallSpeedSet) fprintf(stderr, "Requested recall speed: %d\n", gVISCARecallSpeed);
-  fprintf(stderr, "Tally-based speed: %d\n", getVISCAZoomSpeedFromTallyState());
-
-  // Slowest speed is 1, which maps to 30 seconds.
-  // Fastest speed is 24, which maps to 2 seconds.
-  //
-  // From there, we compute an equation to find the other values.
-  //
-  // k - 24n = 2
-  // k - 1n = 30
-  // ---------------
-  // 24k - 24n = 720
-  // -k + 24n = -2
-  // 23k     = 718
-  // k = 718/23
-  // ---------------
-  // k - n = 30
-  // 718/23 - n = 30
-  // 718/23 = 30 + n
-  // n = 718/23 - 30
-  // n = 28/23  (about 1.2173)
-
-  double multiplier = 28.0/23.0;
-  double computed_max = 718.0/23.0;
-  double duration = computed_max - (multiplier * recallSpeed);
-  return (duration > 30) ? 30 :
-         (duration < 2) ? 2 :
-         duration;
 }
 
 
