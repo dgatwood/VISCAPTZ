@@ -1009,6 +1009,7 @@ void handleRecallUpdates(void) {
             fprintf(stderr, "AXIS %d MOTION COMPLETE\n", axis);
           }
           gAxisMoveInProgress[axis] = false;
+          gAxisStalls[axis] = 0;
           setAxisSpeed(axis, 0, false);
           if (localDebug) {
             fprintf(stderr, "SPEEDINFO AXIS: %d POS: %04d TIME: %04d SPEED: %d (stopped)\n",
@@ -1674,6 +1675,7 @@ void cancelRecallIfNeeded(char *context) {
       didCancel = true;
     }
     gAxisMoveInProgress[axis] = false;
+    gAxisStalls[axis] = 0;
   }
   if (didCancel) {
     fprintf(stderr, "RECALL CANCELLED (%s)\n", context);
@@ -1699,6 +1701,7 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
   }
 
   gAxisMoveInProgress[axis] = true;
+  gAxisStalls[axis] = 0;
   gAxisStartTime[axis] = startTime ?: timeStamp();
   gAxisDuration[axis] = duration;
   gAxisMoveStartPosition[axis] = getAxisPosition(axis);
