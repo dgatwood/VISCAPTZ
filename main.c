@@ -1708,6 +1708,8 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
   gAxisMoveTargetPosition[axis] = position;
   gAxisMoveMaxSpeed[axis] = maxSpeed;
   gAxisPreviousPosition[axis] = gAxisMoveStartPosition[axis];
+  gAxisPreviousPositionTimestamp[axis] = gAxisStartTime[axis];
+  gAxisLastMoveSpeed[axis] = 0;
 
   if (localDebug) {
     fprintf(stderr, "gAxisMoveInProgress[%d] = %s\n", axis, gAxisMoveInProgress[axis] ? "true" : "false");
