@@ -23,6 +23,12 @@ bool panaSetIPAddress(char *address);
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed);
 
 /**
+ * Gets the maximum possible zoom range for the camera (based on calibration data).
+ * Returns true if calibration data is available, else false.
+ */
+bool panaGetZoomRange(int64_t *min, int64_t *max);
+
+/**
  * Sets the zoom speed.
  *
  * @param speed The zoom speed.
@@ -88,6 +94,7 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
     #endif
 
     #define SET_TALLY_STATE(state) panaSetTallyState(state)
+    #define GET_ZOOM_RANGE(min, max) panaGetZoomRange(min, max)  // uint64_t *
     #define GET_ZOOM_POSITION() panaGetZoomPosition()
     #define GET_ZOOM_SPEED() panaGetZoomSpeed()
     #define ZOOM_POSITION_SUPPORTED true

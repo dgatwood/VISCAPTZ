@@ -1884,6 +1884,34 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
             gVISCAUsesCoreScale = true;
             return true;
+          } else if (command[3] == 0x47 && command[4] == 0xFF) {
+#ifndef GET_ZOOM_RANGE
+            return false;
+#else
+            int64_t zoomMin = 0, zoomMax = 0;
+            if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax)) {
+              return false;
+            }
+            // Because this is a 30x zoom camera, scale the zoom position to the range
+            // 0..0x6000.  This range is comparable to what PTZOptics uses, I think.
+            int64_t zoomPosition = getAxisPosition(axis_identifier_zoom) - zoomMin;
+            int64_t zoomRange = zoomMax - zoomMin;
+            int64_t zoomPositionScaled = ((double)zoomPosition / (double)zoomRange) *
+                0x6000;
+            while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength));
+            static visca_response_t response;
+            uint8_t data[] = {
+                0x10, 0x50, ((zoomPositionScaled >> 12) & 0x0f), ((zoomPositionScaled >> 8) & 0x0f),
+                ((zoomPositionScaled >> 4) & 0x0f), (zoomPositionScaled & 0x0f), 0xff
+            };
+            SET_RESPONSE(&response, data);
+            while (!sendVISCAResponse(&response, sequenceNumber, sock, client, structLength));
+            
+            gVISCAUsesCoreScale = true;
+            return true;
+
+
+#endif
           }
         case 0x7e:
           if (command[3] == 0x01 && command[4] == 0x0a) {

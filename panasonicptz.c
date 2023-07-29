@@ -288,6 +288,25 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
 
 // Public function.  Docs in header.
 //
+// Returns true and populates the current minimum and maximum zoom position values, or
+// returns false if there is no calibration data.
+bool panaGetZoomRange(int64_t *min, int64_t *max) {
+  // Don't trust the range if there's no calibration data.
+  if (panasonicScaledZoomCalibrationData == NULL) {
+    return false;
+  }
+  if (min != NULL) {
+    *min = zoomOutLimit();
+  }
+
+  if (max != NULL) {
+    *max = zoomInLimit();
+  }
+  return true;
+}
+
+// Public function.  Docs in header.
+//
 // Moves the camera to the specified zoom position.
 bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
 
