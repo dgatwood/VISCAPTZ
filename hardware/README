@@ -23,10 +23,10 @@ to use the same design for both pieces.
 
 The result is that the spacing between the motor and encoder differs by about
 4.25 mm between the pan and tilt axes.  For ease of 3D printing (and, more
-specifically, to ensure that you don't print one piece twice), the two models
-are combined in the same STL file.  If you need to re-print only one of the
-two pieces for some reason, you can always run OpenSCAD, disable one  part,
-and export the STL.
+specifically, to ensure that you don't print one piece twice), I provided a
+combined STL file in addition to the per-piece STL files.  I suggest printing
+them separately on Snapmaker, because it tends to create a wall between the
+two pieces when printing them together.
 
 Screws:
 

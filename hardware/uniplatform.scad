@@ -127,5 +127,7 @@ module plate(spacing, title) {
 // projection()
 translate([-20, -20, 0]) rotate([0, 0, 180]) plate(79, "PAN");
 
+// Uncomment to generate 2D projection for printing a flat screw template
+// projection()
 translate([20, 20, 0]) plate(74.75, "TILT");
 
