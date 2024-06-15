@@ -1,6 +1,7 @@
 circle_facets = 40;
 clamp_hole_size = 6.25;  // Measured at 6, but we lose about .5mm from PETG bleed.
 hex_nut_size = 3.45;  // Measured at 6.35 tip-to-tip (5.56 across), but we lose slightly more than .5mm from PETG bleed.
+side_bore = true;
 
 module rotate_around_center_point(angles, center_point) {
     translate(center_point)
@@ -17,7 +18,7 @@ module rotate_around_center_point(angles, center_point) {
 // Uses 3mm screws.
 // Edge is 2.5mm in from edge of body.
 
-module plate(spacing, title) {
+module plate(spacing, title, enable_side_bore) {
     difference() {
         union() {
             // Square part of plate 1
@@ -52,21 +53,18 @@ module plate(spacing, title) {
             // Clamp gap
             translate([31, 13.5, -1]) cube([3, 23, 10]);
 
-            // Clamp screw hole M6 (unthreaded, 6.1mm)
-            translate([32.5, 28.95, 4]) rotate([0,90,0]) cylinder(h = 100, r = 3.1, $fn = circle_facets);
+            if (enable_side_bore) {
+                // Clamp screw hole M6 (unthreaded, 6.1mm)
+                translate([32.5, 28.95, 4]) rotate([0,90,0]) cylinder(h = 100, r = 3.1, $fn = circle_facets);
 
-            // Clamp screw hole M6 (threaded, 5mm)
-            translate([21, 29, 4]) rotate([0,90,0]) cylinder(h = 100, r = 2.5, $fn =
-    circle_facets);
-
-             // ---- Spring hole ----
-//             translate([-26, 18, -10]) cylinder(h = 100, r = 1.5, $fn = circle_facets);
-//             translate([-26, 18, 5.3]) rotate([0, 0, 30]) cylinder(h = 5.01, r = hex_nut_size, $fn = 6);
+                // Clamp screw hole M6 (threaded, 5mm)
+                translate([21, 29, 4]) rotate([0,90,0]) cylinder(h = 100, r = 2.5, $fn = circle_facets);
+            }
         }; // Holes in plate 1
        
         // ---- Position badge ----
-        // translate([5, 18, 4]) rotate([0, 0, 90]) linear_extrude(height = 5) { text("PAN", size = 7, font = "Verdana", halign = "center", valign = "center", $fn = 16); }
-        translate([30, -20, 4]) rotate([0, 0, 90]) linear_extrude(height = 5) { text(title, size = 7, font = "Verdana", halign = "center", valign = "center", $fn = 16); }
+        // translate([5, 18, 4]) rotate([0, 0, 90]) linear_extrude(height = 2) { text("PAN", size = 7, font = "Verdana", halign = "center", valign = "center", $fn = 16); }
+        translate([30, -20, 6.5]) rotate([0, 0, 90]) linear_extrude(height = 5) { text(title, size = 7, font = "Verdana", halign = "center", valign = "center", $fn = 16); }
     };
 
 
@@ -123,11 +121,17 @@ module plate(spacing, title) {
 // For pan, try 78mm.  Just barely too short.  Will stretch enough to barely go on.
 // Going with 79mm.
 
-// Uncomment to generate 2D projection for printing a flat screw template
-// projection()
-translate([-20, -20, 0]) rotate([0, 0, 180]) plate(79.5, "PAN");
+// Set side_bore = false above and uncomment to generate 2D projection for printing a flat screw template
+// 0, 0, 0 for full depth, 
+// 0, 0, -6 for bore holes
+// 0, 0, -8 for etching
+// projection(cut = true)
+// translate([0, 0, -8])
+{
+translate([-20, -20, 0]) rotate([0, 0, 180]) plate(79.5, "PAN", side_bore);
 
 // Uncomment to generate 2D projection for printing a flat screw template
+// 74.75 is too loose, 74.25 is too snug.  Trying 74.5.
 // projection()
-translate([20, 20, 0]) plate(74.75, "TILT");
-
+translate([20, 20, 0]) plate(74.5, "TILT", side_bore);
+}
