@@ -14,8 +14,8 @@ The depth information is as follows:
     - Bit size: 1.5mm
 
 2.  Screw heads:
-    - Processing mode: Vector
-    - Method: Fill
+    - Processing mode: Relief
+    - Method: N/A
     - Depth: 2.5mm
     - Bit size: 3.125mm
 
