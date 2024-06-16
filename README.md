@@ -57,8 +57,7 @@ and forth between the two implementations because I couldn't decide which
 hardware to use (at first).
 
 
-Hardware:
----------
+# Supported Hardware:
 
 The following harware is currently supported:
 
@@ -81,18 +80,12 @@ mesh with the gears on your gimbal.  For the Vidpro, you need a pair of
 I didn't provide links for the other products, because they're easy to find,
 but that particular search took *hours*.  :-)
 
-If you are using the Vidpro hardware, you will need to replace the mounting
-plates that hold the motor with a modified version that holds the encoders.
-I have included the model files in the /hardware/ directory.  Mine are
-3D-printed out of PETG.  Eventually, it would be nice to mill them out of
-aluminum, but for now, the PETG plates are doing the job adequately.
-
-If you are using other hardware, mounting the encoders is left as an
-exercise for the reader.
+More information about the Vidpro hardware mod can be found in the README
+file inside the /hardware/ directory.  If you are using other hardware,
+mounting the encoders is left as an exercise for the reader.
 
 
-Status:
--------
+# Status:
 
 This software can now properly drive both motors, read the position
 values from both CAN encoders, and move to an absolute position.  It
@@ -114,8 +107,7 @@ when I have access to the Panasonic camera again, I need to verify
 that the code works as expected against the real camera hardware.
 
 
-Installation:
--------------
+# Installation:
 
 First, add the following bits to your /boot/config.txt file:
 
@@ -147,8 +139,7 @@ Finally, the Panasonic support requires libcurl.  To install it, type:
 Then just `make` and `./viscaptz`.
 
 
-Tally and Camera IP Configuration:
-----------------------------------
+# Tally and Camera IP Configuration:
 
 OBS or
 Tricaster:
@@ -192,8 +183,7 @@ Panasonic camera:
         ./viscaptz --setcameraip "IP address"
 
 
-CANBus Configuration:
----------------------
+# CANBus Configuration:
 
 Before you can use this tool, assuming you are using CAN-based encoders, you must
 reprogram one of the encoders to have a different ID.  This also means that you
@@ -207,8 +197,7 @@ This reassigns the encoder from ID 1 to 2.  Once you have done this, label that
 encoder as the vertical (tilt) encoder.
 
 
-Motor Configuration:
---------------------
+# Motor Configuration:
 
 Assuming you configure this software to use absolute positioning, the next thing
 you must do is calibrate the motors and encoders.  This process can take several
@@ -255,8 +244,7 @@ range of motion is used *only* for calibration, and this is for a good reason.
 You may not end up lining up the encoders precisely.
 
 
-Recentering:
-------------
+# Recentering:
 
 When you calibrate the motors, this software tells the encoders to use the current
 position as their midpoint values.  This ensures that you don't run off either
@@ -270,8 +258,7 @@ It might be worth always recentering every time you run the software, just to
 minimize the risk of misbehavior.
 
 
-Zoom Configuration:
--------------------
+# Zoom Configuration:
 
 Because the zoom support also requires calibration to work properly, when you
 change cameras, you need to recalibrate the zoom portion.  To do this, type:
@@ -279,3 +266,4 @@ change cameras, you need to recalibrate the zoom portion.  To do this, type:
     ./viscaptz --zoomcalibrate
 
 This saves potentially a couple of hours calibrating the pan and tilt motors.
+

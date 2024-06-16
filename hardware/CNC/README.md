@@ -8,22 +8,22 @@ hole, etc. and spending all its time moving the toolhead around for no reason.)
 The depth information is as follows:
 
 1.  Etching ("PAN" and "TILT" labels):
-	Processing mode: Relief
-	Method: N/A
-	Depth: 2mm
-	Bit size: 1.5mm
+    - Processing mode: Relief
+    - Method: N/A
+    - Depth: 2mm
+    - Bit size: 1.5mm
 
 2.  Screw heads:
-	Processing mode: Vector
-	Method: Fill
-	Depth: 2.5mm
-	Bit size: 3.125mm
+    - Processing mode: Vector
+    - Method: Fill
+    - Depth: 2.5mm
+    - Bit size: 3.125mm
 
 3.  All other SVG files:
-	Processing mode: Vector
-	Method: On the Path
-	Depth: 8.6mm (full 8mm depth and a bit over)
-	Bit size: 3.125mm
+    - Processing mode: Vector
+    - Method: On the Path
+    - Depth: 8.6mm (full 8mm depth and a bit over)
+    - Bit size: 3.125mm
 
 Note that the SVG is hand-edited to ensure that Luban does not waste time making
 hundreds of plunges per drill hole.  The bit size is close enough to the target
