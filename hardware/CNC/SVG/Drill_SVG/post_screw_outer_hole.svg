@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="122mm" height="121mm" viewBox="-61 -63 122 121" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<title>OpenSCAD Model</title>
+<!--
+This is the hole through the flap, which must be big enough for the threads to not bind.
+
+The tool diameter is 3.175 mm in diameter.  Because Luban bizarrely interprets "fill"
+without considering the tool diameter, we have to subtract the tool's radius (1.5875)
+from the radius of the circle to avoid cutting all the way through the material.  So
+instead of a 3.3mm hole, we create a 1.5875mm hole.
+-->
+<circle cx="0.0" cy="0.0" r="1.5875" stroke="black" fill="white" stroke-width="0.01" />
+</svg>
