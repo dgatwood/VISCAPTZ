@@ -95,6 +95,8 @@ tools.  I've tried to provide links where needed.
     the main board (two wires used).  These are potentially optional, but strongly recommended
     for easier assembly.
 
+8.  Some extra wire to go from those connectors to pins on the control input connector.
+
 9.  A 5.5mm x 2.1mm jack, e.g. Amazon ASIN [B07CTCLKPP](
     https://www.amazon.com/Antrader-24pcs-Female-Socket-Connector/dp/B07CTCLKPP),
     because the original DC jack is part of the battery pack, which is removed in this mod.
@@ -234,7 +236,18 @@ You will need to print the following models:
     the other two switches (A0 and A1) switched to the right (0).
 13. Pass the wires through the hole from the battery compartment.  You may have to enlarge the
     hole to make room for them, particularly if you put a connector on any of the wires.
+14. Open the compartment that contains Bescor's main board.  Solder four wires to pins 2, 3, 5,
+    and 6.  The unused pins are the far left, the far right, and the middle, which are
+    speed, ground, and power, respectively.
+15. Connect those to four GPIO pins.  You MUST choose four pins that are OFF by default, or
+    else your hardware could be damaged while powering it on, as this mod disables the switches
+    that would otherwise detect the tilt motor limit and replaces it with software.  For
+    current versions of Rock Pi E, this means pins 7, 12, 15, and 36.  (In a pinch, pin 19 can
+    also be used, as it provides only momentary power when the device is powered on, likely
+    ending before the Bescor hardware's microcontroller would start handling input anyway.)
 
+TODO: Update the above to describe the pin-to-pin mapping that I used after I get things wired
+up and test it to verify the order that I attached the wires to those GPIO pins.
 
 
 ## Install the tilt encoder

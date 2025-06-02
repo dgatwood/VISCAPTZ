@@ -1,10 +1,10 @@
 
 enable_body = true;
-enable_top_plate = false;
+enable_top_plate = true;
 test_top_plate = false;
 
 bottom_offset = test_top_plate ? 0: 90;
-bottom_voffset = test_top_plate ? -72: 0;
+bottom_voffset = test_top_plate ? -71: 0;
 screw_post_size = 4.3;  // 3mm with a little bit of leeway.
 screwdriver_size = 3.8;  // 3mm with a lot of extra leeway.
 screw_head_size = 6;
@@ -16,7 +16,7 @@ jack_hole_size = 8.3;  // 8mm with a bit of leeway.
 if (enable_top_plate) {
     rotate([0, test_top_plate ? 180: 0, test_top_plate ? 180: 0]) translate([bottom_offset, test_top_plate ? -72 : 0, 0]) difference() {
         union() {
-            translate([-10, 0, bottom_voffset]) cube([46, 72, 2]);
+            translate([-10, 0, bottom_voffset]) cube([46, 72, 5]);
             translate([36, 0, bottom_voffset]) cube([46, 72, 2]);
         }
         union() {
@@ -41,8 +41,8 @@ if (enable_body) {
 
             difference() {
                 union() {
-                    cube([36, 62, 68]);  
-                    translate([36, -5, -3]) cube([46, 72, 71]);
+                    cube([36, 62, 63]);  
+                    translate([36, -5, -3]) cube([46, 72, 69]);
                 }
                 translate([-31.5, 31, -1]) cylinder(100, 91/2, 91/2, false, $fn=2000);
                 
@@ -80,7 +80,7 @@ if (enable_body) {
                 // Space behind power jack   
                 translate([0, 2.5, 35]) cube([20, 52.5, 20]);
                 // Space in front of power jack   
-                translate([0, 58, 39]) cube([20, 52.5, 13]);
+                translate([0, 58, 38]) cube([20, 52.5, 13]);
                 
             //     translate([35, 3, 0]) cube([10, 60, 65]);
                 // Hollowed out cavity inside main body (for voltage regulators and similar)
@@ -140,7 +140,7 @@ if (enable_body) {
             translate([34.5, 10, 0]) cube([1.5, 42, 58], false);  // 42mm wide, out of 62mm total
             
             // More material by power jack
-            translate([15, 55, 36]) cube([8, 5, 3], false);
+            translate([15, 55, 35]) cube([8, 5, 3], false);
             translate([15, 55, 52]) cube([8, 5, 11], false);
             translate([20, 55, 36]) cube([3, 5, 18], false);
             translate([15, 55, 36]) cube([8, 3, 18], false);
@@ -150,8 +150,8 @@ if (enable_body) {
             translate([36, 56.86, -2.18]) rotate([-25, 0, 0]) cube([45, 2, 19.6], false);
         }
         union() {
-            // Hole for power jack 45mm up
-            translate([14, 65, 45]) rotate([90, 0, 0]) cylinder(20, jack_hole_size/2, jack_hole_size/2, false, $fn=200);
+            // Hole for power jack 44mm up
+            translate([14, 65, 44]) rotate([90, 0, 0]) cylinder(20, jack_hole_size/2, jack_hole_size/2, false, $fn=200);
             
             // Pi mounting screwdriver holes
             translate([0, 5.75, 63]) rotate([0, 90, 0]) cylinder(42, screwdriver_size / 2, screwdriver_size / 2, false, $fn=200);
