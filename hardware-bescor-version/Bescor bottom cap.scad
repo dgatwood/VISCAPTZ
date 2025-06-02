@@ -1,7 +1,7 @@
 
 // Inside 85mm
 tower_height = 51.01;  // Keep in sync with riser.
-cap_height = tower_height - 10.01;
+cap_height = tower_height + 0.8;
 
 difference() {
     union() {
@@ -15,6 +15,7 @@ difference() {
 
         /* Hole for tripod thread */
         translate([0, 0, -1]) cylinder(5, 8.2 / 2, 8.2 / 2, false, $fn=100);
+        
         /* Hole for tripod pin */        
         translate([0, 14, -1]) cylinder(5, 5.2 / 2, 5.2 / 2, false, $fn=100);
 

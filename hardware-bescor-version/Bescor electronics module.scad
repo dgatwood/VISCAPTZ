@@ -1,6 +1,6 @@
 
 enable_body = true;
-enable_top_plate = true;
+enable_top_plate = false;
 test_top_plate = false;
 
 bottom_offset = test_top_plate ? 0: 90;
@@ -84,7 +84,10 @@ if (enable_body) {
                 
             //     translate([35, 3, 0]) cube([10, 60, 65]);
                 // Hollowed out cavity inside main body (for voltage regulators and similar)
-                translate([15.99, 6, -1]) cube([18.52, 50, 71]);  // Was 66 when top was unified
+                translate([15.99, 6, 12]) cube([18.52, 50, 71]);  // Was 66 when top was unified
+                
+                // Gap for wires (you will have to widen the hole).
+                translate([0, 14, -1]) cube([18.52, 34, 71]);  // Was 66 when top was unified
                             
                 // Hole for voltage regulator and self-stick pad
                 translate([0, 2.5, 20]) cube([16, 57.5, 16]);
@@ -103,8 +106,8 @@ if (enable_body) {
     //             translate([-0.01, -0.01, -0.01]) cube([34, 7, 7], false);
     //             translate([-0.01, 55.01, -0.01]) cube([34, 7, 7], false);
                 
-                // Remove bottom for wires
-                translate([-0.01, -0.01, -0.01]) cube([20, 62, 7], false);
+                // Remove bottom to make life easier (no holes for the posts).
+                translate([-0.01, -0.01, -0.01]) cube([35, 62, 7], false);
                 
                 // Remove corners for sanity
                 translate([-0.01, -0.01, -0.01]) cube([9, 66, 100], false);
