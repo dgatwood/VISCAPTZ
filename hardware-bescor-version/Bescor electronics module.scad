@@ -1,6 +1,6 @@
 
 enable_body = true;
-enable_top_plate = true;
+enable_top_plate = false;
 test_top_plate = false;
 
 bottom_offset = test_top_plate ? 0: 90;
@@ -16,21 +16,28 @@ jack_hole_size = 8.3;  // 8mm with a bit of leeway.
 if (enable_top_plate) {
     rotate([0, test_top_plate ? 180: 0, test_top_plate ? 180: 0]) translate([bottom_offset, test_top_plate ? -72 : 0, 0]) difference() {
         union() {
-            translate([-10, 0, bottom_voffset]) cube([46, 72, 5]);
-            translate([36, 0, bottom_voffset]) cube([46, 72, 2]);
+            translate([-10, 0, bottom_voffset]) cube([46, 72, 10]);
+            translate([36, 0, bottom_voffset]) cube([46, 72, 7]);
         }
         union() {
-            translate([-31.5, 36, -1 + bottom_voffset]) cylinder(100, 87/2, 87/2, false, $fn=2000);
+            translate([-31.5, 36, -1 + bottom_voffset]) cylinder(100, 93/2, 93/2, false, $fn=2000);
             
-            // Ethernet ports -- Removed because we will have to use a separate top.
-            translate([53, 20.5, -1 + bottom_voffset]) cube([15, 17, 10]);
-            translate([53, 39.5, -1 + bottom_voffset]) cube([15, 17, 10]);
+            // Ethernet ports
+            translate([56.5, 20.5, -1 + bottom_voffset]) cube([15, 17, 10]);
+            translate([56.5, 39.5, -1 + bottom_voffset]) cube([15, 17, 10]);
             
             // Screw holes for Pi cover
             translate([78.5, 17, -1 + bottom_voffset]) cylinder(100, screw_hole_size / 2, screw_hole_size / 2, $fn=100);
             translate([78.5, 55, -1 + bottom_voffset]) cylinder(100, screw_hole_size / 2, screw_hole_size / 2, $fn=100);
             translate([42.5, 17, -1 + bottom_voffset]) cylinder(100, screw_hole_size / 2, screw_hole_size / 2, $fn=100);
             translate([42.5, 55, -1 + bottom_voffset]) cylinder(100, screw_hole_size / 2, screw_hole_size / 2, $fn=100);
+            
+            // Indent in plate
+            translate([16, 3, 3]) cube([18, 66, 10.1]);
+            translate([10.5, 3, 3]) cube([18, 10, 10.1]);
+            translate([12.5, 3, 3]) cube([18, 15, 10.1]);
+            translate([10.5, 59, 3]) cube([18, 10, 10.1]);
+            translate([12.5, 54, 3]) cube([18, 15, 10.1]);
         }
     }
 }
@@ -70,8 +77,8 @@ if (enable_body) {
                 translate([14, 12, -1]) cylinder(100, screw_hole_size/2, screw_hole_size/2, false, $fn=200);
                 translate([14, 50, -1]) cylinder(100, screw_hole_size/2, screw_hole_size/2, false, $fn=200);
 
-                translate([14, 12, 11]) cylinder(100, screwdriver_size/2, screwdriver_size/2, false, $fn=200);
-                translate([14, 50, 11]) cylinder(100, screwdriver_size/2, screwdriver_size/2, false, $fn=200);
+                translate([14, 12, 8]) cylinder(100, screwdriver_size/2, screwdriver_size/2, false, $fn=200);
+                translate([14, 50, 8]) cylinder(100, screwdriver_size/2, screwdriver_size/2, false, $fn=200);
                 
                 // Holes for screw posts -- Removed because we removed the entire bottom.
                 // translate([12, 12, -.01]) cylinder(6.01, screw_post_size/2, screw_post_size/2, false, $fn=200);
@@ -93,8 +100,9 @@ if (enable_body) {
                 translate([0, 2.5, 20]) cube([16, 57.5, 16]);
                 
                 // Hole for wiring harness
-                translate([36.01, 57, 52]) cube([10, 3, 20]);
-                translate([28.01, 42, 52]) cube([13, 16, 20]);
+                translate([33.01, 18, 42]) cube([15, 26, 30]);
+//                translate([36.01, 57, 52]) cube([10, 3, 20]);
+//                translate([28.01, 42, 52]) cube([13, 16, 20]);
 
                 // Pi mounting holes (larger because of needing to accommodate flex in the plastic posts.
                 translate([0, 5.75, 63]) rotate([0, 90, 0]) cylinder(50, sloppy_screw_hole_size / 2, sloppy_screw_hole_size / 2, false, $fn=200);
@@ -107,7 +115,7 @@ if (enable_body) {
     //             translate([-0.01, 55.01, -0.01]) cube([34, 7, 7], false);
                 
                 // Remove bottom to make life easier (no holes for the posts).
-                translate([-0.01, -0.01, -0.01]) cube([35, 62, 7], false);
+                translate([-0.01, -0.01, -0.01]) cube([35, 62, 5], false);
                 
                 // Remove corners for sanity
                 translate([-0.01, -0.01, -0.01]) cube([9, 66, 100], false);
@@ -137,7 +145,7 @@ if (enable_body) {
             }
 
             // Bottom tab
-            translate([34.5, 10, 0]) cube([1.5, 42, 58], false);  // 42mm wide, out of 62mm total
+            translate([34.5, 10, 0]) cube([1.5, 42, 42], false);  // 42mm wide, out of 62mm total
             
             // More material by power jack
             translate([15, 55, 35]) cube([8, 5, 3], false);
