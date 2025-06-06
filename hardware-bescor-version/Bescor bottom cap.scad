@@ -6,12 +6,12 @@ cap_height = tower_height + 0.8;
 difference() {
     union() {
         cylinder(20, 68.5 / 2, 68.5 / 2, false, $fn=3000);
-        translate([0, 0, 7]) cylinder(cap_height, 89.5 / 2, 89.5 / 2, false, $fn=3000);
+        translate([0, 0, 5]) cylinder(cap_height, 89.5 / 2, 89.5 / 2, false, $fn=3000);
     }
     union() {
         /* Hollow it out */
-        translate([0, 0, 10]) cylinder(cap_height+1, 86 / 2, 86 / 2, false, $fn=3000);
-        translate([0, 0, 4]) cylinder(cap_height+1, 65 / 2, 65 / 2, false, $fn=3000);
+        translate([0, 0, 8]) cylinder(cap_height+1, 86 / 2, 86 / 2, false, $fn=3000);
+        translate([0, 0, 2]) cylinder(cap_height+1, 65 / 2, 65 / 2, false, $fn=3000);
 
         /* Hole for tripod thread */
         translate([0, 0, -1]) cylinder(5.1, 8.2 / 2, 8.2 / 2, false, $fn=100);
@@ -36,9 +36,9 @@ difference() {
         translate([-23.20, 13.9, .99]) cylinder(0.51, 5/2, 3/2, false, $fn=100);
         
         /* Holes for screw heads underneath (1 cm from hub at same angles) */
-        translate([0, -10, 1]) cylinder(3.1, 5/2, 5/2, false, $fn=100);
-        translate([8.66025403784, 5, 1]) cylinder(3.1, 5/2, 5/2, false, $fn=100);
-        translate([-8.66025403784, 5, 1]) cylinder(3.1, 5/2, 5/2, false, $fn=100);
+        translate([0, -10, -.1]) cylinder(3.1, 5/2, 5/2, false, $fn=100);
+        translate([8.66025403784, 5, -.1]) cylinder(3.1, 5/2, 5/2, false, $fn=100);
+        translate([-8.66025403784, 5, -.1]) cylinder(3.1, 5/2, 5/2, false, $fn=100);
     }
 //    translate([-50, -50, 2]) cube([100, 100, 100], false);
 }
