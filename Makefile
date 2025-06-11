@@ -25,9 +25,14 @@ CFLAGS+=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver 
 
 # If not using hardware, remove -lbcm2835
 ifeq ($(UNAME), Linux)
-LDFLAGS+=-lpthread -lm -lbcm2835 -Lmotorcontrol -lmotorcontrol
+LDFLAGS+=-lpthread -lm -lbcm2835 -Lmotorcontrol -lmotorcontrol -lcrypto -lxml2
 else
-LDFLAGS+=-lpthread -lm
+LDFLAGS+=-lpthread -lm -lcrypto -lxml2
+endif
+
+ifeq ($(UNAME), Darwin)
+CFLAGS+=-I/opt/homebrew/Cellar/openssl@3/3.4.1/include/
+LDFLAGS+=-L/opt/homebrew/Cellar/openssl@3/3.4.1/lib/
 endif
 
 ifeq ($(USE_OBS_TALLY_SOURCE), 1)
@@ -58,8 +63,8 @@ else
 LINUX_TARGETS=
 endif
 
-viscaptz: main.o obs_tally.o tricaster_tally.o configurator.o panasonicptz.o motorptz.o ${LINUX_TARGETS} *.h
-	${CC} ${CFLAGS} main.o obs_tally.o tricaster_tally.o configurator.o panasonicptz.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
+viscaptz: main.o obs_tally.o tricaster_tally.o configurator.o panasonic_shared.o panasonicptz.o p2protocol.o motorptz.o ${LINUX_TARGETS} *.h
+	${CC} ${CFLAGS} main.o obs_tally.o tricaster_tally.o configurator.o panasonic_shared.o panasonicptz.o p2protocol.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
 
 motorcontrol/libmotorcontrol.so:
 	cd motorcontrol ; make libmotorcontrol.so ; sudo make install

@@ -4,6 +4,7 @@
 #include "constants.h"
 
 bool tricasterModuleInit(void);
+bool tricasterModuleStart(void);
 
 tallyState tricaster_getTallyState(void);
 

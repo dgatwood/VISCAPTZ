@@ -7,6 +7,9 @@
 /** Initializes the OBS tally module. */
 bool obsModuleInit(void);
 
+/** Starts the OBS tally module. */
+bool obsModuleStart(void);
+
 /** Returns the current tally state based on the active OBS scene. */
 tallyState obs_getTallyState(void);
 

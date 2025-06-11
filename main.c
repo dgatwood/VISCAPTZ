@@ -4,6 +4,7 @@
 #include "motorptz.h"
 #include "obs_tally.h"
 #include "panasonicptz.h"
+#include "p2protocol.h"
 #include "tricaster_tally.h"
 
 #include <arpa/inet.h>
@@ -591,10 +592,43 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Motor module init failed.  Bailing.\n");
     exit(1);
   }
+#if ENABLE_P2_MODE
+  if (!p2ModuleInit()) {
+    fprintf(stderr, "Panasonic module init failed.  Bailing.\n");
+    exit(1);
+  }
+#else  // !ENABLE_P2_MODE
   if (!panaModuleInit()) {
     fprintf(stderr, "Panasonic module init failed.  Bailing.\n");
     exit(1);
   }
+#endif  // ENABLE_P2_MODE
+
+  fprintf(stderr, "Starting threads\n");
+
+  if (!obsModuleStart()) {
+    fprintf(stderr, "OBS module init failed.  Bailing.\n");
+    exit(1);
+  }
+  if (!tricasterModuleStart()) {
+    fprintf(stderr, "Tricaster module init failed.  Bailing.\n");
+    exit(1);
+  }
+  if (!motorModuleStart()) {
+    fprintf(stderr, "Motor module init failed.  Bailing.\n");
+    exit(1);
+  }
+  #if ENABLE_P2_MODE
+    if (!p2ModuleStart()) {
+      fprintf(stderr, "Panasonic module init failed.  Bailing.\n");
+      exit(1);
+    }
+  #else  // !ENABLE_P2_MODE
+    if (!panaModuleStart()) {
+      fprintf(stderr, "Panasonic module init failed.  Bailing.\n");
+      exit(1);
+    }
+  #endif
 
   fprintf(stderr, "Created threads.\n");
 
@@ -1113,7 +1147,7 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       if (localDebug) {
         fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
                 speed, retval, abs(absSpeed - scaleData[i]),
-                100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+                100 * fabs(1.0 * absSpeed - scaleData[i]) / absSpeed);
       }
       return retval;
     } else if (scaleData[i] > absSpeed) {
@@ -1132,7 +1166,7 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
         if (localDebug) {
           fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
                   speed, retval, abs(absSpeed - scaleData[i]),
-                  100 * fabs(absSpeed - scaleData[i]) / absSpeed);
+                  100 * fabs(1.0 * absSpeed - scaleData[i]) / absSpeed);
         }
         return retval;
       }
@@ -1147,7 +1181,7 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       if (localDebug) {
         fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
                 speed, retval, abs(absSpeed - scaleData[chosenIndex]),
-                100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+                100 * fabs(1.0 * absSpeed - scaleData[chosenIndex]) / absSpeed);
       }
       return retval;
     }
@@ -1158,7 +1192,7 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
   if (localDebug) {
     fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
             speed, retval, abs(absSpeed - scaleData[chosenIndex]),
-            100 * fabs(absSpeed - scaleData[chosenIndex]) / absSpeed);
+            100 * fabs(1.0 * absSpeed - scaleData[chosenIndex]) / absSpeed);
   }
   return retval;
 }
@@ -2680,7 +2714,11 @@ void do_calibration(void) {
     fprintf(stderr, "Calibrating panasonic module.\n");
   }
 
+#if ENABLE_P2_MODE
+  p2ModuleCalibrate();
+#else  // !ENABLE_P2_MODE
   panaModuleCalibrate();
+#endif  // ENABLE_P2_MODE
 
   if (localDebug) {
     fprintf(stderr, "Out of loop.  Writing configuration.\n");
@@ -2693,10 +2731,17 @@ void do_calibration(void) {
     exit(1);
   }
 
+#if ENABLE_P2_MODE
+  if (!p2ModuleReload()) {
+    fprintf(stderr, "Panasonic module reload failed.  Bailing.\n");
+    exit(1);
+  }
+#else  // !ENABLE_P2_MODE
   if (!panaModuleReload()) {
     fprintf(stderr, "Panasonic module reload failed.  Bailing.\n");
     exit(1);
   }
+#endif  // ENABLE_P2_MODE
 }
 
 double timeStamp(void) {
@@ -2717,13 +2762,18 @@ void waitForAxisMove(axis_identifier_t axis) {
 bool pastEnd(int64_t currentPosition, int64_t startPosition, int64_t endPosition, int direction) {
   if (direction == 1) {
     if (startPosition > endPosition) {
+      fprintf(stderr, "Past end: currentPosition >= startPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, startPosition, (currentPosition >= startPosition) ? "true" : "false");
       return currentPosition >= startPosition;
     }
+    fprintf(stderr, "Past end: currentPosition <= startPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, startPosition, (currentPosition <= startPosition) ? "true" : "false");
+
     return currentPosition <= startPosition;
   } else {
     if (startPosition > endPosition) {
+      fprintf(stderr, "Past end: currentPosition <= endPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, endPosition, (currentPosition <= endPosition) ? "true" : "false");
       return currentPosition <= endPosition;
     }
+    fprintf(stderr, "Past end: currentPosition >= endPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, endPosition, (currentPosition >= endPosition) ? "true" : "false");
     return currentPosition >= endPosition;
   }
 }
@@ -2731,7 +2781,7 @@ bool pastEnd(int64_t currentPosition, int64_t startPosition, int64_t endPosition
 // Returns number of seconds before last valid sample (with ~10,000 usec precision).
 double spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition, int64_t endPosition,
               int direction) {
-  bool localDebug = false;
+  bool localDebug = true;
 
   if (localDebug) {
     fprintf(stderr, "Spinning axis %d for %d microseconds.\n", axis, microseconds);
@@ -2765,7 +2815,7 @@ double spinAxis(axis_identifier_t axis, int microseconds, int64_t startPosition,
 double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     int64_t startPosition, int64_t endPosition, int speed, float dutyCycle,
     bool pollingIsSlow) {
-  bool localDebug = false;
+  bool localDebug = true;
   int attempts = 0;
   int64_t motionStartPosition = 0;
   int64_t motionEndPosition = 1;
@@ -2798,8 +2848,12 @@ double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     if (pollingIsSlow) dutyCycleMultiplier *= 5;
     int delay = (inMotion ? 0 : movedTooFast ? 1000000 : 2000000) * dutyCycleMultiplier;
 
+    fprintf(stderr, "Starting to spin axis\n");
     if (spinAxis(axis, delay, startPosition, endPosition, direction) >=
         (delay * 1.0 / USEC_PER_SEC)) {
+
+      fprintf(stderr, "Axis spin success.\n");
+
       motionStartPosition = getAxisPosition(axis);
 
       // Try to sample data for 2 seconds, and throw it away if we can't get at least 1.5
@@ -2816,6 +2870,7 @@ double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
         break;
       }
     } else if (attempts > 2) {
+      fprintf(stderr, "Axis spin failed.\n");
       if (localDebug) {
         fprintf(stderr, "Moved too fast.\n");
       }
@@ -2849,7 +2904,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int32_t minSpeed,
                                      int32_t maxSpeed,
                                      bool pollingIsSlow) {
-  bool localDebug = false;
+  bool localDebug = true;
   if (localDebug) {
     fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
   }
@@ -2865,6 +2920,8 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
   for (int32_t speed = minSpeed; speed <= maxSpeed; speed++) {
     float dutyCycle = (speed - minSpeed) / (float)(maxSpeed - minSpeed);
 
+    fprintf(stderr, "Computing calibration for speed %d\n", speed);
+
     bool done = false;
 
 #define NUM_SAMPLES 10
@@ -2876,6 +2933,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     while (!done) {
       // No need to invert the drive direction.  The motor driver should already be
       // handling that.
+      fprintf(stderr, "Start of loop\n");
       int64_t min = 0, max = 0;
       int64_t sameValue = -1;
       for (int i = 0 ; i < NUM_SAMPLES; i++) {
@@ -2905,6 +2963,8 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
         } else if (value != sameValue) {
           sameValue = -1;
         }
+        fprintf(stderr, "Are we done?  %s.  (%lf, %" PRId64 ", %d %d) \n", done ? "Yes" : "No",
+          value, sameValue, i, (MIN_SAMPLES - 1));
       }
       if (!done) {
         if (min == max) {
@@ -2931,7 +2991,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
           for (int i = 0 ; i < NUM_SAMPLES; i++) {
             int64_t value = positionsPerSecond[i];
 
-            if (fabs(value - mean) > standardDeviation) {
+            if (fabs(1.0 * value - mean) > standardDeviation) {
               fprintf(stderr, "Discarding outlier %" PRId64 ".\n", value);
               continue;
             }
@@ -2959,6 +3019,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
             failures++;
           }
         }
+        fprintf(stderr, "End loop\n");
       }
     }
 

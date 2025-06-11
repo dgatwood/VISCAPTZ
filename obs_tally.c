@@ -71,6 +71,12 @@ bool obsModuleInit(void) {
 
     splitSourceNames(tallySourceName, &gTallySourceNames, &gNumberOfTallySourceNames);
 
+  #endif
+  return true;
+}
+
+bool obsModuleStart(void) {
+  #if USE_OBS_TALLY_SOURCE
     pthread_create(&obs_tally_thread, NULL, runOBSTallyThread, NULL);
   #endif
   return true;

@@ -33,6 +33,7 @@
 
 // For printing zoom speed.
 #include "panasonicptz.h"
+#include "p2protocol.h"
 
 #if ENABLE_HARDWARE && USE_CANBUS
 #include <linux/can.h>
@@ -87,28 +88,33 @@ const char *kMotorsAreSwappedKey = "motors_are_swapped";
 //
 // Initializes the motor control/encoder module.
 bool motorModuleInit(void) {
-    bool localDebug = motor_enable_debugging || false;
-    if (localDebug) fprintf(stderr, "Initializing motor module\n");
-#if ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
+  bool localDebug = motor_enable_debugging || false;
+  if (localDebug) fprintf(stderr, "Initializing motor module\n");
+  #if ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
     if (localDebug) fprintf(stderr, "Initializing dev motor module\n");
     if (DEV_ModuleInit()) {
       return false;
     }
     if (localDebug) fprintf(stderr, "Initializing motor\n");
     Motor_Init();
-#else
+  #else
     // Start the fake hardware in the middle.
     g_last_pan_position = 1000000;
     g_last_tilt_position = 1000000;
-#endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
-    if (localDebug) fprintf(stderr, "Motor initialized\n");
+  #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
+  if (localDebug) fprintf(stderr, "Motor initialized\n");
+  return true;
+}
 
+bool motorModuleStart(void) {
+  bool localDebug = motor_enable_debugging || false;
   // Start the motor control thread in the background.
   if (motor_enable_debugging) fprintf(stderr, "Motor module init\n");
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
-#if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
-  pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
-#endif  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
+
+  #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
+    pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
+  #endif  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
 
   if (localDebug) fprintf(stderr, "Motor module init done\n");
   return motorModuleReload();
@@ -606,7 +612,7 @@ void *runMotorControlThread(void *argIgnored) {
 #endif  // ENABLE_HARDWARE
         printf("PAN SPEED: %" PRId64 " (%d) TILT SPEED: %" PRId64 " (%d) "
                "PAN POSITION: %" PRId64 " TILT POSITION: %" PRId64
-               " ZOOM SPEED: %" PRId64 " ZOOM POSITION: %" PRId64 "\n",
+               " ZOOM SPEED: %" PRId64 " ZOOM POSITION: %010" PRId64 "\n",
                g_pan_speed, scaledPanSpeed, g_tilt_speed, scaledTiltSpeed,
                g_last_pan_position, g_last_tilt_position, zoom_speed, zoom_position);
 #if ENABLE_HARDWARE

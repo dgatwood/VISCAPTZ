@@ -57,9 +57,15 @@ bool tricasterModuleInit(void) {
       return false;
     }
 
-    pthread_create(&tricaster_tally_thread, NULL, runTricasterTallyThread, NULL);
   #endif
 
+  return true;
+}
+
+bool tricasterModuleStart(void) {
+  #if USE_TRICASTER_TALLY_SOURCE
+    pthread_create(&tricaster_tally_thread, NULL, runTricasterTallyThread, NULL);
+  #endif
   return true;
 }
 

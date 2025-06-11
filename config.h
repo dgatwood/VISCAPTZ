@@ -24,6 +24,9 @@
 /** 1 if using a Panasonic camera for zoom or PTZ, else 0. */
 #define USE_PANASONIC_PTZ 1
 
+/** 1 if using a Panasonic camera that requires P2 protocol, or 0 for a camera that supports PTZ protocol. */
+#define ENABLE_P2_MODE 1
+
 /**
  * 1 if using a Panasonic camera for zoom only, but a different module for
  * pan and tilt.  0 if using Panasonic for pan, tilt, and zoom.

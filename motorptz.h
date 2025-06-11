@@ -8,10 +8,14 @@
 void reassign_encoder_device_id(int oldCANBusID, int newCANBusID);
 
 /**
- * Initializes the motor control module (and encoders) and starts motor
- * control and encoder position monitor thread.
+ * Initializes the motor control module (and encoders).
  */
 bool motorModuleInit(void);
+
+/**
+ * Starts motor control and encoder position monitor thread.
+ */
+bool motorModuleStart(void);
 
 /** Reinitializes the motor control module (and encoders) after calibration. */
 bool motorModuleReload(void);

@@ -7,11 +7,11 @@
 /** Initializes the Panasonic pan/tilt/zoom module. */
 bool panaModuleInit(void);
 
+/** Starts the Panasonic pan/tilt/zoom module. */
+bool panaModuleStart(void);
+
 /** Reinitializes the Panasonic pan/tilt/zoom module after calibration. */
 bool panaModuleReload(void);
-
-/** Calibrates the Panasonic pan/tilt/zoom module. */
-void panaModuleCalibrate(void);
 
 /** Cleans up the Panasonic pan/tilt/zoom module. */
 bool panaModuleTeardown(void);
@@ -62,27 +62,9 @@ int panaGetTallyState(void);
 /** Changes the camera's tally light state. */
 bool panaSetTallyState(int tallyState);
 
-/** The number of pan positions moved in one second at the minimum speed. */
-int64_t panaMinimumPanPositionsPerSecond(void);
-
-/** The number of tilt positions moved in one second at the minimum speed. */
-int64_t panaMinimumTiltPositionsPerSecond(void);
-
-/** The number of zoom positions moved in one second at the minimum speed. */
-int64_t panaMinimumZoomPositionsPerSecond(void);
-
-/** The number of pan positions moved in one second at the maximum speed. */
-int64_t panaMaximumPanPositionsPerSecond(void);
-
-/** The number of tilt positions moved in one second at the maximum speed. */
-int64_t panaMaximumTiltPositionsPerSecond(void);
-
-/** The number of zoom positions moved in one second at the maximum speed. */
-int64_t panaMaximumZoomPositionsPerSecond(void);
-
 // If Panasonic zoom is enabled (and maybe pan and tilt), map the standard
 // motion and position macros to functions in this module.
-#if USE_PANASONIC_PTZ
+#if USE_PANASONIC_PTZ && !ENABLE_P2_MODE
 
     #define MODULE_INIT() panaModuleInit()
     #define SET_IP_ADDR(address) panaSetIPAddress(address);
@@ -93,8 +75,11 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define GET_TALLY_STATE() panaGetTallyState()
     #endif
 
+    int64_t panaGetZoomPositionRaw(void);
+
     #define SET_TALLY_STATE(state) panaSetTallyState(state)
     #define GET_ZOOM_RANGE(min, max) panaGetZoomRange(min, max)  // uint64_t *
+    #define GET_RAW_ZOOM_POSITION() panaGetZoomPositionRaw()
     #define GET_ZOOM_POSITION() panaGetZoomPosition()
     #define GET_ZOOM_SPEED() panaGetZoomSpeed()
     #define ZOOM_POSITION_SUPPORTED true
@@ -102,6 +87,7 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
 
     // Possible future options: LANC max is 8 (officially 0-7 plus "stopped").
     #define ZOOM_SCALE_HARDWARE 49
+    #define ZOOM_MIN_HARDWARE 0  // 0..49
 
     // Cameras without pan and tilt motors do not allow you to jump to a specific
     // zoom position.  Others don't provide speed control, so you may not want to
