@@ -1,6 +1,13 @@
 
+// If you want to make a cut-out for USB or USB-C, here are the Rock Pi E measurements as based I could measure them.
+
+// 4mm from middle of screw to USB port.  13mm to other side.
+// 10mm from top of riser to USB port.  25mm to bottom.
+// 13mm to USB-C port.  23mm to far side.
+// 21mm to top o USB-C port.  25mm to bottom.
+
 enable_body = true;
-enable_top_plate = false;
+enable_top_plate = true;
 test_top_plate = false;
 
 bottom_offset = test_top_plate ? 0: 90;
@@ -20,7 +27,8 @@ if (enable_top_plate) {
             translate([36, 0, bottom_voffset]) cube([46, 72, 7]);
         }
         union() {
-            translate([-31.5, 36, -1 + bottom_voffset]) cylinder(100, 93/2, 93/2, false, $fn=2000);
+            translate([-31.5, 36, -1 + bottom_voffset]) cylinder(100, 87/2, 89/2, false, $fn=2000);
+            translate([-31.5, 36, 4 + bottom_voffset]) cylinder(7.1, 89/2, 89/2, false, $fn=2000);
             
             // Ethernet ports
             translate([56.5, 20.5, -1 + bottom_voffset]) cube([15, 17, 10]);
@@ -104,11 +112,12 @@ if (enable_body) {
 //                translate([36.01, 57, 52]) cube([10, 3, 20]);
 //                translate([28.01, 42, 52]) cube([13, 16, 20]);
 
+// 58mm from screw to screw vertically.
                 // Pi mounting holes (larger because of needing to accommodate flex in the plastic posts.
                 translate([0, 5.75, 63]) rotate([0, 90, 0]) cylinder(50, sloppy_screw_hole_size / 2, sloppy_screw_hole_size / 2, false, $fn=200);
                 translate([0, 54.75, 63]) rotate([0, 90, 0]) cylinder(50, sloppy_screw_hole_size / 2, sloppy_screw_hole_size / 2, false, $fn=200);
-                translate([0, 5.75, 15]) rotate([0, 90, 0]) cylinder(50, sloppy_screw_hole_size / 2, sloppy_screw_hole_size / 2, false, $fn=200);
-                translate([0, 54.75, 15]) rotate([0, 90, 0]) cylinder(50, sloppy_screw_hole_size / 2, sloppy_screw_hole_size / 2, false, $fn=200);
+                translate([0, 5.75, 5]) rotate([0, 90, 0]) cylinder(50, sloppy_screw_hole_size / 2, sloppy_screw_hole_size / 2, false, $fn=200);
+                translate([0, 54.75, 5]) rotate([0, 90, 0]) cylinder(50, sloppy_screw_hole_size / 2, sloppy_screw_hole_size / 2, false, $fn=200);
                 
                 // Slope avoidance
     //             translate([-0.01, -0.01, -0.01]) cube([34, 7, 7], false);
@@ -164,15 +173,15 @@ if (enable_body) {
             // Pi mounting screwdriver holes
             translate([0, 5.75, 63]) rotate([0, 90, 0]) cylinder(42, screwdriver_size / 2, screwdriver_size / 2, false, $fn=200);
             translate([0, 54.75, 63]) rotate([0, 90, 0]) cylinder(42, screwdriver_size / 2, screwdriver_size / 2, false, $fn=200);
-            translate([0, 5.75, 15]) rotate([0, 90, 0]) cylinder(42, screwdriver_size / 2, screwdriver_size / 2, false, $fn=200);
-            translate([0, 54.75, 15]) rotate([0, 90, 0]) cylinder(42, screwdriver_size / 2, screwdriver_size / 2, false, $fn=200);
+            translate([0, 5.75, 5]) rotate([0, 90, 0]) cylinder(42, screwdriver_size / 2, screwdriver_size / 2, false, $fn=200);
+            translate([0, 54.75, 5]) rotate([0, 90, 0]) cylinder(42, screwdriver_size / 2, screwdriver_size / 2, false, $fn=200);
 
 
             // Pi mounting screw head holes
             translate([30, 5.75, 63]) rotate([0, 90, 0]) cylinder(12, screw_head_size / 2, screw_head_size / 2, false, $fn=200);
             translate([30, 54.75, 63]) rotate([0, 90, 0]) cylinder(12, screw_head_size / 2, screw_head_size / 2, false, $fn=200);
-            translate([30, 5.75, 15]) rotate([0, 90, 0]) cylinder(12, screw_head_size / 2, screw_head_size / 2, false, $fn=200);
-            translate([30, 54.75, 15]) rotate([0, 90, 0]) cylinder(12, screw_head_size / 2, screw_head_size / 2, false, $fn=200);
+            translate([30, 5.75, 5]) rotate([0, 90, 0]) cylinder(12, screw_head_size / 2, screw_head_size / 2, false, $fn=200);
+            translate([30, 54.75, 5]) rotate([0, 90, 0]) cylinder(12, screw_head_size / 2, screw_head_size / 2, false, $fn=200);
         }
     }
 }

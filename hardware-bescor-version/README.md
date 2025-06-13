@@ -114,13 +114,19 @@ tools.  I've tried to provide links where needed.
 12. Some female pins with pre-crimped wires to populate the 40-pin socket, unless you're good at
     crimping those things.
 
-13. Four 2mm nuts and 2mm screws with length 20mm to fasten the pan motor block to the riser block.
+13. A longer 5.5mm x 2.5mm x 14mm power plug to put on your 12V power supply, because the deeply
+    recessed power jack won't work with standard plugs.
+
+    e.g. Amazon ASIN [B07FRXPZV9](
+        https://www.amazon.com/Lzzvibo-5-5x2-5mm-Supply-Connector-Shrinkle/dp/B0DZHX92V2)
+
+14. Four 2mm nuts and 2mm screws with length 20mm to fasten the pan motor block to the riser block.
 
     I would strongly recommend just buying a metric screw collection, e.g. [B09WJ14JWF](
     https://www.amazon.com/HELIFOUNER-Stainless-Hardware-Assortment-Wrenches/dp/B09WJ14JWF
     ), because that contains nearly all of the screws that I used, plus a lot of others.
 
-14. Three 2.5mm x 10mm standoffs (male-female or female-female), 2.5mm x 8mm screws, and either
+15. Three 2.5mm x 10mm standoffs (male-female or female-female), 2.5mm x 8mm screws, and either
     nuts or 2.5mm x 6mm screws for attaching the ADC.  (One corner is unsupported because there
     is an encoder mounted underneath it.)
 
@@ -131,21 +137,21 @@ tools.  I've tried to provide links where needed.
     You can find these standoffs, 2.5mm x 6mm screws, and 2.5mm nuts in sets, e.g. Amazon ASIN
     [B07JYSFMRY](https://www.amazon.com/dp/B07JYSFMRY).
 
-15. One 2.5mm x 8mm screw to fasten the plastic tilt plate to the threaded (small) hole in the
+16. One 2.5mm x 8mm screw to fasten the plastic tilt plate to the threaded (small) hole in the
     (Bescor-provided) metal tilt plate.  (See link above.)
 
-16. One 2.5mm x 12mm screw and nut and thin washer to mount the plastic tilt plate to the
+17. One 2.5mm x 12mm screw and nut and thin washer to mount the plastic tilt plate to the
     unthreaded (large) hole in the (Bescor-provided) metal tilt plate.  (See link above.)
 
-17. Two M3x3 set screws.  I bought an assortment from Hapric, Amazon ASIN [B0D1CF7C1F](
+18. Two M3x3 set screws.  I bought an assortment from Hapric, Amazon ASIN [B0D1CF7C1F](
     https://www.amazon.com/Hapric-Metric-Assortment-Socket-Cup-Point/dp/B0D1CF7C1F),
     because I wanted a collection of metric and standard set screws; they can be great
     to have around.
 
-18. Four M2.5x20mm standoffs, four M2.5 nuts, and four M2.5x6mm or 8mm screws for holding the Pi.
+19. Four M2.5x20mm standoffs, four M2.5 nuts, and four M2.5x6mm or 8mm screws for holding the Pi.
     You can find those in sets, e.g. Amazon ASIN [B07JYSFMRY](https://www.amazon.com/dp/B07JYSFMRY).
 
-19. Rubber cement to reattach the rubber grip plate on the bottom when you're done.
+20. Rubber cement to reattach the rubber grip plate on the bottom when you're done.
 
 
 # Printing the models
