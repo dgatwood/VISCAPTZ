@@ -27,8 +27,8 @@ if (enable_top_plate) {
             translate([36, 0, bottom_voffset]) cube([46, 72, 7]);
         }
         union() {
-            translate([-31.5, 36, -1 + bottom_voffset]) cylinder(100, 87/2, 89/2, false, $fn=2000);
-            translate([-31.5, 36, 4 + bottom_voffset]) cylinder(7.1, 89/2, 89/2, false, $fn=2000);
+            translate([-31.5, 36, -1 + bottom_voffset]) cylinder(100, 89/2, 89/2, false, $fn=2000);
+            translate([-31.5, 36, 4 + bottom_voffset]) cylinder(7.1, 91/2, 91/2, false, $fn=2000);
             
             // Ethernet ports
             translate([56.5, 20.5, -1 + bottom_voffset]) cube([15, 17, 10]);
