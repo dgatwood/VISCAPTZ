@@ -1,0 +1,47 @@
+
+IMPORTANT: There are multiple versions of the Rock Pi E hardware, and the
+pinouts are VERY different.  Later versions use the v1.2 header.  This is
+based on that hardware.  If you have an older board, this may be different.
+
+Because it is critical that the motors not be powered during the boot process,
+this is an attempt to map out the GPIO pins to determine which ones meet that
+criterion.  Unfortunately Radxa provides zero documentation, so this is all by
+trial and error.
+
+Step 1: Check each pin while booted to determine which are *definitely* not usable.
+Step 2: Power each pin one at a time to make sure the light comes on, then turn
+        it off, reboot and make sure it stays off.
+
+sudo gpioset -m signal gpiochip3 1=1
+sudo gpioset -m signal gpiochip3 1=0
+
+
+GPIO list:
+
+Pin 8: Fail (powered by default)
+Pin 10: Fail (powered by default)
+Pin 12: OK
+Pin 24: Fail (powered by default)
+Pin 26: Fail (powered by default)
+Pin 28: Occupied (SCL)
+Pin 32: Fail (powered by default)
+Pin 36: OK
+Pin 38: Fail (powered by default)
+Pin 40: Fail (powered by default)
+
+Pin  3: Fail (powered by default)
+Pin  5: Fail (powered by default)
+Pin  7: OK
+Pin 11: Fail (powered by default)
+Pin 13: Fail (powered by default)
+Pin 15: OK
+Pin 19: Flash at power on.
+Pin 21: Fail (powered by default)
+Pin 23: Fail (powered by default)
+Pin 27: Occupied (SDA)
+Pin 29: Fail (powered by default)
+Pin 31: Fail (powered by default)
+Pin 33: Fail (powered by default)
+Pin 35: Fail (powered by default)
+Pin 37: Fail (powered by default)
+

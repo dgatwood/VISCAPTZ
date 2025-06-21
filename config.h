@@ -45,6 +45,13 @@
 #define ENABLE_HARDWARE 1
 
 /**
+ * If 1, use a PCA9685 motor controller.  If 0, use separate pins to drive
+ * Bescor up, down, left, and right input pins.
+ */
+#define ENABLE_PCA9685 0
+
+
+/**
  * The minimum speed used for panning or tilting programmatically
  * when we don't have calibration data.
  */
@@ -54,17 +61,16 @@
 #pragma mark - Encoder configuration
 
 /**
- * Chooses what type of encoder is connected.
- *
- * If 1, the encoder is expected to be on a CANBus connection.
- * If 0, the encoder is expected to be on an RS485 (Modbus) connection.
+ * Chooses what type of encoder is connected - currently, one of
+ * ENCODER_TYPE_SERIAL, ENCODER_TYPE_CANBUS, or ENCODER_TYPE_GRAVITY_I2C.
  *
  * This value is ignored if ENABLE_HARDWARE is 0.
  *
  * Note that RS485 encoders are entirely untested.  Remove this note if
  * that ever changes.
  */
-#define USE_CANBUS 1
+
+#define USE_ENCODER_TYPE ENCODER_TYPE_GRAVITY_I2C
 
 /** The identifiers for CANBus-based encoders. */
 #define panCANBusID 1

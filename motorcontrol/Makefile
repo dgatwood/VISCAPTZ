@@ -11,8 +11,6 @@ OBJ_O = $(patsubst %.c,${DIR_BIN}/%.o,$(notdir ${OBJ_C}))
 TARGET = libmotorcontrol.so
 #BIN_TARGET = ${DIR_BIN}/${TARGET}
 
-CC = gcc
-
 DEBUG = -g -O0 -Wall
 CFLAGS += $(DEBUG)
 

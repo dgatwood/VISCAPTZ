@@ -558,7 +558,7 @@ int main(int argc, char *argv[]) {
 #endif
     }
   }
-#if USE_CANBUS && ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
+#if (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS) && ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
   if (argc >= 4) {
     if (!strcmp(argv[1], "--reassign")) {
       int oldCANBusID = atoi(argv[2]);
@@ -934,7 +934,7 @@ void handleRecallUpdates(void) {
                         " CURRENTPOS: %" PRId64 " REMAININGPOS: %" PRId64 "\n",
                 nameForAxis(axis),
                 startPosition, targetPosition,
-                axisPosition, llabs(targetPosition - axisPosition));
+                axisPosition, (uint64_t)llabs(targetPosition - axisPosition));
       }
 
       int peakSpeed = usingPositionBasedProgress ? 1000 :
@@ -1307,7 +1307,7 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
     fprintf(stderr, "makeDurationValid(axis %d, duration %lf, position: %lld)\n",
       axis, duration, (long long)position);
     int64_t currentPosition = getAxisPosition(axis);
-    fprintf(stderr, "    Current position: %lld for %s\n", currentPosition,
+    fprintf(stderr, "    Current position: %" PRId64 " for %s\n", (uint64_t)currentPosition,
             nameForAxis(axis));
   }
   double slowestDuration = slowestMoveForAxisToPosition(axis, position);
@@ -1595,8 +1595,9 @@ int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPos
   double peakPositionsPerSecond = (llabs(fromPosition - toPosition) / time) / moveTimeFractionBeforeSlowdown;
 
   if (localDebug) {
-    fprintf(stderr, "Peak points per second for move along axis %d from %lld to %lld over time %lf is %lf\n",
-            axis, fromPosition, toPosition, time, peakPositionsPerSecond);
+    fprintf(stderr, "Peak points per second for move along axis %d from %" PRId64 " to %" PRId64
+            " over time %lf is %lf\n", axis, (uint64_t)fromPosition, (uint64_t)toPosition, time,
+            peakPositionsPerSecond);
   }
 
   int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
@@ -3025,7 +3026,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
 
     int index = speed - minSpeed;
     data[index] = round(positionsPerSecondAverage);
-    fprintf(stderr, "Positions per second at speed %d (average): %lf (%lld)\n",
+    fprintf(stderr, "Positions per second at speed %d (average): %lf (%" PRId64 ")\n",
             index, positionsPerSecondAverage, data[index]);
 
     // The motor may stall at low voltages, but once it gets moving, it should get faster

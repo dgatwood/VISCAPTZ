@@ -17,17 +17,30 @@ USE_OBS_TALLY_SOURCE=0
 # Use a Tricaster as the tally source.
 USE_TRICASTER_TALLY_SOURCE=1
 
+# Use motor controller (for directly driving motors) - requires Raspberry Pi/WiringPi.
+# For Bescor, set to 0.
+USE_MOTOR_DRIVER=0
+
 ### There are no user-configurable values below this line.  ###
 
 UNAME := $(shell uname)
 
-CFLAGS+=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -Wall -Wno-unknown-pragmas -g -O0 -fno-omit-frame-pointer
+CFLAGS+=-std=gnu99 -Wall -Wno-unknown-pragmas -g -O0 -fno-omit-frame-pointer
+
+ifeq ($(USE_MOTOR_DRIVER), 1)
+CFLAGS+=-I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -DENABLE_PCA9685=1
+else
+CFLAGS+=-DENABLE_PCA9685=0
+endif
 
 # If not using hardware, remove -lbcm2835
-ifeq ($(UNAME), Linux)
-LDFLAGS+=-lpthread -lm -lbcm2835 -Lmotorcontrol -lmotorcontrol -lcrypto -lxml2
-else
 LDFLAGS+=-lpthread -lm -lcrypto -lxml2
+
+ifeq ($(UNAME), Linux)
+CFLAGS+=-I/usr/include/libxml2/
+ifeq ($(USE_MOTOR_DRIVER), 1)
+LDFLAGS+=-lbcm2835 -Lmotorcontrol -lmotorcontrol
+endif
 endif
 
 ifeq ($(UNAME), Darwin)
@@ -58,7 +71,9 @@ endif
 	${CC} -c ${CFLAGS} -o $@ $<
 
 ifeq ($(UNAME), Linux)
+ifeq ($(USE_MOTOR_DRIVER), 1)
 LINUX_TARGETS=motorcontrol/libmotorcontrol.so
+endif
 else
 LINUX_TARGETS=
 endif

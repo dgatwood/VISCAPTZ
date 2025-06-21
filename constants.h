@@ -67,4 +67,17 @@ typedef enum {
   extern const char *kMotorsAreSwappedKey;
 #endif
 
+// Untested, but designed for Briter's RS-485 (MODBUS) encoders.  Might work, or
+// might need some additional fixes.
+#define ENCODER_TYPE_SERIAL 0
+
+// Tested with the Briter BRT38-COM4096D24-RT1.  Other CAN-based encoders may
+// work adequately as long as they can handle enough turns and retain state
+// across power cycling (or as long as you re-program your set positions every
+// time you power it on).
+#define ENCODER_TYPE_CANBUS 1
+
+// Gravity 2-Channel 15Bit 0-10V ADC Module over I2C.
+#define ENCODER_TYPE_GRAVITY_I2C 2
+
 #endif  // __CONSTANTS_H__

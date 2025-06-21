@@ -22,12 +22,34 @@
 
 #define ENABLE_STATUS_DEBUGGING 0
 
+// This numbers are entirely bogus.
+#define TILT_UP_PIN GPIO_PIN_1
+#define TILT_DOWN_PIN GPIO_PIN_2
+#define PAN_LEFT_PIN GPIO_PIN_3
+#define PAN_RIGHT_PIN GPIO_PIN_4
+
 #if ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
+#if ENABLE_PCA9685
 
 #include "motorcontrol/lib/Config/DEV_Config.h"
 #include "motorcontrol/lib/Config/Debug.h"
 #include "motorcontrol/lib/MotorDriver/MotorDriver.h"
 #include "motorcontrol/lib/PCA9685/PCA9685.h"
+
+#endif  // ENABLE_PCA9685
+
+#if ENABLE_MRAA
+
+// #include <mraa.h>
+
+typedef void *mraa_gpio_context;
+
+mraa_gpio_context gPanLeftGPIOContext;
+mraa_gpio_context gPanRightGPIOContext;
+mraa_gpio_context gTiltUpGPIOContext;
+mraa_gpio_context gTiltDownGPIOContext;
+
+#endif  // ENABLE_MRAA
 
 #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
@@ -35,33 +57,50 @@
 #include "panasonicptz.h"
 #include "p2protocol.h"
 
-#if ENABLE_HARDWARE && USE_CANBUS
+#if ENABLE_HARDWARE && (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <linux/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
-#endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
+#endif  // ENABLE_HARDWARE && (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 
 
 static bool motor_enable_debugging = false;
 
 #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
-  #if USE_CANBUS
+  #if (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
     int motorOpenCANSock(void);
     bool updatePositionsCANBus(int sock);
     void resetCenterPositionsCANBus(int sock);
     void handleCANFrame(struct can_frame *frame);
     bool sendCANRequestFrame(int sock, uint8_t deviceID);
-  #else
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_SERIAL)
     void updatePositionsSerial(int pan_fd, int tilt_fd);
     void resetCenterPositionsSerial(int tilt_fd, int pan_fd);
-  #endif
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_GRAVITY_I2C)
+    void updatePositionsAnalog(void);
+    void resetCenterPositionsAnalog(void);
+    void restoreTurnCounter(void);
+    void writeTurnCounter(void);
+    signed int gTurnCounter = 0;
+  #else
+    #error Unknown/unsupported encoder type.
+  #endif  // USE_ENCODER_TYPE
 #endif
 
 pthread_t motor_control_thread;
 pthread_t position_monitor_thread;
+
+#if ENABLE_PCA9685
 void *runMotorControlThread(void *argIgnored);
+#endif
+
+#if ENABLE_MRAA
+void *runPanMotorControlThread(void *argIgnored);
+void *runTiltMotorControlThread(void *argIgnored);
+#endif
+
 void *runPositionMonitorThread(void *argIgnored);
 
 static volatile int64_t g_pan_speed = 0;
@@ -91,12 +130,30 @@ bool motorModuleInit(void) {
   bool localDebug = motor_enable_debugging || false;
   if (localDebug) fprintf(stderr, "Initializing motor module\n");
   #if ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
-    if (localDebug) fprintf(stderr, "Initializing dev motor module\n");
-    if (DEV_ModuleInit()) {
-      return false;
-    }
-    if (localDebug) fprintf(stderr, "Initializing motor\n");
-    Motor_Init();
+    #if ENABLE_PCA9685
+      if (localDebug) fprintf(stderr, "Initializing dev motor module\n");
+      if (DEV_ModuleInit()) {
+        return false;
+      }
+      if (localDebug) fprintf(stderr, "Initializing motor\n");
+      Motor_Init();
+    #endif  // !ENABLE_PCA9685
+    #if ENABLE_MRAA
+      if (mraa_init() != MRAA_SUCCESS) {
+        return false;
+      }
+
+      gPanLeftGPIOContext = mraa_gpio_init(PAN_LEFT_PIN);
+      gPanRightGPIOContext = mraa_gpio_init(PAN_RIGHT_PIN);
+      gTiltUpGPIOContext = mraa_gpio_init(TILT_UP_PIN);
+      gTiltDownGPIOContext = mraa_gpio_init(TILT_DOWN_PIN);
+
+      assert(mraa_gpio_dir(gPanLeftGPIOContext, MRAA_GPIO_OUT) == MRAA_SUCCESS);
+      assert(mraa_gpio_dir(gPanRightGPIOContext, MRAA_GPIO_OUT) == MRAA_SUCCESS);
+      assert(mraa_gpio_dir(gTiltUpGPIOContext, MRAA_GPIO_OUT) == MRAA_SUCCESS);
+      assert(mraa_gpio_dir(gTiltDownGPIOContext, MRAA_GPIO_OUT) == MRAA_SUCCESS);
+
+    #endif  // ENABLE_MRAA
   #else
     // Start the fake hardware in the middle.
     g_last_pan_position = 1000000;
@@ -110,8 +167,14 @@ bool motorModuleStart(void) {
   bool localDebug = motor_enable_debugging || false;
   // Start the motor control thread in the background.
   if (motor_enable_debugging) fprintf(stderr, "Motor module init\n");
-  pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
 
+  #if ENABLE_PCA9685
+    pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
+  #endif  // ENABLE_PCA9685
+  #if ENABLE_MRAA
+    pthread_create(&motor_control_thread, NULL, runPanMotorControlThread, NULL);
+    pthread_create(&motor_control_thread, NULL, runTiltMotorControlThread, NULL);
+  #endif  // ENABLE_MRAA
   #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
     pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
   #endif  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
@@ -196,9 +259,9 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
 void *runPositionMonitorThread(void *argIgnored) {
 #if ENABLE_HARDWARE
     bool localDebug = false;
-  #if USE_CANBUS
+  #if (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
     int sock = motorOpenCANSock();
-  #else  // !USE_CANBUS
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_SERIAL)
     int tilt_fd = motorOpenSerialDev(SERIAL_DEV_FILE_FOR_TILT);
     int pan_fd = motorOpenSerialDev(SERIAL_DEV_FILE_FOR_PAN);
 
@@ -206,7 +269,14 @@ void *runPositionMonitorThread(void *argIgnored) {
       fprintf(stderr, "Could not open serial ports.  Disabling position monitoring.\n");
       return NULL;
     }
-  #endif  // USE_CANBUS
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_GRAVITY_I2C)
+    // Initialize the audio hardware here.
+    // @@@
+
+    restoreTurnCounter();
+  #else
+    #error Unknown/unsupported encoder type.
+  #endif  // (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 #endif  // ENABLE_HARDWARE
 
   // During calibration, we set the current position to be the midpoint of the encoders,
@@ -214,37 +284,49 @@ void *runPositionMonitorThread(void *argIgnored) {
   // no attempt at understanding wraparound right now.
   if (gRecenter || (gCalibrationMode && !gCalibrationModeQuick)) {
 #if ENABLE_HARDWARE
-  #if USE_CANBUS
+  #if (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
     resetCenterPositionsCANBus(sock);
-  #else  // !USE_CANBUS
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_SERIAL)
     resetCenterPositionsSerial(tilt_fd, pan_fd);
-    resetCenterPositionsSerial(pan_fd);
-  #endif  // USE_CANBUS
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_GRAVITY_I2C)
+    resetCenterPositionsAnalog();
+  #else
+    #error Unknown/unsupported encoder type.
+  #endif  // (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 #endif  // ENABLE_HARDWARE
   }
 
   // Read the position.
   while (1) {
 #if ENABLE_HARDWARE
-    #if USE_CANBUS
+    #if (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
         if (!updatePositionsCANBus(sock)) {
             if (localDebug) fprintf(stderr, "Reopening socket after failure.\n");
             sock = motorOpenCANSock();
         }
-    #else  // !USE_CANBUS
+    #elif (USE_ENCODER_TYPE == ENCODER_TYPE_SERIAL)
         updatePositionsSerial(pan_fd, tilt_fd)
-    #endif  // USE_CANBUS
+    #elif (USE_ENCODER_TYPE == ENCODER_TYPE_GRAVITY_I2C)
+        updatePositionsAnalog();
+    #else
+      #error Unknown/unsupported encoder type.
+    #endif  // (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 #endif  // ENABLE_HARDWARE
     usleep(2000);  // Update 500x per second (latency-critical).
   }
 #if ENABLE_HARDWARE
-  #if USE_CANBUS
+  #if (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
     close(sock);
     system("sudo ifconfig can0 down");
-  #else  // !USE_CANBUS
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_SERIAL)
     close(pan_fd);
     close(tilt_fd);
-  #endif  // USE_CANBUS
+  #elif (USE_ENCODER_TYPE == ENCODER_TYPE_GRAVITY_I2C)
+    // @@@
+
+  #else
+    #error Unknown/unsupported encoder type.
+  #endif  // (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 #endif  // ENABLE_HARDWARE
   return NULL;
 }
@@ -252,7 +334,7 @@ void *runPositionMonitorThread(void *argIgnored) {
 
 #pragma mark - CANBus-specific encoder implementation
 
-#if USE_CANBUS
+#if (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 
 /** Opens a CANBus socket for talking to the position encoders. */
 int motorOpenCANSock(void) {
@@ -465,7 +547,7 @@ void resetCenterPositionsCANBus(int sock) {
 
 #pragma mark - RS485/Modbus-specific encoder implementation
 
-#else  // !USE_CANBUS
+#elif (USE_ENCODER_TYPE == ENCODER_TYPE_SERIAL)
 
 /**
  * Opens a serial device file descriptor for talking to serial/Modbus-based
@@ -540,7 +622,32 @@ void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
     assert(responseBuf[1] == 0x10);
 }
 
-#endif  // USE_CANBUS
+#elif (USE_ENCODER_TYPE == ENCODER_TYPE_GRAVITY_I2C)
+
+void updatePositionsAnalog(void) {
+    // @@@ WRITE ME @@@
+}
+
+// Persist the turn counter to disk.
+void restoreTurnCounter(void) {
+    // @@@ WRITE ME @@@
+    gTurnCounter = 0;
+}
+
+// Persist the turn counter to disk.
+void writeTurnCounter(void) {
+    // @@@ WRITE ME @@@
+    // ... gTurnCounter
+}
+
+void resetCenterPositionsAnalog(void) {
+    gTurnCounter = 0;
+    writeTurnCounter();
+}
+
+#else
+  #error Unknown/unsupported encoder type.
+#endif  // (USE_ENCODER_TYPE == ENCODER_TYPE_CANBUS)
 #endif  // ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
 
 
@@ -552,6 +659,7 @@ void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
  * This thread is responsible for taking the current pan and tilt speeds
  * (as set by other modules) and converting them into motor speed commands.
  */
+#if ENABLE_PCA9685
 void *runMotorControlThread(void *argIgnored) {
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE && ENABLE_HARDWARE)
   bool localDebug = false;
@@ -573,6 +681,8 @@ void *runMotorControlThread(void *argIgnored) {
 
     // Set the pan motor speed.
     if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
+
+
     Motor_Run(motorsAreSwapped ? MOTORB : MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
 
     // Set the tilt motor speed.
@@ -624,6 +734,62 @@ void *runMotorControlThread(void *argIgnored) {
   }
   return NULL;
 }
+
+#endif  // !ENABLE_PCA9685
+
+#if ENABLE_MRAA
+
+void *runMotorControlThread(mraa_gpio_context negativeValueGPIOContext,
+                            mraa_gpio_context positiveValueGPIOContext
+                            int64_t *speedValue);
+
+void *runPanMotorControlThread(void *ignored) {
+  runMotorControlThread(gPanLeftGPIOContext, gPanRightGPIOContext, &g_pan_speed,
+                        motor_pan_scaled_data);
+}
+
+void *runTiltMotorControlThread(void *argIgnored) {
+  runMotorControlThread(gTiltDownGPIOContext, gTiltUpGPIOContext, &g_tilt_speed,
+                        motor_tilt_scaled_data);
+}
+
+void *runMotorControlThread(mraa_gpio_context negativeValueGPIOContext,
+                            mraa_gpio_context positiveValueGPIOContext
+                            int64_t *speedValueRef, 
+                            int32_t *scaleData) {
+  bool localDebug = false;
+
+  while (1) {
+    uint64_t speedValue = *speedValueRef;
+
+    int scaledSpeed = g_pan_tilt_raw ?
+        llabs(speedValue) :
+        llabs(scaleSpeed(speedValue, SCALE_CORE, PAN_TILT_SCALE_HARDWARE, scaleData));
+    int negative = (speedValue < 0);
+
+    // PAN_TILT_SCALE_HARDWARE is 100 (percent).
+
+    // We run at 10 kHz, so each period is 100 microseconds.  If the duty cycle is 13 / 100,
+    // then it is on for 13 microseconds and off for 87 microseconds.
+
+    if (negative) {
+      mraa_gpio_write(negativeValueGPIOContext, 1);
+      mraa_gpio_write(positiveValueGPIOContext, 0);
+    } else {
+      mraa_gpio_write(negativeValueGPIOContext, 0);
+      mraa_gpio_write(positiveValueGPIOContext, 1);
+    }
+
+    usleep(scaledSpeed);
+
+    mraa_gpio_write(negativeValueGPIOContext, 0);
+    mraa_gpio_write(positiveValueGPIOContext, 0);
+
+    usleep(PAN_TILT_SCALE_HARDWARE - scaledSpeed);
+  }
+  return NULL;
+}
+#endif  // ENABLE_MRAA
 
 
 #pragma mark - Calibration
