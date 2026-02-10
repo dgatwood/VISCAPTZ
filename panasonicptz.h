@@ -62,6 +62,12 @@ int panaGetTallyState(void);
 /** Changes the camera's tally light state. */
 bool panaSetTallyState(int tallyState);
 
+/** Returns the minimum zoom positions per second supported by this camera. */
+int64_t panaMinimumZoomPositionsPerSecond(void);
+
+/** Returns the maximum zoom positions per second supported by this camera. */
+int64_t panaMaximumZoomPositionsPerSecond(void);
+
 // If Panasonic zoom is enabled (and maybe pan and tilt), map the standard
 // motion and position macros to functions in this module.
 #if USE_PANASONIC_PTZ && !ENABLE_P2_MODE

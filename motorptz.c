@@ -504,21 +504,24 @@ int motorOpenSerialDev(char *path) {
 void updatePositionsSerial(int pan_fd, int tilt_fd) {
     static const uint8_t requestBuf[] =
         { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0a };
-    const uint8_t responseBuf[5];
+    uint8_t responseBuf[5];
 
     // Read the pan position.
-    write(pan_fd, requestBuf, sizeof(requestBuf));
-    read(pan_fd, (void *)responseBuf, sizeof(responseBuf));
-    uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
+    if (write(pan_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
+
+        if (read(pan_fd, (void *)responseBuf, sizeof(responseBuf)) == sizeof(responseBuf)) {
+            uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
+            g_last_pan_position = pan_position;
+        }
+    }
 
     // Read the tilt position.
-    write(tilt_fd, requestBuf, sizeof(requestBuf));
-    read(tilt_fd, (void *)responseBuf, sizeof(responseBuf));
-    uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
-
-    g_last_pan_position = pan_position;
-
-    g_last_tilt_position = tilt_position;
+    if (write(tilt_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
+        if (read(tilt_fd, (void *)responseBuf, sizeof(responseBuf)) == sizeof(responseBuf)) {
+            uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
+            g_last_tilt_position = tilt_position;
+        }
+    }
 }
 
 /** Resets the center position of the encoders to the current position (serial/Modbus version). */

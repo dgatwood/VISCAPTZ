@@ -4,6 +4,7 @@
 #include "motorptz.h"
 #include "obs_tally.h"
 #include "panasonicptz.h"
+#include "panasonic_shared.h"
 #include "p2protocol.h"
 #include "tricaster_tally.h"
 
@@ -2443,6 +2444,11 @@ bool savePreset(int presetNumber) {
 
     if (retval) {
         FILE *fp = fopen(presetFilename(presetNumber), "w");
+        if (!fp) {
+            fprintf(stderr, "Failed to save preset %d (I/O Error)\n", presetNumber);
+            return false;
+        }
+
         fwrite((void *)&preset, sizeof(preset), 1, fp);
         fclose(fp);
         fprintf(stderr, "Saving preset %d (pan=%" PRId64 ", tilt=%" PRId64
@@ -3342,7 +3348,7 @@ void runStartupTests(void) {
 
   int32_t *translatedData = convertSpeedValues(fakeData, 3, 0);
   int32_t expectedResuls[] = { 0, 285, 571, 857 };
-  assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)));
+  assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)) - 1);
 
   for (int i=0; i <= maxSpeed; i++) {
     assert(translatedData[i] == expectedResuls[i]);

@@ -71,7 +71,7 @@ const char *getConfigFilePath(void) {
 
   struct passwd *pw = getpwuid(getuid());
 
-  asprintf(&value, "%s/.viscaptz.conf", pw->pw_dir);
+  asprintf(&value, "%s/.viscaptz.conf", (pw != NULL && pw->pw_dir != NULL) ? pw->pw_dir : getenv("HOME"));
   return value;
 }
 
@@ -98,7 +98,11 @@ char *getConfigKey(const char *key) {
       }
       char *retval = NULL;
       asprintf(&retval, "%s", &buf[strlen(key) + 1]);
-      retval[strlen(retval)-1] = '\0';  // Remove terminating newline
+      while ((strlen(retval) > 0) &&
+             (retval[strlen(retval)-1] == '\r' || 
+              retval[strlen(retval)-1] == '\n')) {
+          retval[strlen(retval)-1] = '\0';  // Remove terminating newline
+      }
       if (localDebug) {
         fprintf(stderr, "Will return \"%s\"\n", retval);
       }
