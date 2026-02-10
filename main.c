@@ -1221,8 +1221,45 @@ int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed, axis_identifier_
   return outputValues;
 }
 
-int64_t scaleVISCAPanTiltSpeedToCoreSpeed(int speed) {
-  return scaleSpeed(speed, PAN_SCALE_VISCA, SCALE_CORE, NULL);
+int getInteractiveScale() {
+  bool localDebug = true;
+
+  int64_t zoomMin = 0, zoomMax = 0;
+  if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax)) {
+    if (localDebug) {
+      fprintf(stderr, "Could not get zoom range in getInteractiveScale()\n");
+    }
+    return 1;
+  }
+
+  int64_t zoomPosition = getAxisPosition(axis_identifier_zoom) - zoomMin;
+  int64_t zoomScale = zoomMax - zoomMin;
+  double floatPosition = (zoomPosition * 1.0) / zoomScale;
+
+  // If zoom is zoomMax, zoomPosition = zoomMax - zoomMin and zoomPositiion == zoomScale.
+  // Then floatPosition = 1.0, and this returns 4.0.
+  // If zoom is zoomMin, zoomPosition = 0.  Then floatPosition = 0, and this returns 1.0.
+
+  int scale = 1.0 + (7.0 * floatPosition);
+  if (localDebug) {
+    fprintf(stderr, "In getInteractiveScale(): pos = %lf scale = %d\n", floatPosition, scale);
+  }
+  return scale;
+}
+
+// If interactive is true, scale pan and tilt speed based on zoom position.
+int64_t scaleVISCAPanTiltSpeedToCoreSpeed(int speed, bool interactive) {
+  int scale = interactive ? getInteractiveScale() : 1;
+
+  int64_t retval = scaleSpeed(speed, PAN_SCALE_VISCA, SCALE_CORE / scale, NULL);
+
+  fprintf(stderr, "scaleVISCAPanTiltSpeedToCoreSpeed: speed=%d, ", (int)speed);
+  fprintf(stderr, "VISCA=%lld, ", (long long)PAN_SCALE_VISCA);
+  fprintf(stderr, "CORE=%lld, ", (long long)SCALE_CORE);
+  fprintf(stderr, "scale=%d, ", (int)scale);
+  fprintf(stderr, "ret=%lld\n", (long long)retval);
+
+  return retval;
 }
 
 int64_t scaleVISCAZoomSpeedToCoreSpeed(int speed) {
@@ -2230,8 +2267,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                   // stick, abort any in-progress move immediately.
                   if (!moveInProgress() || panSpeed != 0 || tiltSpeed != 0) {
                     cancelRecallIfNeeded("Pan/tilt command received");
-                    setAxisSpeed(axis_identifier_pan, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed), false);
-                    setAxisSpeed(axis_identifier_tilt, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed), false);
+                    setAxisSpeed(axis_identifier_pan, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, true), false);
+                    setAxisSpeed(axis_identifier_tilt, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, true), false);
                   }
                 }
 
@@ -2257,8 +2294,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 int16_t tiltPosition = (int16_t)rawTiltValue;
 
                 cancelRecallIfNeeded("Pan/tilt absolute command received");
-                if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
-                                        tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
+                if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, false),
+                                        tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, false),
                                         0, 0, 0)) {
                     return false;
                 }
@@ -2290,8 +2327,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                     tiltPosition += relativeTiltPosition;
 
                     cancelRecallIfNeeded("Pan/tilt relative command received");
-                    if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
-                                            tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
+                    if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, false),
+                                            tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, false),
                                             0, 0, 0)) {
                         return false;
                     }
@@ -2514,8 +2551,8 @@ bool recallPreset(int presetNumber) {
     }
 
     cancelRecallIfNeeded("recallPreset");
-    bool retval = setPanTiltPosition(preset.panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed),
-                                     preset.tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed),
+    bool retval = setPanTiltPosition(preset.panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, false),
+                                     preset.tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, false),
                                      duration, panStartTime, tiltStartTime);
     bool retval2 = setZoomPosition(preset.zoomPosition, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed),
                                    duration, zoomStartTime);
