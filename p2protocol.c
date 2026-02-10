@@ -27,6 +27,8 @@
 #include "constants.h"
 #include "panasonic_shared.h"
 
+#if USE_PANASONIC_PTZ && ENABLE_P2_MODE  // Otherwise, this .c file is a no-op.
+
 // #define P2_APP_NAME "VISCAPTZ"
 #define P2_APP_NAME "sRC_SemiProApp_iOS"
 
@@ -764,7 +766,7 @@ bool sendP2Request(char *request, char **buf) {
 
   free(message);
 
-  fprintf(stderr, "sendP2Request point 2 %ld %ld\n", size, expectedSize);
+  fprintf(stderr, "sendP2Request point 2 %zu %zu\n", size, expectedSize);
   pthread_mutex_unlock(&gSocketLock);
 
   if (size < 0) {
@@ -826,7 +828,7 @@ bool enableZoomPositionupdates(void) {
   char requestBuf[3] = { 0xff, 0x01, 0xff };
 
   ssize_t length = sendto(gP2UDPSocket, requestBuf, 3, 0, (struct sockaddr *)&gP2Addr, sizeof(gP2Addr));
-  fprintf(stderr, "Write returned %ld on sock %d\n", length, gP2UDPSocket);
+  fprintf(stderr, "Write returned %zu on sock %d\n", length, gP2UDPSocket);
 
   return length == 3;
 }
@@ -1054,3 +1056,4 @@ int64_t panaZoomPositionsPerSecondAtSpeed(int speed) {
 void runP2Tests(void) {
 }
 
+#endif  // USE_PANASONIC_PTZ && ENABLE_P2_MODE

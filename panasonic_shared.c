@@ -33,7 +33,7 @@
 /** If true, enables extra debugging. */
 bool pana_enable_debugging = false;
 
-/** Maps hardware zoom values to linearized values. */
+/** Maps hardware zoom values to linearized values. n=hw_zoom_positions+1 */
 static int64_t *zoom_position_map;
 
 static int zoom_position_map_count;
@@ -115,7 +115,7 @@ void populateZoomNonlinearityTable(void) {
   zoom_position_map_count = maxZoom - minZoom + 1;
   zoom_position_map = malloc(zoom_position_map_count * sizeof(int64_t));
 
-  int64_t position = 0;
+  int64_t position = 0;  // minZoom - minZoom
   int64_t scaledPosition = scaleLinearZoomToRawZoom(position);
 
   // If this assertion fails, your camera will require a different nonlinearity map.
@@ -129,12 +129,18 @@ void populateZoomNonlinearityTable(void) {
   assert(floor(scaledPosition) <= minZoom);
 
   int lastPosition = minZoom - 1;
-  while (lastPosition <= maxZoom) {
+
+  while (lastPosition < maxZoom) {
     // fprintf(stderr, "min/max: %lld %lld\n", minZoom, maxZoom);
     // fprintf(stderr, "pos %lld scaled %lld (between %lld and %lld, inclusive)\n",
     // position, scaledPosition, minZoom, maxZoom);
     if (scaledPosition > lastPosition) {
       lastPosition++;
+
+      // Initially minZoom - 1 + 1 - minZoom = 0.
+      // Terminally maxZoom - 1 + 1 - minZoom = zoom_position_map_count - 1 = max-min+1 -1 = max-min
+      // So last time is when lastPosition = maxZoom - 1 + 1
+      // So when lastPosition == maxZoom, drop out of the loop.
       uint64_t index = lastPosition - minZoom;
       zoom_position_map[index] = position;
 

@@ -25,6 +25,7 @@ CFLAGS+=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver 
 
 # If not using hardware, remove -lbcm2835
 ifeq ($(UNAME), Linux)
+CFLAGS+=-I/usr/include/libxml2
 LDFLAGS+=-lpthread -lm -lbcm2835 -Lmotorcontrol -lmotorcontrol -lcrypto -lxml2
 else
 LDFLAGS+=-lpthread -lm -lcrypto -lxml2

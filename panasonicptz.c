@@ -56,6 +56,9 @@ static int64_t gLastZoomSpeed = 0;
 static char *g_cameraIPAddr = NULL;
 
 #if USE_PANASONIC_PTZ
+  /** The zoom calibration data in raw form (positions per second for each speed). */
+  int64_t *panasonicZoomCalibrationData = NULL;
+
   /** The zoom calibration data in core-scaled form (1000 * value / max_value). */
   int32_t *panasonicScaledZoomCalibrationData = NULL;
 
@@ -74,7 +77,6 @@ static char *g_cameraIPAddr = NULL;
 
   #endif  // !PANASONIC_PTZ_ZOOM_ONLY
 #endif  // USE_PANASONIC_PTZ
-
 
 #pragma mark - Panasonic module implementation
 
