@@ -390,7 +390,6 @@ bool sendCANRequestFrame(int sock, uint8_t deviceID) {
         fprintf(stderr, "CANBus write failed (expected length %zu, got %zu)\n", sizeof(message), bytesWritten);
         return false;
     }
-fprintf(stderr, "CANBus OK\n");
     return true;
 }
 
@@ -703,10 +702,7 @@ double getVISCATimestamp(void) {
 }
 
 ssize_t waitwrite(int fd, const void *buf, size_t count) {
-  fd_set write_fds;
-  FD_ZERO(&write_fds);
-  FD_SET(fd, &write_fds);
-
+#ifdef THROTTLE
   // Throttle writes at 100 messages per second to avoid write failures.
   static double lastTimestamp = 0;
   double minCANBusInterval = 1.0 / MAX_CANBUS_REQUESTS_PER_SECOND;
@@ -722,13 +718,7 @@ ssize_t waitwrite(int fd, const void *buf, size_t count) {
   lastTimestamp = timestamp;
   
   assert(pthread_self() == position_monitor_thread);
+#endif // THROTTLE
 
-  struct timeval timeout;
-  timeout.tv_sec = 0;
-  timeout.tv_usec = 100000;  // Update the speed of automatic recall operations 100x per second (10 ms).
-
-  if (select(fd + 1, &write_fds, NULL, NULL, &timeout) > 0) {
-    return write(fd, buf, count);
-  }
-  return -1;
+  return write(fd, buf, count);
 }
