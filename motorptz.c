@@ -353,7 +353,7 @@ struct can_frame CANBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data
 
 /** Processes a CANBus response from the encoder. */
 void handleCANFrame(struct can_frame *response) {
-    bool localDebug = false;
+    bool localDebug = true;
     if (localDebug) fprintf(stderr, "Processing CAN frame.\n");
     if (response->data[0] == 0x7 && response->data[2] == 0x1) {
         long value = response->data[3] | (response->data[4] << 8) |
@@ -711,12 +711,15 @@ ssize_t waitwrite(int fd, const void *buf, size_t count) {
   static double lastTimestamp = 0;
   double minCANBusInterval = 1.0 / MAX_CANBUS_REQUESTS_PER_SECOND;
   double sleepUntil = lastTimestamp + minCANBusInterval;
-  double sleepTime = getVISCATimestamp() - sleepUntil;
+  double timestamp = getVISCATimestamp();
+  double sleepTime = sleepUntil - timestamp;
 
   if (sleepTime > 0) {
+    // fprintf(stderr, "sleepTime = %lf timestamp %lf lastTimestamp %lf sleepUntil %lf to CAN\n",
+            // sleepTime, timestamp, lastTimestamp, sleepUntil);
     usleep(sleepTime * 1000000);
   }
-  lastTimestamp = getVISCATimestamp();
+  lastTimestamp = timestamp;
   
   assert(pthread_self() == position_monitor_thread);
 

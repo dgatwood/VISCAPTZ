@@ -2440,6 +2440,10 @@ char *presetFilename(int presetNumber) {
 bool savePreset(int presetNumber) {
     preset_t preset;
     bool retval = GET_PAN_TILT_POSITION(&preset.panPosition, &preset.tiltPosition);
+    if (!retval) {
+        fprintf(stderr, "GET_PAN_TILT_POSITION failed!\n");
+    }
+
     preset.zoomPosition = GET_ZOOM_POSITION();
 
     if (retval) {
