@@ -149,6 +149,7 @@ bool setConfigKey(const char *key, const char *value) {
     }
 
     free(configFilePathCopy);
+    fprintf(stderr, "Could not open file %s for writing.\n", tempfilename);
     return false;
   }
 
@@ -160,15 +161,27 @@ bool setConfigKey(const char *key, const char *value) {
       // Matching line.
       if (value != NULL) {
         // Write the new value if it is non-NULL, else treat it as a deletion.
-        error = error || (fprintf(fq, "%s=%s\n", key, value) == -1);
+        bool newError = (fprintf(fq, "%s=%s\n", key, value) == -1);
+        error = error || newError;
+        if (newError) {
+          fprintf(stderr, "Error rewriting key line.\n");
+        }
       }
       found = true;
     } else {
-      error = error || (fprintf(fq, "%s", buf) == -1);
+      bool newError = (fprintf(fq, "%s", buf) == -1);
+      error = error || newError;
+      if (error) {
+        fprintf(stderr, "Error writing non-key line.\n");
+      }
     }
   }
   if ((!found) && value != NULL) {
-    error = error || (fprintf(fq, "%s=%s\n", key, value) == -1);
+    bool newError = (fprintf(fq, "%s=%s\n", key, value) == -1);
+    error = error || newError;
+    if (error) {
+      fprintf(stderr, "Error writing key line.\n");
+    }
   }
 
   if (fp) {
@@ -177,7 +190,11 @@ bool setConfigKey(const char *key, const char *value) {
   fclose(fq);
 
   if (!error) {
-    error = error || (rename(tempfilename, getConfigFilePath()) != 0);
+    bool newError = (rename(tempfilename, getConfigFilePath()) != 0);
+    error = error || newError;
+    if (error) {
+      fprintf(stderr, "Error renaming temp file.\n");
+    }
   }
   free(tempfilename);
   free(buf);

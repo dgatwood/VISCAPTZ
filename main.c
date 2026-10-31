@@ -3348,7 +3348,7 @@ void runStartupTests(void) {
 
   int32_t *translatedData = convertSpeedValues(fakeData, 3, 0);
   int32_t expectedResuls[] = { 0, 285, 571, 857 };
-  assert(writeCalibrationDataForAxis(30, fakeData, sizeof(fakeData) / sizeof(int64_t)) - 1);
+  assert(writeCalibrationDataForAxis(30, fakeData, (sizeof(fakeData) / sizeof(int64_t)) - 1));
 
   for (int i=0; i <= maxSpeed; i++) {
     assert(translatedData[i] == expectedResuls[i]);
