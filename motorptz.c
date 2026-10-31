@@ -13,6 +13,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -43,6 +44,7 @@
 #include <sys/socket.h>
 #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
+ssize_t waitwrite(int fd, const void *buf, size_t count);
 
 static bool motor_enable_debugging = false;
 
@@ -383,11 +385,12 @@ bool sendCANRequestFrame(int sock, uint8_t deviceID) {
         fprintf(stderr, "Writing to socket %d frame %d %d\n", sock, message.can_id, message.can_dlc);
     }
 
-    ssize_t bytesWritten = write(sock, &message, sizeof(message));
-    if (bytesWritten != sizeof(message)) {
+    ssize_t bytesWritten = -1;
+    if (waitwrite(sock, &message, sizeof(message) != sizeof(message))) {
         fprintf(stderr, "CANBus write failed (expected length %zu, got %zu)\n", sizeof(message), bytesWritten);
         return false;
     }
+fprintf(stderr, "CANBus OK\n");
     return true;
 }
 
@@ -404,7 +407,7 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
     struct can_frame message = CANBusFrameMake(oldCANBusID, 4, data);
 
     fprintf(stderr, "Reassigning device %d to %d\n", oldCANBusID, newCANBusID);
-    if (write(sock, &message, sizeof(message)) == sizeof(message)) {
+    if (waitwrite(sock, &message, sizeof(message)) == sizeof(message)) {
         struct can_frame response;
         if (read(sock, &response, sizeof(response)) == sizeof(response)) {
             if (response.data[0] == 0x4 && response.data[1] == oldCANBusID &&
@@ -436,7 +439,7 @@ void resetCenterPositionOfCANBusEncoder(int sock, int CANBusID) {
     struct can_frame message = CANBusFrameMake(CANBusID, 4, data);
 
     fprintf(stderr, "Setting the midpint of the encoder to the current position.\n");
-    if (write(sock, &message, sizeof(message)) == sizeof(message)) {
+    if (waitwrite(sock, &message, sizeof(message)) == sizeof(message)) {
         struct can_frame response;
         if (read(sock, &response, sizeof(response)) == sizeof(response)) {
             if (response.data[0] == 0x4 && response.data[1] == CANBusID &&
@@ -507,7 +510,7 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
     uint8_t responseBuf[5];
 
     // Read the pan position.
-    if (write(pan_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
+    if (waitwrite(pan_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
 
         if (read(pan_fd, (void *)responseBuf, sizeof(responseBuf)) == sizeof(responseBuf)) {
             uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
@@ -516,7 +519,7 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
     }
 
     // Read the tilt position.
-    if (write(tilt_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
+    if (waitwrite(tilt_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
         if (read(tilt_fd, (void *)responseBuf, sizeof(responseBuf)) == sizeof(responseBuf)) {
             uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
             g_last_tilt_position = tilt_position;
@@ -532,12 +535,12 @@ void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
     static const uint8_t requestBuf[] = { 0x01, 0x06, 0x00, 0x01, 0x00, 0x0E, 0xCE, 0x59 };
     const uint8_t responseBuf[5];
 
-    write(pan_fd, requestBuf, sizeof(requestBuf));
+    waitwrite(pan_fd, requestBuf, sizeof(requestBuf));
     read(pan_fd, (void *)responseBuf, sizeof(responseBuf));
     assert(responseBuf[0] == 1);
     assert(responseBuf[1] == 0x10);
 
-    write(tilt_fd, requestBuf, sizeof(requestBuf));
+    waitwrite(tilt_fd, requestBuf, sizeof(requestBuf));
     read(tilt_fd, (void *)responseBuf, sizeof(responseBuf));
     assert(responseBuf[0] == 1);
     assert(responseBuf[1] == 0x10);
@@ -691,4 +694,38 @@ int64_t motorMaximumPanPositionsPerSecond(void) {
 // speed.
 int64_t motorMaximumTiltPositionsPerSecond(void) {
   return motor_tilt_data[PAN_TILT_SCALE_HARDWARE];
+}
+
+double getVISCATimestamp(void) {
+    struct timeval curTime;
+    gettimeofday(&curTime, NULL);
+    return curTime.tv_sec + (curTime.tv_usec / 1000000.0);
+}
+
+ssize_t waitwrite(int fd, const void *buf, size_t count) {
+  fd_set write_fds;
+  FD_ZERO(&write_fds);
+  FD_SET(fd, &write_fds);
+
+  // Throttle writes at 100 messages per second to avoid write failures.
+  static double lastTimestamp = 0;
+  double minCANBusInterval = 1.0 / MAX_CANBUS_REQUESTS_PER_SECOND;
+  double sleepUntil = lastTimestamp + minCANBusInterval;
+  double sleepTime = getVISCATimestamp() - sleepUntil;
+
+  if (sleepTime > 0) {
+    usleep(sleepTime * 1000000);
+  }
+  lastTimestamp = getVISCATimestamp();
+  
+  assert(pthread_self() == position_monitor_thread);
+
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = 100000;  // Update the speed of automatic recall operations 100x per second (10 ms).
+
+  if (select(fd + 1, &write_fds, NULL, NULL, &timeout) > 0) {
+    return write(fd, buf, count);
+  }
+  return -1;
 }

@@ -65,6 +65,7 @@
  * that ever changes.
  */
 #define USE_CANBUS 1
+#define MAX_CANBUS_REQUESTS_PER_SECOND 1000
 
 /** The identifiers for CANBus-based encoders. */
 #define panCANBusID 1
