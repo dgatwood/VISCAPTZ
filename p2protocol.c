@@ -471,7 +471,12 @@ int64_t p2GetZoomPosition(void) {
     }
 
     if (!gCalibrationMode) {
-      retval += estimatedPositionsSinceLastPositionData();
+      int64_t zoomMin, zoomMax;
+      if (p2GetZoomRange(&zoomMin, &zoomMax) {
+        retval += estimatedPositionsSinceLastPositionData();
+        retval = MAX(zoomMin, retval);
+        retval = MIN(zoomMax, retval);
+      }
     }
 
     return retval;
@@ -558,11 +563,16 @@ int openP2Socket(void) {
 
   char *authToken = getP2Auth(sock);
   if (authToken == NULL) {
+    fprintf(stderr, "P2 auth failed.\n");
     close(sock);
     return -1;
   }
 
-  requestEnv(authToken, sock);
+  if (!requestEnv(authToken, sock)) {
+    fprintf(stderr, "Request environment failed.\n");
+    close(sock);
+    return -1;
+  }
 
   return sock;
 }
@@ -571,6 +581,13 @@ char *getP2Auth(int sock) {
   bool localDebug = false;
   char *message = NULL;
   char *user = getenv("PANA_USER");
+  char *password = getenv("PANA_PASS");
+
+  if (!user || !paassword) {
+    fprintf(stderr, "This feature is in development.  For now, you must set the\n"
+                    "PANA_USER and PANA_PASS environment variables.\n");
+    exit(1);
+  }
 
   if (localDebug) fprintf(stderr, "Beginning auth handshake.\n");
 
@@ -582,7 +599,7 @@ char *getP2Auth(int sock) {
   if (length != strlen(message)) {
     perror("write");
     fprintf(stderr, "Could not write auth message 1; got %" PRId64 "\n", (uint64_t)length);
-    return false;
+    return NULL;
   }
 
   char buf[4097];
@@ -590,7 +607,7 @@ char *getP2Auth(int sock) {
   length = syncread(sock, buf, 4096);
   if (length <= 0) {
     fprintf(stderr, "Short read.\n");
-    return false;
+    return NULL;;
   }
 
   if (localDebug) fprintf(stderr, "Parsing response\n");
@@ -624,13 +641,13 @@ char *getP2Auth(int sock) {
 
   if (localDebug) fprintf(stderr, "Handshake stage 2\n");
 
-  char *password = getenv("PANA_PASS");
-
   char *encryptedPasswordStage1 = NULL;
   asprintf(&encryptedPasswordStage1, "%s:%s:%s", user, realm, password);
 
   if (localDebug) fprintf(stderr, "Encryption 1: %s\n", encryptedPasswordStage1);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
   // unsigned char *MD5(const unsigned char *d, unsigned long n, unsigned char *md);
@@ -646,6 +663,7 @@ char *getP2Auth(int sock) {
 
   MD5((const unsigned char *)encryptedPasswordStage2, strlen(encryptedPasswordStage2), hash);
 
+#pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 
   hashstring = md5_string(hash);
