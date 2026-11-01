@@ -364,6 +364,7 @@ int p2GetMaxZoomSpeed(void) {
   // Response:
   // <P2Control><CamCtl>$ZmSpd:i-8,8</CamCtl></P2Control
 
+  bool localDebug = false;
   char *result = NULL;
   bool ok = sendP2Request("<CamCtl>$ZmSpd:c</CamCtl>", &result);
   if (!ok) {
@@ -374,16 +375,16 @@ int p2GetMaxZoomSpeed(void) {
   // <P2Control><Response><CamCtl>$ZmSpd:8</CamCtl></Response></P2Control>
   // <P2Control><Response><CamCtl>$ZmSpd:i-8,8</CamCtl></Response></P2Control>
 
-  fprintf(stderr, "Zoom speed response: %s\n", result);
+  if (localDebug) fprintf(stderr, "Zoom speed response: %s\n", result);
 
   char *text = textForResponseElement("CamCtl", result);
 
-  fprintf(stderr, "Zoom speed result: %s\n", text);
+  if (localDebug) fprintf(stderr, "Zoom speed result: %s\n", text);
 
   if (!strncmp(text, "$ZmSpd:", 7)) {
     char *speed = text + 7;
     // If intelligent zoom is active, skip the intelligent zoom speed and get the hardware zoom speed after the comma.
-    fprintf(stderr, "Speed part: \"%s\"\n", speed);
+    if (localDebug) fprintf(stderr, "Speed part: \"%s\"\n", speed);
     if (speed[0] == 'i') {
       speed = strstr(speed, ",");
       if (speed != NULL) {
@@ -567,14 +568,15 @@ int openP2Socket(void) {
 }
 
 char *getP2Auth(int sock) {
+  bool localDebug = false;
   char *message = NULL;
   char *user = getenv("PANA_USER");
 
-  fprintf(stderr, "Beginning auth handshake.\n");
+  if (localDebug) fprintf(stderr, "Beginning auth handshake.\n");
 
   asprintf(&message, "<P2Control><Login>%s</Login></P2Control>", user);
 
-  fprintf(stderr, "User: %s\n", user);
+  if (localDebug) fprintf(stderr, "User: %s\n", user);
 
   ssize_t length = write(sock, message, strlen(message));
   if (length != strlen(message)) {
@@ -591,7 +593,7 @@ char *getP2Auth(int sock) {
     return false;
   }
 
-  fprintf(stderr, "Parsing response\n");
+  if (localDebug) fprintf(stderr, "Parsing response\n");
 
   xmlDocPtr doc = xmlReadMemory(buf, length, "response.xml", NULL, 0);
 
@@ -618,16 +620,16 @@ char *getP2Auth(int sock) {
     curnode = curnode->next;
   }
 
-  fprintf(stderr, "Realm: \"%s\"\nNonce: \"%s\"\n", realm, nonce);
+  if (localDebug) fprintf(stderr, "Realm: \"%s\"\nNonce: \"%s\"\n", realm, nonce);
 
-  fprintf(stderr, "Handshake stage 2\n");
+  if (localDebug) fprintf(stderr, "Handshake stage 2\n");
 
   char *password = getenv("PANA_PASS");
 
   char *encryptedPasswordStage1 = NULL;
   asprintf(&encryptedPasswordStage1, "%s:%s:%s", user, realm, password);
 
-  fprintf(stderr, "Encryption 1: %s\n", encryptedPasswordStage1);
+  if (localDebug) fprintf(stderr, "Encryption 1: %s\n", encryptedPasswordStage1);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -640,7 +642,7 @@ char *getP2Auth(int sock) {
   char *encryptedPasswordStage2 = NULL;
   asprintf(&encryptedPasswordStage2, "%s:%s", hashstring, nonce);
   free(hashstring);
-  fprintf(stderr, "Encryption 2: %s\n", encryptedPasswordStage2);
+  if (localDebug) fprintf(stderr, "Encryption 2: %s\n", encryptedPasswordStage2);
 
   MD5((const unsigned char *)encryptedPasswordStage2, strlen(encryptedPasswordStage2), hash);
 
@@ -648,7 +650,7 @@ char *getP2Auth(int sock) {
 
   hashstring = md5_string(hash);
 
-  fprintf(stderr, "Encryption 3: %s\n", hashstring);
+  if (localDebug) fprintf(stderr, "Encryption 3: %s\n", hashstring);
 
   xmlFreeDoc(doc);
 

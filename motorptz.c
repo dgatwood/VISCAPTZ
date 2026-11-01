@@ -1,8 +1,5 @@
 #include "motorptz.h"
 
-#define ENABLE_MOTOR_HARDWARE 1
-#define ENABLE_ENCODER_HARDWARE 1
-
 #include <assert.h>
 #include <fcntl.h>
 #include <math.h>
@@ -56,6 +53,7 @@ static bool motor_enable_debugging = false;
     void handleCANFrame(struct can_frame *frame);
     bool sendCANRequestFrame(int sock, uint8_t deviceID);
   #else
+    int motorOpenSerialDev(char *path);
     void updatePositionsSerial(int pan_fd, int tilt_fd);
     void resetCenterPositionsSerial(int tilt_fd, int pan_fd);
   #endif
@@ -224,7 +222,6 @@ void *runPositionMonitorThread(void *argIgnored) {
     resetCenterPositionsCANBus(sock);
   #else  // !USE_CANBUS
     resetCenterPositionsSerial(tilt_fd, pan_fd);
-    resetCenterPositionsSerial(pan_fd);
   #endif  // USE_CANBUS
 #endif  // ENABLE_HARDWARE
   }
@@ -238,7 +235,7 @@ void *runPositionMonitorThread(void *argIgnored) {
             sock = motorOpenCANSock();
         }
     #else  // !USE_CANBUS
-        updatePositionsSerial(pan_fd, tilt_fd)
+        updatePositionsSerial(pan_fd, tilt_fd);
     #endif  // USE_CANBUS
 #endif  // ENABLE_HARDWARE
     usleep(2000);  // Update 500x per second (latency-critical).
@@ -547,7 +544,7 @@ void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
     // [Device ID = 1] 06 00 01 00 0E [CRC high] [CRC low]
 
     static const uint8_t requestBuf[] = { 0x01, 0x06, 0x00, 0x01, 0x00, 0x0E, 0xCE, 0x59 };
-    const uint8_t responseBuf[5];
+    uint8_t responseBuf[5];
 
     waitwrite(pan_fd, requestBuf, sizeof(requestBuf));
     read(pan_fd, (void *)responseBuf, sizeof(responseBuf));

@@ -21,6 +21,14 @@
 
 #pragma mark - Motor configuration
 
+// Enabled for most real-world setups.  Disable if you're using a Panasonic
+// PTZ camera (why?).
+#define ENABLE_MOTOR_HARDWARE 1
+
+// Enabled for most real-world setups.  Disable if you're using a Panasonic
+// PTZ camera (why?).
+#define ENABLE_ENCODER_HARDWARE 1
+
 /** 1 if using a Panasonic camera for zoom or PTZ, else 0. */
 #define USE_PANASONIC_PTZ 1
 

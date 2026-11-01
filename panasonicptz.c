@@ -226,10 +226,10 @@ void freeMulti(char **array, ssize_t count) {
 // Sets the pan and tilt speed in core scale or hardware scale (if isRaw is true).
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
     int scaledPanSpeed =
-        isRaw ? panSpeed : scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+        isRaw ? panSpeed + 50: scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
                                        pana_pan_scaled_data);
     int scaledTiltSpeed =
-        isRaw ? tiltSpeed : scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+        isRaw ? tiltSpeed + 50: scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
                                        pana_tilt_scaled_data);
 
     bool localDebug = pana_enable_debugging || false;
@@ -450,8 +450,8 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
     if (response != NULL) {
         retval = true;
         int32_t value = strtol(response, NULL, 16);
-        last_pan_position = (value >> 12) & 0xfff;
-        last_tilt_position = value & 0xfff;
+        last_pan_position = (value >> 16) & 0xffff;
+        last_tilt_position = value & 0xffff;
 
         if (localDebug) fprintf(stderr, "Pan position: %" PRId64 "\n", last_pan_position);
         if (localDebug) fprintf(stderr, "Tilt position: %" PRId64 "\n", last_tilt_position);

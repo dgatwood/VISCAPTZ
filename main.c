@@ -902,8 +902,8 @@ void handleRecallUpdates(void) {
       int moveProgressByPosition = actionProgress(axis, startPosition, axisPosition,
                                                   targetPosition, gAxisPreviousPosition[axis],
                                                   &gAxisStalls[axis], (duration != 0));
-#if EXPERIMENTAL_TIME_PROGRESS
       double currentTime = timeStamp();
+#if EXPERIMENTAL_TIME_PROGRESS
       double remainingTime = gAxisStartTime[axis] + duration - currentTime;
 
       if (gAxisStartTime[axis] > currentTime) { 
@@ -1224,7 +1224,7 @@ int32_t *convertSpeedValues(int64_t *speedValues, int maxSpeed, axis_identifier_
 }
 
 int getInteractiveScale() {
-  bool localDebug = true;
+  bool localDebug = false || debug_verbose;
 
   int64_t zoomMin = 0, zoomMax = 0;
   if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax)) {
@@ -1251,15 +1251,19 @@ int getInteractiveScale() {
 
 // If interactive is true, scale pan and tilt speed based on zoom position.
 int64_t scaleVISCAPanTiltSpeedToCoreSpeed(int speed, bool interactive) {
+  bool localDebug = false || debug_verbose;
+
   int scale = interactive ? getInteractiveScale() : 1;
 
   int64_t retval = scaleSpeed(speed, PAN_SCALE_VISCA, SCALE_CORE / scale, NULL);
 
-  fprintf(stderr, "scaleVISCAPanTiltSpeedToCoreSpeed: speed=%d, ", (int)speed);
-  fprintf(stderr, "VISCA=%lld, ", (long long)PAN_SCALE_VISCA);
-  fprintf(stderr, "CORE=%lld, ", (long long)SCALE_CORE);
-  fprintf(stderr, "scale=%d, ", (int)scale);
-  fprintf(stderr, "ret=%lld\n", (long long)retval);
+  if (localDebug) {
+    fprintf(stderr, "scaleVISCAPanTiltSpeedToCoreSpeed: speed=%d, ", (int)speed);
+    fprintf(stderr, "VISCA=%lld, ", (long long)PAN_SCALE_VISCA);
+    fprintf(stderr, "CORE=%lld, ", (long long)SCALE_CORE);
+    fprintf(stderr, "scale=%d, ", (int)scale);
+    fprintf(stderr, "ret=%lld\n", (long long)retval);
+  }
 
   return retval;
 }
@@ -1393,9 +1397,13 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
 
   // These speeds are just sort of arbitrary mappings.
   int recallSpeed = getVISCARecallSpeed();  // Range 1 to 24.
-  fprintf(stderr, "Recall speed: %d\n", getVISCARecallSpeed());
-  fprintf(stderr, "Recall speed set: %s\n", gRecallSpeedSet ? "YES" : "NO");
-  if (gRecallSpeedSet) fprintf(stderr, "Requested recall speed: %d\n", gVISCARecallSpeed);
+
+  if (localDebug) {
+    fprintf(stderr, "Recall speed: %d\n", getVISCARecallSpeed());
+    fprintf(stderr, "Recall speed set: %s\n", gRecallSpeedSet ? "YES" : "NO");
+
+    if (gRecallSpeedSet) fprintf(stderr, "Requested recall speed: %d\n", gVISCARecallSpeed);
+  }
 
 #ifdef OLD_STATIC_DURATIONS
   // Slowest speed is 1, which maps to 30 seconds.
@@ -2846,20 +2854,21 @@ void waitForAxisMove(axis_identifier_t axis) {
 }
 
 bool pastEnd(int64_t currentPosition, int64_t startPosition, int64_t endPosition, int direction) {
+  bool localDebug = false || debug_verbose;
   if (direction == 1) {
     if (startPosition > endPosition) {
-      fprintf(stderr, "Past end: currentPosition >= startPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, startPosition, (currentPosition >= startPosition) ? "true" : "false");
+      if (localDebug) fprintf(stderr, "Past end: currentPosition >= startPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, startPosition, (currentPosition >= startPosition) ? "true" : "false");
       return currentPosition >= startPosition;
     }
-    fprintf(stderr, "Past end: currentPosition <= startPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, startPosition, (currentPosition <= startPosition) ? "true" : "false");
+    if (localDebug) fprintf(stderr, "Past end: currentPosition <= startPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, startPosition, (currentPosition <= startPosition) ? "true" : "false");
 
     return currentPosition <= startPosition;
   } else {
     if (startPosition > endPosition) {
-      fprintf(stderr, "Past end: currentPosition <= endPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, endPosition, (currentPosition <= endPosition) ? "true" : "false");
+      if (localDebug) fprintf(stderr, "Past end: currentPosition <= endPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, endPosition, (currentPosition <= endPosition) ? "true" : "false");
       return currentPosition <= endPosition;
     }
-    fprintf(stderr, "Past end: currentPosition >= endPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, endPosition, (currentPosition >= endPosition) ? "true" : "false");
+    if (localDebug) fprintf(stderr, "Past end: currentPosition >= endPosition: %" PRId64 " %" PRId64 " %s\n", currentPosition, endPosition, (currentPosition >= endPosition) ? "true" : "false");
     return currentPosition >= endPosition;
   }
 }
