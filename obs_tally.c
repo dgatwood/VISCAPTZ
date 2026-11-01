@@ -47,6 +47,8 @@ void splitSourceNames(char *sourceNameString, char ***outArray, int *outCount);
 bool obsModuleInit(void) {
   runOBSTests();
 
+  #ifdef USE_OBS_TALLY_SOURCE
+
   char *tallySourceName = NULL;
   char *OBSWebSocketURL = getConfigKey(kOBSWebSocketURLKey);
   char *password = getConfigKey(kOBSPasswordKey);
@@ -54,26 +56,28 @@ bool obsModuleInit(void) {
 
   setTallyOff();
 
-  if (OBSWebSocketURL == NULL) {
-    fprintf(stderr, "No OBS web socket URL specified.  Initialization failed.\n");
-    fprintf(stderr, "Run 'viscaptz --setobsurl <URL>' to fix.\n");
-    return false;
-  }
+    if (OBSWebSocketURL == NULL) {
+      fprintf(stderr, "No OBS web socket URL specified.  Initialization failed.\n");
+      fprintf(stderr, "Run 'viscaptz --setobsurl <URL>' to fix.\n");
+      return false;
+    }
 
-  if (tallySourceName == NULL) {
-    fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
-    fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
-    return false;
-  }
+    if (tallySourceName == NULL) {
+      fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
+      fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
+      return false;
+    }
 
-  if (password == NULL) {
-    fprintf(stderr, "WARNING: No OBS web socket password specified.\n");
-    fprintf(stderr, "Run 'viscaptz --setobspass <password>' to fix.\n");
+    if (password == NULL) {
+      fprintf(stderr, "WARNING: No OBS web socket password specified.\n");
+      fprintf(stderr, "Run 'viscaptz --setobspass <password>' to fix.\n");
 
-    password = "";
-  }
+      password = "";
+    }
 
-  splitSourceNames(tallySourceName, &gTallySourceNames, &gNumberOfTallySourceNames);
+    splitSourceNames(tallySourceName, &gTallySourceNames, &gNumberOfTallySourceNames);
+  #endif  // USE_OBS_TALLY_SOURCE
+
 
   return true;
 }

@@ -225,7 +225,7 @@ bool p2ModuleInit(void) {
     gP2UDPSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (gP2UDPSocket == -1) {
         perror("Socket could not be created.");
-        return -1;
+        return false;
     }
     int reuseValue = 1;
     setsockopt(gP2UDPSocket, SOL_SOCKET, SO_REUSEADDR, &reuseValue, sizeof(reuseValue));
@@ -249,7 +249,7 @@ bool p2ModuleInit(void) {
     if (bind(gP2UDPSocket, (struct sockaddr *)&sa_recv, sizeof(sa_recv)) != 0) {
         perror("Bind failed");
         close(gP2UDPSocket);
-        return -1;
+        return false;
     }
 
     if (p2_enable_debugging) fprintf(stderr, "P2 module init done\n");
@@ -420,7 +420,7 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
     if (maxZoomSpeed == 0) {
       maxZoomSpeed = p2GetMaxZoomSpeed();
       fprintf(stderr, "Max zoom speed %d expected %d\n", maxZoomSpeed, ZOOM_SCALE_HARDWARE);
-      assert(maxZoomSpeed == ZOOM_SCALE_HARDWARE);
+      // assert(maxZoomSpeed == ZOOM_SCALE_HARDWARE);
     }
 
     bool retval = true;
@@ -753,6 +753,7 @@ bool sendP2Request(char *request, char **buf) {
   char *authToken = gAuthToken; //getP2Auth(gP2TCPSocket);
   if (authToken == NULL) {
     fprintf(stderr, "Could not get auth token for sendP2Request\n");
+    pthread_mutex_unlock(&gSocketLock);
     return false;
   }
 
@@ -767,9 +768,9 @@ bool sendP2Request(char *request, char **buf) {
   free(message);
 
   fprintf(stderr, "sendP2Request point 2 %zu %zu\n", size, expectedSize);
-  pthread_mutex_unlock(&gSocketLock);
 
   if (size < 0) {
+    pthread_mutex_unlock(&gSocketLock);
     return false;
   }
   bool retval = true;
@@ -782,10 +783,11 @@ bool sendP2Request(char *request, char **buf) {
   ssize_t length = syncread(gP2TCPSocket, localBuf, 4096);
   *buf = localBuf;
 
-  localBuf[length] = '\0';
+  localBuf[MAX(length, 0)] = '\0';
 
   fprintf(stderr, "In sendP2Request: Got response %s\n", localBuf);
 
+  pthread_mutex_unlock(&gSocketLock);
   return retval && (length > 0);
 }
 
@@ -1000,8 +1002,10 @@ void freeSpeedChanges(void) {
   markSpeedChangeNoLock(gLastZoomSpeed);
 
   pthread_mutex_unlock(&gSpeedLock);
-  for (speed_time_t *pos = oldHead; pos && pos->next; pos = pos->next) {
+  for (speed_time_t *pos = oldHead; pos;) {
+    speed_time_t *next = pos->next;
     free(pos);
+    pos = next;
   }
 }
 

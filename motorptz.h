@@ -101,8 +101,8 @@ int64_t motorMaximumTiltPositionsPerSecond(void);
 
     #define PAN_TILT_SCALE_HARDWARE 100
 
-    #define MIN_PAN_POSITIONS_PER_SECOND() motorMinimumPanPositionsPerSecond();
-    #define MIN_TILT_POSITIONS_PER_SECOND() motorMinimumTiltPositionsPerSecond();
-    #define MAX_PAN_POSITIONS_PER_SECOND() motorMaximumPanPositionsPerSecond();
-    #define MAX_TILT_POSITIONS_PER_SECOND() motorMaximumTiltPositionsPerSecond();
+    #define MIN_PAN_POSITIONS_PER_SECOND() motorMinimumPanPositionsPerSecond()
+    #define MIN_TILT_POSITIONS_PER_SECOND() motorMinimumTiltPositionsPerSecond()
+    #define MAX_PAN_POSITIONS_PER_SECOND() motorMaximumPanPositionsPerSecond()
+    #define MAX_TILT_POSITIONS_PER_SECOND() motorMaximumTiltPositionsPerSecond()
 #endif

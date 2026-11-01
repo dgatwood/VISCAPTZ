@@ -66,4 +66,8 @@ typedef enum {
   extern const char *kMotorsAreSwappedKey;
 #endif
 
+#define kCalibrationDataPanKey "calibration_data_pan"
+#define kCalibrationDataTiltKey "calibration_data_tilt"
+#define kCalibrationDataZoomKey "calibration_data_zoom"
+
 #endif  // __CONSTANTS_H__

@@ -20,7 +20,7 @@ bool panaModuleTeardown(void);
 bool panaSetIPAddress(char *address);
 
 /** Sets the pan and tilt speed (for true PTZ cameras only). */
-bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed);
+bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);
 
 /**
  * Gets the maximum possible zoom range for the camera (based on calibration data).
@@ -115,7 +115,7 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define GET_PAN_TILT_POSITION(panPositionRef, tiltPositionRef) \
             panaGetPanTiltPosition(panPositionRef, tiltPositionRef)
         #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed, isRaw) \
-            panaSetPanTiltSpeed(panSpeed, tiltSpeed)
+            panaSetPanTiltSpeed(panSpeed, tiltSpeed, isRaw)
         #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, \
                                       panDuration, tiltDuration, panStartTime, tiltStartTime) \
             panaSetPanTiltPosition(panPosition, panSpeed, tiltPosition, tiltSpeed)
@@ -127,10 +127,10 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         // -49 to 49 and ignore the additional negative value (hardware value 0).
         #define PAN_TILT_SCALE_HARDWARE 49
 
-        #define MIN_PAN_POSITIONS_PER_SECOND() panaMinimumPanPositionsPerSecond();
-        #define MIN_TILT_POSITIONS_PER_SECOND() panaMinimumTiltPositionsPerSecond();
-        #define MAX_PAN_POSITIONS_PER_SECOND() panaMaximumPanPositionsPerSecond();
-        #define MAX_TILT_POSITIONS_PER_SECOND() panaMaximumTiltPositionsPerSecond();
+        #define MIN_PAN_POSITIONS_PER_SECOND() panaMinimumPanPositionsPerSecond()
+        #define MIN_TILT_POSITIONS_PER_SECOND() panaMinimumTiltPositionsPerSecond()
+        #define MAX_PAN_POSITIONS_PER_SECOND() panaMaximumPanPositionsPerSecond()
+        #define MAX_TILT_POSITIONS_PER_SECOND() panaMaximumTiltPositionsPerSecond()
 
         /** The pan calibration data in raw form (positions per second for each speed). */
         int64_t *pana_pan_data = NULL;

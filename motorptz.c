@@ -200,6 +200,10 @@ void *runPositionMonitorThread(void *argIgnored) {
     bool localDebug = false;
   #if USE_CANBUS
     int sock = motorOpenCANSock();
+    if (sock == -1) {
+      fprintf(stderr, "Could not open CAN socket.  This is fatal.\n");
+      return NULL;
+    }
   #else  // !USE_CANBUS
     int tilt_fd = motorOpenSerialDev(SERIAL_DEV_FILE_FOR_TILT);
     int pan_fd = motorOpenSerialDev(SERIAL_DEV_FILE_FOR_PAN);
@@ -268,7 +272,7 @@ int motorOpenCANSock(void) {
     int sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (sock < 0) {
         perror("socket PF_CAN failed");
-        return 1;
+        return -1;
     }
 
     struct ifreq interfaceRequest;
@@ -276,6 +280,7 @@ int motorOpenCANSock(void) {
     int retval = ioctl(sock, SIOCGIFINDEX, &interfaceRequest);
     if (retval < 0) {
         perror("ioctl failed");
+        close(sock);
         return -1;
     }
 
@@ -285,6 +290,7 @@ int motorOpenCANSock(void) {
     retval = bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
     if (retval < 0) {
         perror("bind failed");
+        close(sock);
         return -1;
     }
 
@@ -294,6 +300,10 @@ int motorOpenCANSock(void) {
 
 /** Updates the current encoder positions (CANBus version). */
 bool updatePositionsCANBus(int sock) {
+    if (sock < 0) {
+        fprintf(stderr, "Invalid socket\n");
+        return false;
+    }
     bool localDebug = false;
     bool gotRead = false;
     fd_set readfds;
@@ -386,7 +396,7 @@ bool sendCANRequestFrame(int sock, uint8_t deviceID) {
     }
 
     ssize_t bytesWritten = -1;
-    if (waitwrite(sock, &message, sizeof(message) != sizeof(message))) {
+    if (waitwrite(sock, &message, sizeof(message)) != sizeof(message)) {
         fprintf(stderr, "CANBus write failed (expected length %zu, got %zu)\n", sizeof(message), bytesWritten);
         return false;
     }
@@ -402,6 +412,11 @@ bool sendCANRequestFrame(int sock, uint8_t deviceID) {
 // the --reassign command-line flag.  See the main README for details.
 void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
     int sock = motorOpenCANSock();
+
+    if (sock == -1) {
+      fprintf(stderr, "Could not open CAN socket.  This is fatal.\n");
+      exit(1);
+    }
     uint8_t data[8] = { 0x04, oldCANBusID, 0x02, newCANBusID, 0, 0, 0, 0 };
     struct can_frame message = CANBusFrameMake(oldCANBusID, 4, data);
 
