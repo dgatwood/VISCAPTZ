@@ -73,7 +73,8 @@ void populateZoomNonlinearityTable(void);
 
 void runP2Tests(void);
 
-ssize_t syncread(int fd, void *buf, size_t count);
+ssize_t syncRead(int fd, void *buf, size_t count);
+ssize_t syncReadLong(int fd, char *buf, size_t capacity);
 
 #pragma mark - Global variables
 
@@ -595,8 +596,10 @@ char *getP2Auth(int sock) {
 
   if (localDebug) fprintf(stderr, "User: %s\n", user);
 
-  ssize_t length = write(sock, message, strlen(message));
-  if (length != strlen(message)) {
+  ssize_t expectedLength = strlen(message);
+  ssize_t length = write(sock, message, expectedLength);
+  free(message);
+  if (length != expectedLength) {
     perror("write");
     fprintf(stderr, "Could not write auth message 1; got %" PRId64 "\n", (uint64_t)length);
     return NULL;
@@ -604,37 +607,66 @@ char *getP2Auth(int sock) {
 
   char buf[4097];
 
-  length = syncread(sock, buf, 4096);
+  length = syncReadLong(sock, buf, 4096);
   if (length <= 0) {
     fprintf(stderr, "Short read.\n");
-    return NULL;;
+    return NULL;
   }
 
   if (localDebug) fprintf(stderr, "Parsing response\n");
 
   xmlDocPtr doc = xmlReadMemory(buf, length, "response.xml", NULL, 0);
+  if (doc == NULL) {
+    fprintf(stderr, "Could not parse auth response.\n");
+    return NULL;
+  }
 
   // <P2Control><Response><Realm>...</Realm><Nonce>...</Nonce></Response></P2Control>
   xmlNode *root_element = xmlDocGetRootElement(doc);
-  xmlNode *response = root_element->children;
+  xmlNode *response = (root_element != NULL) ? root_element->children : NULL;
+
+  // Skip any whitespace/text nodes to find the <Response> element.
+  while (response != NULL &&
+         (response->type != XML_ELEMENT_NODE ||
+          strcmp((const char *)response->name, "Response"))) {
+    response = response->next;
+  }
+  if (response == NULL) {
+    fprintf(stderr, "No <Response> element in auth response.\n");
+    xmlFreeDoc(doc);
+    return NULL;
+  }
+
   xmlNode *curnode = response->children;
-  const char *realm = NULL;
-  const char *nonce = NULL;
+  char *realm = NULL;
+  char *nonce = NULL;
 
   while (curnode) {
     if (!strcmp((const char *)curnode->name, "Realm")) {
-      xmlNode *realmTextNode = curnode->children;
-      if (realmTextNode != NULL) {
-        realm = (const char *)xmlNodeGetContent(realmTextNode);
+      if (realm != NULL) {
+        free(realm);
       }
+      realm = (const char *)xmlNodeGetContent(curnode);
     }
     if (!strcmp((const char *)curnode->name, "Nonce")) {
-      xmlNode *nonceTextNode = curnode->children;
-      if (nonceTextNode != NULL) {
-        nonce = (const char *)xmlNodeGetContent(nonceTextNode);
+      if (nonce != NULL) {
+        free(nonce);
       }
+      nonce = (const char *)xmlNodeGetContent(curnode);
     }
     curnode = curnode->next;
+  }
+  if (realm == NULL) {
+    fprintf(stderr, "Missing realm in auth response.\n");
+    if (nonce != NULL) xmlFree(nonce);
+    xmlFreeDoc(doc);
+    return NULL;
+  }
+  if (nonce == NULL) {
+    fprintf(stderr, "Missing nonce in auth response.\n");
+    if (realm != NULL) xmlFree(realm);
+    xmlFreeDoc(doc);
+    return NULL;
   }
 
   if (localDebug) fprintf(stderr, "Realm: \"%s\"\nNonce: \"%s\"\n", realm, nonce);
@@ -653,6 +685,7 @@ char *getP2Auth(int sock) {
   // unsigned char *MD5(const unsigned char *d, unsigned long n, unsigned char *md);
   uint8_t hash[MD5_DIGEST_LENGTH];
   MD5((const unsigned char *)encryptedPasswordStage1, strlen(encryptedPasswordStage1), hash);
+  free(encryptedPasswordStage1);
 
   char *hashstring = md5_string(hash);
 
@@ -662,6 +695,7 @@ char *getP2Auth(int sock) {
   if (localDebug) fprintf(stderr, "Encryption 2: %s\n", encryptedPasswordStage2);
 
   MD5((const unsigned char *)encryptedPasswordStage2, strlen(encryptedPasswordStage2), hash);
+  free(encryptedPasswordStage2);
 
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
@@ -670,6 +704,8 @@ char *getP2Auth(int sock) {
 
   if (localDebug) fprintf(stderr, "Encryption 3: %s\n", hashstring);
 
+  xmlFree(realm);
+  xmlFree(nonce);
   xmlFreeDoc(doc);
 
   return hashstring;
@@ -678,6 +714,9 @@ char *getP2Auth(int sock) {
 bool requestEnv(char *authToken, int sock) {
   char *message = NULL;
   asprintf(&message, "<P2Control><Auth>%s</Auth><Query Type=\"env\"/></P2Control>", authToken);
+  if (gAuthToken != NULL) {
+    free(gAuthToken);
+  }
   gAuthToken = authToken;
 
   ssize_t length = write(sock, message, strlen(message));
@@ -688,7 +727,7 @@ bool requestEnv(char *authToken, int sock) {
   }
 
   char buf[4097];
-  length = syncread(sock, buf, 4096);
+  length = syncRead(sock, buf, 4096);
   if (length <= 0) return false;
 
   buf[length] = '\0';
@@ -707,7 +746,7 @@ bool requestEnv(char *authToken, int sock) {
     return false;
   }
 
-  length = syncread(sock, buf, 4096);
+  length = syncRead(sock, buf, 4096);
   if (length <= 0) {
     fprintf(stderr, "No response from camera.\n");
     return false;
@@ -800,7 +839,7 @@ bool sendP2Request(char *request, char **buf) {
 
   fprintf(stderr, "In sendP2Request: Waiting for response.\n");
   char *localBuf = (char *)malloc(4096);
-  ssize_t length = syncread(gP2TCPSocket, localBuf, 4096);
+  ssize_t length = syncRead(gP2TCPSocket, localBuf, 4096);
   *buf = localBuf;
 
   localBuf[MAX(length, 0)] = '\0';
@@ -937,7 +976,7 @@ void *runP2UDPThread(void *argIgnored) {
   }
 }
 
-ssize_t syncread(int fd, void *buf, size_t count) {
+ssize_t syncRead(int fd, void *buf, size_t count) {
   ssize_t len = 0;
   int retries = 0;
   while (len <= 0 && retries < 100) {
@@ -958,6 +997,24 @@ ssize_t syncread(int fd, void *buf, size_t count) {
 }
 
 #pragma mark - Position estimation
+
+/**
+ * In theory, a TCP read can return a partial response (though this is not
+ * typically the case on a LAN).  For safety, read until the closing P2Control
+ * mark.
+ */
+ssize_t syncReadLong(int fd, char *buf, size_t capacity) {
+  size_t total = 0;
+  while (total < capacity - 1) {
+    ssize_t length = syncRead(fd, buf + total, capacity - 1 - total);
+    if (length <= 0) break;
+    total += length;
+    buf[total] = '\0';
+    if (strstr(buf, "</P2Control>") != NULL) break;
+  }
+  buf[total] = '\0';
+  return (total > 0) ? (ssize_t)total : -1;
+}
 
 /*
  * Panasonic's P2 protocol is poorly suited for this purpose.  It provides no mechanism
