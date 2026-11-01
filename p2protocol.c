@@ -196,7 +196,7 @@ typedef struct p2_camera_data {
 } p2_camera_data_t;
 
 typedef struct speed_time {
-  uint64_t timestamp;
+  double timestamp;
   int speed;
   struct speed_time *next;
 } speed_time_t;
@@ -849,6 +849,11 @@ bool timeToRequestZoomPosition(void) {
 void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSize) {
   uint8_t message_type = packetBuffer[0];
   if (message_type == 6) {
+    if (packetSize < sizeof(p2_optical_data_t) {
+      fprintf(stderr, "Ignoring short packet for message type 6 (optical data).\n");
+      return;
+    }
+
     int64_t expectedPosition = gLastZoomPosition + estimatedPositionsSinceLastPositionData();
     // fprintf(stderr, "Zoom position message type\n");
 
@@ -867,6 +872,10 @@ void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSi
     freeSpeedChanges();
     pthread_cond_broadcast(&gZoomDataCond);
   } else if (message_type == 0x0A) {
+    if (packetSize < sizeof(p2_camera_data_t) {
+      fprintf(stderr, "Ignoring short packet for message type 0xA (camera data).\n");
+      return;
+    }
     p2_camera_data_t *camera_data = (p2_camera_data_t *)packetBuffer;
     // Red tally is bit 0 (value & 0x1).
     // Green tally is bit 1. (value & 0x2).
@@ -977,14 +986,14 @@ void markSpeedChangeNoLock(int newSpeed) {
  * position data from the camera (half a second).
  */
 int64_t estimatedPositionsSinceLastPositionData(void) {
-  uint64_t timestamp = timeStamp();
+  double timestamp = timeStamp();
   pthread_mutex_lock(&gSpeedLock);
 
   double positions = 0.0;
   for (speed_time_t *pos = gSpeedHead; pos && pos->next; pos = pos->next) {
-    uint64_t nextTimestamp = (pos->next == NULL) ? timestamp : pos->next->timestamp;
-    uint64_t msec = nextTimestamp - pos->timestamp;
-    positions += (panaZoomPositionsPerSecondAtSpeed(pos->speed) * msec) / 1000000.0;
+    double nextTimestamp = (pos->next == NULL) ? timestamp : pos->next->timestamp;
+    double sec = nextTimestamp - pos->timestamp;
+    positions += (panaZoomPositionsPerSecondAtSpeed(pos->speed) * sec);
   }
   pthread_mutex_unlock(&gSpeedLock);
 

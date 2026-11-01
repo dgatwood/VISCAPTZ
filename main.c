@@ -112,7 +112,7 @@ static const int kRampDownPeriodStart = 1000 - kRampUpPeriodEnd;
 //
 // Assuming the ramp-up period and ramp-down period are equal, this can be simplified to
 // one minus half of the ramp-up period.
-static const double moveDistanceFractionBeforeSlowdown = 1 - ((kRampUpPeriodEnd / 1000) / 2);
+static const double moveDistanceFractionBeforeSlowdown = 1 - ((kRampUpPeriodEnd / 1000.0) / 2);
 
 // The time fraction mefore slowdown is just kRampDownPeriodStart / 1000.
 static const double moveTimeFractionBeforeSlowdown = (kRampDownPeriodStart / 1000.0);
@@ -263,7 +263,7 @@ volatile tallyState gTallyState = kTallyStateOff;
 bool gRecallSpeedSet = false;
 
 /** The recall speed as set via VISCA. */
-int gVISCARecallSpeed = 0;
+int gVISCARecallSpeed = 2;
 
 
 #pragma mark - Prototypes
@@ -370,7 +370,7 @@ char *VISCAMessageDebugString(uint8_t *command, uint8_t len);
  * Gets a default zoom speed (in VISCA range) based on the current tally state,
  * i.e. the speed is slower when the camera is live.
  */
-int getVISCAZoomSpeedFromTallyState(void);
+int getVISCAZoomSpeedFromTallyState(bool isRaw);
 
 /**
  * Returns the speed (in VISCA range) that should be used for a preset recall.
@@ -920,7 +920,7 @@ void handleRecallUpdates(void) {
       // guarantee that we don't move.
       bool usingPositionBasedProgress = (duration == 0 || moveProgressByPosition == 1000);
 
-      int moveProgressByTime = usingPositionBasedProgress ? 0 : 1000 - ((1000.0 * remainingTime ) / duration);
+      int moveProgressByTime = usingPositionBasedProgress ? 0 : MIN(1000, 1000 - ((1000.0 * remainingTime ) / duration));
       int moveProgress = usingPositionBasedProgress ? moveProgressByPosition : moveProgressByTime;
 
       if (usingPositionBasedProgress && localDebug) {
@@ -1392,7 +1392,7 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
   // maps those into speeds.
 
   // These speeds are just sort of arbitrary mappings.
-  int recallSpeed = getVISCARecallSpeed();
+  int recallSpeed = getVISCARecallSpeed();  // Range 1 to 24.
   fprintf(stderr, "Recall speed: %d\n", getVISCARecallSpeed());
   fprintf(stderr, "Recall speed set: %s\n", gRecallSpeedSet ? "YES" : "NO");
   if (gRecallSpeedSet) fprintf(stderr, "Requested recall speed: %d\n", gVISCARecallSpeed);
@@ -1466,7 +1466,7 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
   // the fastest speed.
   double durationRange = maximumDurationOnSlowestAxis - minimumDurationOnSlowestAxis;
   double fractionPerIncrement = durationRange / 23.0;  // Possible values of recallSpeed are 1 to 24.
-  double recallTime = minimumDurationOnSlowestAxis + (fractionPerIncrement * (25 - recallSpeed));
+  double recallTime = minimumDurationOnSlowestAxis + (fractionPerIncrement * (24 - recallSpeed));
 
   if (localDebug) { 
     fprintf(stderr, "maximumDurationOnSlowestAxis: %lf\n", maximumDurationOnSlowestAxis);
@@ -1915,7 +1915,7 @@ visca_response_t *enqueuedVISCAResponse(void) {
 
 visca_response_t *completedVISCAResponse(void) {
   static visca_response_t response;
-  uint8_t data[] = { 0x10, 0x41, 0xff };
+  uint8_t data[] = { 0x10, 0x51, 0xff };
   SET_RESPONSE(&response, data);
   return &response;
 }
@@ -1985,7 +1985,6 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
             failCount = 0;
             while (!sendVISCAResponse(&response, sequenceNumber, sock, client, structLength) && ++failCount < 10);
             
-            gVISCAUsesCoreScale = true;
             return true;
 #endif
           }
@@ -2206,6 +2205,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                           while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
                           return true;
                       }
+                      break;
                     case 2:
                       if (recallPreset(presetNumber)) {
                           int failCount = 0;
@@ -2232,9 +2232,19 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 // convert that to be from 1 to 8.  But only do that if it is a command that has a speed
                 // parameter.  Otherwise go with a default based on whether the camera is live or not.
                 uint8_t speed = ((command[len - 2] & 0xf0) == 0) ? ((command[8] & 0xf) + 1) :
-                    getVISCAZoomSpeedFromTallyState();
+                    getVISCAZoomSpeedFromTallyState(false);
                 cancelRecallIfNeeded("setZoomPosition");
-                setZoomPosition(position, scaleVISCAZoomSpeedToCoreSpeed(speed), 0, 0);
+
+                // Because this is a 30x zoom camera, scale the zoom position to the range
+                // 0..0x6000.  This range is comparable to what PTZOptics uses, I think.
+
+                int64_t zoomMin = 0, zoomMax = 0;
+                if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax)) {
+                  return false;
+                }
+                int64_t zoomRange = zoomMax - zoomMin;
+                int64_t zoomPositionScaled = ((position * zoomRange) / 0x6000) + zoomMin;
+                setZoomPosition(zoomPositionScaled, scaleVISCAZoomSpeedToCoreSpeed(speed), 0, 0);
 
                 // If (command[9] & 0xf0) == 0, then the low bytes of 9-12 are focus position,
                 // and speed is at position 13, shared with focus.  If we ever add support for
@@ -2396,7 +2406,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               int failCount = 0;
               while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
               return true;
-            } else if (command[5] == 0x00 && command[7] == 0xFF) {
+            } else if (command[5] == 0x01 && command[7] == 0xFF) {
               // 0x81 01 7E 01 0A 01 0p FF : Tally: 0=off 4=low 5=high red 6=high green 7=disable power light.
               switch(command[6]) {
                 case 0:
@@ -2488,10 +2498,15 @@ bool savePreset(int presetNumber) {
     return retval;
 }
 
-int getVISCAZoomSpeedFromTallyState(void) {
+int getVISCAZoomSpeedFromTallyState(bool isRaw) {
+    // TODO: Enable when tally state is reliable.
     // int tallyState = GET_TALLY_STATE();
     int tallyState = kTallyStateRed;
     bool onProgram = (tallyState == kTallyStateRed);
+
+    if (isRaw) {
+        return onProgram ? 7 : 24;
+    }
     return onProgram ? 2 : 8;
 }
 
@@ -2501,7 +2516,7 @@ int getVISCARecallSpeed(void) {
   }
   // Recall speed range is from 1 to 24.  Zoom range is 1 to 8.
   // Multiply by 3.
-  return getVISCAZoomSpeedFromTallyState() * 3;
+  return getVISCAZoomSpeedFromTallyState(true);
 }
 
 double adjustedStartTimeForMove(double totalDuration, double shortMoveDuration, bool alignToEnd);
@@ -2523,7 +2538,11 @@ bool recallPreset(int presetNumber) {
         fprintf(stderr, "Failed to load preset %d (no data)\n", presetNumber);
         return false;
     }
-    fread((void *)&preset, sizeof(preset), 1, fp);
+    if (fread((void *)&preset, sizeof(preset), 1, fp) < sizeof(preset)) {
+        fprintf(stderr, "Truncated preset file for %d\n", presetNumber);
+        fclose(fp);
+        return false;
+    }
     fclose(fp);
 
     int tallyState = GET_TALLY_STATE();
@@ -2532,7 +2551,7 @@ bool recallPreset(int presetNumber) {
     // These speeds are used if there is no speed data for any axis.
     int panSpeed = onProgram ? 5 : 24;
     int tiltSpeed = onProgram ? 5 : 24;
-    int zoomSpeed = getVISCAZoomSpeedFromTallyState();
+    int zoomSpeed = getVISCAZoomSpeedFromTallyState(false);
 
     int64_t currentPanPosition = getAxisPosition(axis_identifier_pan);
     int64_t currentTiltPosition = getAxisPosition(axis_identifier_tilt);

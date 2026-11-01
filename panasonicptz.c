@@ -395,6 +395,7 @@ char *sendCommand(const char *group, const char *command, char *values[],
 
     curl_easy_cleanup(curlQueryHandle);
 
+    free(URL);
     return retval;
 }
 
@@ -433,6 +434,7 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
         free(response);
     }
     free(intSpeedString);
+    free(response);
     return retval;
 }
 
@@ -470,6 +472,7 @@ int64_t panaGetZoomPositionRaw(void) {
         if (localDebug) fprintf(stderr, "Zoom position: %" PRId64 "\n", last_zoom_position);
         free(response);
     } else {
+        if (response != NULL) { free(response); }
         if (localDebug) fprintf(stderr, "Did not get response from CGI.  Returning last value.\n");
     }
     return last_zoom_position;
@@ -565,6 +568,7 @@ curl_buffer_t *fetchURLWithCURL(char *URL, CURL *handle) {
   curl_buffer_t *chunk = malloc(sizeof(curl_buffer_t));;
   chunk->data = malloc(1);
   chunk->len = 0;
+  chunk->data[0] = '\0';
 
   curl_easy_setopt(handle, CURLOPT_URL, URL);
   curl_easy_setopt(handle, CURLOPT_WRITEDATA, (void *)chunk);
