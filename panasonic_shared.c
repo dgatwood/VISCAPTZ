@@ -57,6 +57,7 @@ typedef struct {
 #pragma mark - Prototypes
 
 void waitForZoomStop(timed_position_t **dataPointsOut, int *dataPointCountOut);
+void printZoomNonlinearityComputation(timed_position_t *positionArray, int count);
 
 
 #pragma mark - Globals
@@ -88,27 +89,29 @@ int64_t panaMakeZoomLinear(int64_t zoomPosition) {
 
   // Use the hardware zoom value as the baseline.
   int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
+  int64_t maxZoom = getConfigKeyInteger(kZoomInInternalLimitKey);
 
   // The value of zoomPosition may be zero initially.  Clamp to minZoom so this
   // doesn't crash.
   int64_t entry = MAX(zoomPosition - minZoom, 0);  // Subtract the base.
+  entry = MIN(entry, maxZoom - minZoom + 1);       // Clamp the maximum.
 
   int64_t retval = zoom_position_map[entry];
-  fprintf(stderr, "panaMakeZoomLinear: minZoom: %" PRId64 "\nEntry:%lld\nCount: %d\n", minZoom, entry, zoom_position_map_count);
-  fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", zoomPosition, retval);
+  fprintf(stderr, "panaMakeZoomLinear: minZoom: %" PRId64 "\nEntry:%lld\nCount: %d\n", minZoom, (long long)entry, zoom_position_map_count);
+  fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", (long long)zoomPosition, (long long)retval);
 
   return retval;
 }
 
 void populateZoomNonlinearityTable(void) {
-  bool localDebug = true || pana_enable_debugging;
+  bool localDebug = false || pana_enable_debugging;
   int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
   int64_t maxZoom = getConfigKeyInteger(kZoomInInternalLimitKey);
 
-  if (localDebug) fprintf(stderr, "In populate: %lld %lld\n", minZoom, maxZoom);
+  if (localDebug) fprintf(stderr, "In populate: %lld %lld\n", (long long)minZoom, (long long)maxZoom);
   if (minZoom >= maxZoom || maxZoom == 0) {
     // Implausible data.
-    fprintf(stderr, "Zoom range is broken (%lld to %lld).  Bailing.\n", minZoom, maxZoom);
+    fprintf(stderr, "Zoom range is broken (%lld to %lld).  Bailing.\n", (long long)minZoom, (long long)maxZoom);
     return;
   }
 
@@ -125,15 +128,18 @@ void populateZoomNonlinearityTable(void) {
   // compile-time flag.  You can get the raw points by defining the
   // SHOW_NONLINEARITY_DATA_POINTS macro.
 
-  if (localDebug) fprintf(stderr, "%d <= %lld\n", (int)floor(scaledPosition),  minZoom);
+  if (localDebug) fprintf(stderr, "%d <= %lld\n", (int)floor(scaledPosition), (long long)minZoom);
   assert(floor(scaledPosition) <= minZoom);
 
   int lastPosition = minZoom - 1;
 
   while (lastPosition < maxZoom) {
-    // fprintf(stderr, "min/max: %lld %lld\n", minZoom, maxZoom);
+    // fprintf(stderr, "min/max: %lld %lld\n", (long long)minZoom, (long long)maxZoom);
     // fprintf(stderr, "pos %lld scaled %lld (between %lld and %lld, inclusive)\n",
-    // position, scaledPosition, minZoom, maxZoom);
+    // (long long)position, (long long)scaledPosition, (long long)minZoom, (long long)maxZoom);
+
+    // The scaled values always increase as the input goes towards infinity, so this
+    // will eventually stop.  If the scaling computation ever changes, adjust accordingly.
     if (scaledPosition > lastPosition) {
       lastPosition++;
 
@@ -145,14 +151,14 @@ void populateZoomNonlinearityTable(void) {
       zoom_position_map[index] = position;
 
       if (localDebug) {
-        fprintf(stderr, "zoom_position_map[%lld] = %lld\n", index,
-                zoom_position_map[index]);
+        fprintf(stderr, "zoom_position_map[%lld] = %lld\n", (long long)index,
+                (long long)zoom_position_map[index]);
       }
     }
 
     position++;
     scaledPosition = scaleLinearZoomToRawZoom(position);
-    fprintf(stderr, "Scaled position: %lld\n", scaledPosition);
+    fprintf(stderr, "Scaled position: %lld\n", (long long)scaledPosition);
   }
   fprintf(stderr, "Nonlinearity table populated.\n");
 }
@@ -344,7 +350,7 @@ void printZoomNonlinearityComputation(timed_position_t *positionArray, int count
   for (int i = 0 ; i < count; i++) {
     fprintf(stderr, "%d\t%lf\t%lld\n", i,
             positionArray[i].timeStamp - positionArray[0].timeStamp,
-            positionArray[i].position);
+            (long long)positionArray[i].position);
   }
 }
 

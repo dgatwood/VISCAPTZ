@@ -1,7 +1,6 @@
 #ifndef __CONSTANTS_H__
 #define __CONSTANTS_H__
 
-#define __GNU_SOURCE  // Bizarrely required for asprintf in Linux.
 #define __STDC_WANT_LIB_EXT2__ 1  // Bizarrely required for asprintf in Linux.
 
 #ifndef USEC_PER_SEC

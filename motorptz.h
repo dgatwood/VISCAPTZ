@@ -60,17 +60,17 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
 int64_t motorMinimumPanPositionsPerSecond(void);
 
 /**
- * Returns the number of encoder positions per second that the tilt axis moves
- * when operating at its slowest speed.  Returns 0 if no calibration data is
- * available.
+ * Returns the number of encoder positions per second that the pan axis moves
+ * when operating at its slowest non-stalled speed (i.e. the slowest speed
+ * at which the encoder moves at nonzero positions per second).  Returns 0 if
+ * no calibration data is available.
  */
 int64_t motorMinimumTiltPositionsPerSecond(void);
 
 /**
- * Returns the number of encoder positions per second that the pan axis moves
- * when operating at its fastest non-stalled speed (i.e. the slowest speed
- * at which the encoder moves at nonzero positions per second).  Returns 0 if
- * no calibration data is available.
+ * Returns the number of encoder positions per second that the tilt axis moves
+ * when operating at its fastest speed.  Returns 0 if no calibration data is
+ * available.
  */
 int64_t motorMaximumPanPositionsPerSecond(void);
 

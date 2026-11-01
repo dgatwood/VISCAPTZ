@@ -353,7 +353,7 @@ struct can_frame CANBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data
 
 /** Processes a CANBus response from the encoder. */
 void handleCANFrame(struct can_frame *response) {
-    bool localDebug = true;
+    bool localDebug = false;
     if (localDebug) fprintf(stderr, "Processing CAN frame.\n");
     if (response->data[0] == 0x7 && response->data[2] == 0x1) {
         long value = response->data[3] | (response->data[4] << 8) |

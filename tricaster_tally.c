@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,10 +25,10 @@ bool g_onPreview = false;
 
 #if USE_TRICASTER_TALLY_SOURCE
 static pthread_t tricaster_tally_thread;
-static char *tally_source_name = NULL;
 #endif
+static char *tally_source_name = NULL;
 
-static tallyState gTricasterTallyState;
+static _Atomic(tallyState) gTricasterTallyState;
 
 void handleResponses(int sock);
 ssize_t handleResponse(char *buf, ssize_t length);
@@ -41,23 +42,20 @@ static char *gTricasterIPAddress = NULL;
 //
 // Initializes the Tricaster tally module.
 bool tricasterModuleInit(void) {
-  #if USE_TRICASTER_TALLY_SOURCE
-    tally_source_name = getConfigKey(kTallySourceName);
+  tally_source_name = getConfigKey(kTallySourceName);
 
-    gTricasterIPAddress = getConfigKey(kTricasterIPKey);
-    if (gTricasterIPAddress == NULL) {
-      fprintf(stderr, "Tricaster IP not set.  Initialization failed.\n");
-      fprintf(stderr, "Run 'viscaptz --settricasterip <IP address>' to fix.\n");
-      return false;
-    }
+  gTricasterIPAddress = getConfigKey(kTricasterIPKey);
+  if (gTricasterIPAddress == NULL) {
+    fprintf(stderr, "Tricaster IP not set.  Initialization failed.\n");
+    fprintf(stderr, "Run 'viscaptz --settricasterip <IP address>' to fix.\n");
+    return false;
+  }
 
-    if (tally_source_name == NULL) {
-      fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
-      fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
-      return false;
-    }
-
-  #endif
+  if (tally_source_name == NULL) {
+    fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
+    fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
+    return false;
+  }
 
   return true;
 }
@@ -73,10 +71,8 @@ bool tricasterModuleStart(void) {
 //
 // Returns the most recently retrieved tally light state.
 tallyState tricaster_getTallyState(void) {
-  return gTricasterTallyState;
+  return atomic_load(&gTricasterTallyState);
 }
-
-#if USE_TRICASTER_TALLY_SOURCE
 
   /** The main loop of the Tricaster tally light monitoring thread. */
   void *runTricasterTallyThread(void *argIgnored) {
@@ -102,14 +98,12 @@ tallyState tricaster_getTallyState(void) {
 
       if (connect(sock, (struct sockaddr *)&address, sizeof(address)) != 0) {
           fprintf(stderr, "tricaster_tally: Tricaster connection failed.  Sleeping a bit.\n");
-          teardown(sock);
           usleep(RECONNECT_DELAY);
 	  continue;
       } else if (tricasterDebug) {
           fprintf(stderr, "Connected to Tricaster.\n");
       }
       handleResponses(sock);
-      teardown(sock);
     }
     return NULL;
   }
@@ -134,28 +128,44 @@ tallyState tricaster_getTallyState(void) {
       fprintf(stderr, "Done.\n");
     }
     ssize_t pending = 0;
+    char *pendingBytes = NULL;
+
     while (true) {
   #define TRICASTER_BUF_SIZE 50000
-      char buf[TRICASTER_BUF_SIZE + 1];
 
       fd_set read_fds;
       FD_ZERO(&read_fds);
       FD_SET(sock, &read_fds);
 
       if (select(sock + 1, &read_fds, NULL, NULL, NULL) > 0) {
-        ssize_t length = read(sock, buf + pending, TRICASTER_BUF_SIZE - pending);
-        if (length == -1) {
+        char buf[TRICASTER_BUF_SIZE + 1];
+        ssize_t length = read(sock, buf + pending, TRICASTER_BUF_SIZE);
+        if (length == 0) {
           fprintf(stderr, "tricaster_tally: Could not read from socket.\n");
           return;
         }
-        buf[length] = '\0';
+
+        buf[length + pending] = '\0';
+
+        char *concatBuf = NULL;
+        asprintf(&concatBuf, "%s%s", pendingBytes, buf);
+
+        free(pendingBytes);
+        pendingBytes = NULL;
+
         if (tricasterDebug) {
           fprintf(stderr, "Got Tricaster message:\n%s\n", buf);
         }
-        ssize_t bytesProcessed = handleResponse(buf, length);
+        ssize_t bytesProcessed = handleResponse(concatBuf, length + pending);
         if (bytesProcessed < length) {
           fprintf(stderr, "Bytes remaining in buffer: %" PRId64 "\n", (uint64_t)pending);
-          bcopy(&buf[bytesProcessed], buf, (length - bytesProcessed));
+
+          pendingBytes = malloc(pending + 1);
+
+          bcopy(&concatBuf[bytesProcessed], pendingBytes, (length - bytesProcessed));
+
+          free(concatBuf);
+
           pending = length - bytesProcessed;
           fprintf(stderr, "Copy done.\n");
         }
@@ -171,6 +181,7 @@ tallyState tricaster_getTallyState(void) {
   /** Handles a single tally data response from Tricaster. */
   ssize_t handleResponse(char *buf, ssize_t length) {
     char *pos = buf;
+    char *lastend = buf;
 
     while ((pos = strstr(pos, "<shortcut_state ")) != NULL) {
       char *end = strstr(pos, ">");
@@ -191,8 +202,9 @@ tallyState tricaster_getTallyState(void) {
       handleTag(tag);
       free(tag);
       pos = end + 1;
+      lastend = pos;
     }
-    return (pos - buf);
+    return lastend - buf;
   }
 
   /** Posts tally state changes to the camera, if applicable, and updates the internal state. */
@@ -202,9 +214,9 @@ tallyState tricaster_getTallyState(void) {
             (newState == kTallyStateGreen) ? "Green (Preview)" :
             "Off");
 
-    gTricasterTallyState = newState;
+    atomic_store(&gTricasterTallyState, newState);
     #ifdef SET_TALLY_STATE
-      SET_TALLY_STATE(gTricasterTallyState);
+      SET_TALLY_STATE(newState);
     #endif
   }
 
@@ -272,10 +284,9 @@ tallyState tricaster_getTallyState(void) {
   }
 
   /** Unregisters the active tally state change subscription and closes the Tricaster socket. */
-  void teardown(int sock) {
+  void tricasterModuleTeardown(int sock) {
     const char *endCommand = "<unregister name=\"NTK_states\"/>\n";
     write(sock, endCommand, strlen(endCommand));
     close(sock);
   }
 
-#endif

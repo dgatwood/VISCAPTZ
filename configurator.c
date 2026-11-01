@@ -37,7 +37,7 @@ int64_t getConfigKeyInteger(const char *key) {
   if (localDebug) {
     fprintf(stderr, "String value: %s\n", stringValue);
   }
-  uint64_t intValue = strtoull(stringValue, NULL, 10);
+  uint64_t intValue = strtoll(stringValue, NULL, 10);
   free(stringValue);
   return intValue;
 }
@@ -71,7 +71,8 @@ const char *getConfigFilePath(void) {
 
   struct passwd *pw = getpwuid(getuid());
 
-  asprintf(&value, "%s/.viscaptz.conf", (pw != NULL && pw->pw_dir != NULL) ? pw->pw_dir : getenv("HOME"));
+  const char *basepath = (pw != NULL && pw->pw_dir != NULL) ? pw->pw_dir : getenv("HOME");
+  asprintf(&value, "%s/.viscaptz.conf", (basepath ?: "."));
   return value;
 }
 
@@ -143,13 +144,13 @@ bool setConfigKey(const char *key, const char *value) {
   size_t linecapacity = 0;
   FILE *fq = fopen(tempfilename, "w");
   if (!fq) {
-    free(tempfilename);
     if (fp) {
       fclose(fp);
     }
 
     free(configFilePathCopy);
     fprintf(stderr, "Could not open file %s for writing.\n", tempfilename);
+    free(tempfilename);
     return false;
   }
 
@@ -194,7 +195,10 @@ bool setConfigKey(const char *key, const char *value) {
     error = error || newError;
     if (error) {
       fprintf(stderr, "Error renaming temp file.\n");
+      unlink(tempfilename);
     }
+  } else {
+    unlink(tempfilename);
   }
   free(tempfilename);
   free(buf);

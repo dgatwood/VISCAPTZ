@@ -585,6 +585,7 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "OBS module init failed.  Bailing.\n");
     exit(1);
   }
+
   if (!tricasterModuleInit()) {
     fprintf(stderr, "Tricaster module init failed.  Bailing.\n");
     exit(1);
@@ -1345,7 +1346,7 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
     fprintf(stderr, "makeDurationValid(axis %d, duration %lf, position: %lld)\n",
       axis, duration, (long long)position);
     int64_t currentPosition = getAxisPosition(axis);
-    fprintf(stderr, "    Current position: %lld for %s\n", currentPosition,
+    fprintf(stderr, "    Current position: %lld for %s\n", (long long)currentPosition,
             nameForAxis(axis));
   }
   double slowestDuration = slowestMoveForAxisToPosition(axis, position);
@@ -1634,7 +1635,7 @@ int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPos
 
   if (localDebug) {
     fprintf(stderr, "Peak points per second for move along axis %d from %lld to %lld over time %lf is %lf\n",
-            axis, fromPosition, toPosition, time, peakPositionsPerSecond);
+            axis, (long long)fromPosition, (long long)toPosition, time, peakPositionsPerSecond);
   }
 
   int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
@@ -3073,7 +3074,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     int index = speed - minSpeed;
     data[index] = round(positionsPerSecondAverage);
     fprintf(stderr, "Positions per second at speed %d (average): %lf (%lld)\n",
-            index, positionsPerSecondAverage, data[index]);
+            index, positionsPerSecondAverage, (long long)data[index]);
 
     // The motor may stall at low voltages, but once it gets moving, it should get faster
     // for each increase in voltage.  If not, something went wrong, and our results are invalid.
@@ -3249,11 +3250,11 @@ int64_t setZoomOutLimit(int64_t limit) {
   return setConfigKeyInteger(kZoomOutLimitKey, limit);
 }
 
-int64_t setZoomEncoderReversed(bool isReversed) {
+bool setZoomEncoderReversed(bool isReversed) {
   return setConfigKeyBool(kZoomEncoderReversedKey, isReversed);
 }
 
-int64_t setZoomMotorReversed(bool isReversed) {
+bool setZoomMotorReversed(bool isReversed) {
   return setConfigKeyBool(kZoomMotorReversedKey, isReversed);
 }
 
@@ -3265,7 +3266,7 @@ int64_t zoomOutLimit(void) {
   return getConfigKeyInteger(kZoomOutLimitKey);
 }
 
-int64_t zoomEncoderReversed(void) {
+bool zoomEncoderReversed(void) {
   return getConfigKeyInteger(kZoomEncoderReversedKey);
 }
 

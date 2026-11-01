@@ -461,7 +461,7 @@ int64_t p2GetZoomPositionRaw(void) {
 //
 // Gets the camera's current zoom position.
 int64_t p2GetZoomPosition(void) {
-    bool localDebug = true;
+    bool localDebug = false;
     int64_t nonlinearZoomPosition = p2GetZoomPositionRaw();
     fprintf(stderr, "ZOOMNONLINEARPOS: %" PRId64 "\n", nonlinearZoomPosition);
     int64_t retval = panaMakeZoomLinear(nonlinearZoomPosition);
@@ -857,7 +857,7 @@ void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSi
     }
 
     gLastZoomPosition = zoomPositionFromData(optical_data);
-    fprintf(stderr, "ZOOM POSITION NOW %lld\n", gLastZoomPosition);
+    fprintf(stderr, "ZOOM POSITION NOW %lld\n", (long long)gLastZoomPosition);
 
     fprintf(stderr, "@@@ Zoom position: %" PRId64 " expected %" PRId64 "\n",
         gLastZoomPosition, expectedPosition);

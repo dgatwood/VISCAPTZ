@@ -102,12 +102,12 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define SET_ZOOM_POSITION(position, maxSpeed, time, startTime) \
             setAxisPositionIncrementally(axis_identifier_zoom, position, maxSpeed, time, startTime)
     #else  // !(PANASONIC_PTZ_ZOOM_ONLY || PANASONIC_DISABLE_ZOOM_COMMAND)
-        #define SET_ZOOM_POSITION(position, maxSpeed, time) \
-            panaSetZoomPosition(axis_identifier_zoom, position, maxSpeed)
+        #define SET_ZOOM_POSITION(position, maxSpeed, time, startTime) \
+            panaSetZoomPosition(position, maxSpeed)
     #endif  // PANASONIC_PTZ_ZOOM_ONLY || PANASONIC_DISABLE_ZOOM_COMMAND
 
-    #define MIN_ZOOM_POSITIONS_PER_SECOND() panaMinimumZoomPositionsPerSecond();
-    #define MAX_ZOOM_POSITIONS_PER_SECOND() panaMaximumZoomPositionsPerSecond();
+    #define MIN_ZOOM_POSITIONS_PER_SECOND() panaMinimumZoomPositionsPerSecond()
+    #define MAX_ZOOM_POSITIONS_PER_SECOND() panaMaximumZoomPositionsPerSecond()
 
     // If pan and tilt are enabled (not zoom only), map the pan and tilt getter and
     // setter macros to functions in this module.
@@ -115,7 +115,7 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define GET_PAN_TILT_POSITION(panPositionRef, tiltPositionRef) \
             panaGetPanTiltPosition(panPositionRef, tiltPositionRef)
         #define SET_PAN_TILT_SPEED(panSpeed, tiltSpeed, isRaw) \
-            panaSetPanSpeed(panSpeed, tiltSpeed, isRaw)
+            panaSetPanTiltSpeed(panSpeed, tiltSpeed)
         #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, \
                                       panDuration, tiltDuration, panStartTime, tiltStartTime) \
             panaSetPanTiltPosition(panPosition, panSpeed, tiltPosition, tiltSpeed)
@@ -131,6 +131,19 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define MIN_TILT_POSITIONS_PER_SECOND() panaMinimumTiltPositionsPerSecond();
         #define MAX_PAN_POSITIONS_PER_SECOND() panaMaximumPanPositionsPerSecond();
         #define MAX_TILT_POSITIONS_PER_SECOND() panaMaximumTiltPositionsPerSecond();
-    #endif
+
+        /** The pan calibration data in raw form (positions per second for each speed). */
+        int64_t *pana_pan_data = NULL;
+
+        /** The pan calibration data in core-scaled form (1000 * value / max_value). */
+        int32_t *pana_pan_scaled_data = NULL;
+
+        /** The pan calibration data in raw form (positions per second for each speed). */
+        int64_t *pana_tilt_data = NULL;
+
+        /** The tilt calibration data in core-scaled form (1000 * value / max_value). */
+        int32_t *pana_tilt_scaled_data = NULL;
+
+    #endif  // !PANASONIC_PTZ_ZOOM_ONLY
 
 #endif

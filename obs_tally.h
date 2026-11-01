@@ -3,7 +3,6 @@
 
 #include "constants.h"
 
-
 /** Initializes the OBS tally module. */
 bool obsModuleInit(void);
 

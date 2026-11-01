@@ -83,6 +83,6 @@ int64_t p2MaximumZoomPositionsPerSecond(void);
     #define SET_ZOOM_POSITION(position, maxSpeed, time, startTime) \
         setAxisPositionIncrementally(axis_identifier_zoom, position, maxSpeed, time, startTime)
 
-    #define MIN_ZOOM_POSITIONS_PER_SECOND() p2MinimumZoomPositionsPerSecond();
-    #define MAX_ZOOM_POSITIONS_PER_SECOND() p2MaximumZoomPositionsPerSecond();
+    #define MIN_ZOOM_POSITIONS_PER_SECOND() p2MinimumZoomPositionsPerSecond()
+    #define MAX_ZOOM_POSITIONS_PER_SECOND() p2MaximumZoomPositionsPerSecond()
 #endif

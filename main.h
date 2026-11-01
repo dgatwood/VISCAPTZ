@@ -130,7 +130,7 @@ bool panEncoderReversed(void);
 bool tiltEncoderReversed(void);
 
 /** True if the zoom position value increases when zooming out. */
-int64_t zoomEncoderReversed(void);
+bool zoomEncoderReversed(void);
 
 /**
  * Sets the value returned by zoomEncoderReversed.
@@ -138,14 +138,14 @@ int64_t zoomEncoderReversed(void);
  * @param isReversed True if the zoom position value increases
  *                   when zooming out, else false.
  */
-int64_t setZoomEncoderReversed(bool isReversed);
+bool setZoomEncoderReversed(bool isReversed);
 
 /**
  * Sets the value returned by zoomMotorReversed.
  *
  * @param isReversed True if positive values zoom out, else false.
  */
-int64_t setZoomMotorReversed(bool isReversed);
+bool setZoomMotorReversed(bool isReversed);
 
 /** The leftmost position used during calibration. */
 int64_t leftPanLimit(void);
