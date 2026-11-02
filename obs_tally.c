@@ -6,11 +6,12 @@
 #include "main.h"
 #include "obs_tally.h"
 #include "panasonicptz.h"  // SET_TALLY_STATE
+#include "p2protocol.h"    // SET_TALLY_STATE
 
 void runOBSTests(void);
 
 // Install libgettally from here: https://github.com/dgatwood/v8-libwebsocket-obs-websocket
-#ifdef USE_OBS_TALLY_SOURCE
+#if USE_OBS_TALLY_SOURCE
   #include <gettally.h>
 #else
   // Stub in something so that it builds.
@@ -27,11 +28,11 @@ void runOBSTests(void);
 
 static char kSourceSeparator = '|';
 
-static bool obs_tally_debug = true;
+static bool obs_tally_debug = false;
 #if USE_OBS_TALLY_SOURCE
   static pthread_t obs_tally_thread;
 #endif
-static _Atomic(tallyState) gCurrentOBSTallyState = kTallyStateOff;
+static _Atomic(tallyStateType) gCurrentOBSTallyState = kTallyStateOff;
 static char **gTallySourceNames = NULL;
 static int gNumberOfTallySourceNames = 0;
 
@@ -41,43 +42,55 @@ void addSceneOnPreview(const char *sceneName, bool alsoOnProgram);
 void markSceneInactive(const char *sceneName);
 void splitSourceNames(char *sourceNameString, char ***outArray, int *outCount);
 
+typedef struct tally_scene_item {
+  char *scene_name;
+  tallyStateType tallyState;
+  struct tally_scene_item *next;
+} tally_scene_item_t;
+
+tally_scene_item_t *activeScenes = NULL;
+
+void addActiveSceneWithName(const char *name, tallyStateType tallyState);
+void removeActiveSceneWithName(const char *name);
+static void updateTallyState(void);
+
 // Public function.  Docs in header.
 //
 // Initializes the OBS tally module.
 bool obsModuleInit(void) {
   runOBSTests();
 
-  #ifdef USE_OBS_TALLY_SOURCE
+  #if USE_OBS_TALLY_SOURCE
+    setTallyOff();
 
-  char *tallySourceName = NULL;
-  char *OBSWebSocketURL = getConfigKey(kOBSWebSocketURLKey);
-  char *password = getConfigKey(kOBSPasswordKey);
-  tallySourceName = getConfigKey(kTallySourceName);
-
-  setTallyOff();
-
+    char *OBSWebSocketURL = getConfigKey(kOBSWebSocketURLKey);
     if (OBSWebSocketURL == NULL) {
       fprintf(stderr, "No OBS web socket URL specified.  Initialization failed.\n");
       fprintf(stderr, "Run 'viscaptz --setobsurl <URL>' to fix.\n");
       return false;
     }
+    free(OBSWebSocketURL);
+
+    char *tallySourceName = getConfigKey(kTallySourceName);
 
     if (tallySourceName == NULL) {
       fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
       fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
       return false;
     }
+    free(tallySourceName);
 
+    char *password = getConfigKey(kOBSPasswordKey);
     if (password == NULL) {
       fprintf(stderr, "WARNING: No OBS web socket password specified.\n");
       fprintf(stderr, "Run 'viscaptz --setobspass <password>' to fix.\n");
-
-      password = "";
+    } else {
+      // Treat NULL as empty password, which could be correct.
+      free(password);
     }
 
     splitSourceNames(tallySourceName, &gTallySourceNames, &gNumberOfTallySourceNames);
   #endif  // USE_OBS_TALLY_SOURCE
-
 
   return true;
 }
@@ -123,7 +136,7 @@ void *runOBSTallyThread(void *argIgnored) {
   char *OBSWebSocketURL = getConfigKey(kOBSWebSocketURLKey);
   char *password = getConfigKey(kOBSPasswordKey) ?: "";
 
-  #ifdef USE_OBS_TALLY_SOURCE
+  #if USE_OBS_TALLY_SOURCE
     registerOBSProgramCallback(&addSceneOnProgram);
     registerOBSPreviewCallback(&addSceneOnPreview);
     registerOBSInactiveCallback(&markSceneInactive);
@@ -137,7 +150,7 @@ void *runOBSTallyThread(void *argIgnored) {
 // Public function.  Docs in header.
 //
 // Returns the most recent tally state provided by the tally module.
-tallyState obs_getTallyState(void) {
+tallyStateType obs_getTallyState(void) {
   return atomic_load(&gCurrentOBSTallyState);
 }
 
@@ -157,12 +170,12 @@ bool isMonitoredScene(const char *sceneName, char **monitoredSources, int number
  */
 void addSceneOnProgram(const char *sceneName) {
   if (isMonitoredScene(sceneName, gTallySourceNames, gNumberOfTallySourceNames)) {
-    atomic_store(&gCurrentOBSTallyState, kTallyStateRed);
-    setTallyRed();
+    addActiveSceneWithName(sceneName, kTallyStateRed);
     if (obs_tally_debug) {
       fprintf(stderr, "Program source %s is a monitored source\n",
               sceneName);
     }
+    updateTallyState();
   } else if (obs_tally_debug) {
     fprintf(stderr, "Program source %s is not a monitored source\n",
             sceneName);
@@ -178,13 +191,7 @@ void addSceneOnProgram(const char *sceneName) {
  */
 void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
   if (isMonitoredScene(sceneName, gTallySourceNames, gNumberOfTallySourceNames)) {
-    if (alsoOnProgram) {
-      fprintf(stderr, "Ignored preview source %s because it is on program.\n",
-              sceneName);
-      return;
-    }
-    atomic_store(&gCurrentOBSTallyState, kTallyStateGreen);
-    setTallyGreen();
+    addActiveSceneWithName(sceneName, kTallyStateGreen);
     if (obs_tally_debug) {
       fprintf(stderr, "Preview source %s is a monitored source.\n",
               sceneName);
@@ -202,12 +209,11 @@ void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
  */
 void markSceneInactive(const char *sceneName) {
   if (isMonitoredScene(sceneName, gTallySourceNames, gNumberOfTallySourceNames)) {
-    atomic_store(&gCurrentOBSTallyState, kTallyStateOff);
-    setTallyOff();
     if (obs_tally_debug) {
       fprintf(stderr, "Inactive source %s is a monitored source.\n",
               sceneName);
     }
+    removeActiveSceneWithName(sceneName);
   } else if (obs_tally_debug) {
     fprintf(stderr, "Inactive source %s is not a monitored source.\n",
             sceneName);
@@ -239,3 +245,55 @@ void runOBSTests(void) {
 
     fprintf(stderr, "Done.\n");
 }
+
+void addActiveSceneWithName(const char *name, tallyStateType tallyState) {
+  tally_scene_item_t *item = malloc(sizeof(*item));
+  asprintf(&item->scene_name, "%s", name);
+  item->tallyState = tallyState;
+  item->next = activeScenes;
+  activeScenes = item;
+}
+
+void removeActiveSceneWithName(const char *name) {
+  tally_scene_item_t *last = NULL;
+  for (tally_scene_item_t *item = activeScenes ; item ; item = item->next) {
+    if (!strcmp(item->scene_name, name)) {
+      if (last) {
+        last->next = item->next;
+        free(item);
+        return;
+      } else {
+        activeScenes->next = item->next;
+        free(item);
+        return;
+      }
+    }
+    last = item;
+  }
+}
+
+static void updateTallyState(void) {
+  tallyStateType maxState = kTallyStateOff;
+  for (tally_scene_item_t *item = activeScenes ; item ; item = item->next) {
+    if (maxState < kTallyStateRed) {
+      // Tally light is off.  Just use the value (promote to anything or not).
+      maxState = item->tallyState;
+
+    } else if (maxState == kTallyStateGreen) {
+      // Tally light is green for preview.  Upgrade to red if needed, else ignore.
+      if (item->tallyState == kTallyStateRed) {
+        maxState = kTallyStateRed;
+      }
+    }
+  }
+  atomic_store(&gCurrentOBSTallyState, maxState);
+  if (maxState == kTallyStateRed) {
+    setTallyRed();
+  } else if (maxState == kTallyStateGreen) {
+    setTallyGreen();
+  } else {
+    setTallyOff();
+  }
+}
+
+

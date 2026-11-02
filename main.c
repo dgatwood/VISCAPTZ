@@ -253,7 +253,7 @@ static int gAxisStalls[NUM_AXES];
  * The current tally state as set by VISCA commands.  Used only if
  * the VISCA tally source is active.
  */
-volatile tallyState gTallyState = kTallyStateOff;
+volatile tallyStateType gTallyState = kTallyStateOff;
 
 /**
  * Set to true if a VISCA command has specified a particular recall speed.
@@ -648,7 +648,7 @@ int main(int argc, char *argv[]) {
 
   // Spin this thread forever for now.
   while (1) {
-    usleep(1000000);
+    usleep(100000);
   }
 }
 
@@ -2029,7 +2029,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
   return false;
 }
 
-tallyState VISCA_getTallyState(void) {
+tallyStateType VISCA_getTallyState(void) {
   return gTallyState;
 }
 
@@ -2066,7 +2066,7 @@ bool setTallyGreen(void) {
 #endif
 }
 
-const char *tallyStateName(tallyState state) {
+const char *tallyStateName(tallyStateType state) {
   switch(state) {
     case kTallyStateOff:
       return "kTallyStateOff";
@@ -2669,7 +2669,7 @@ void do_calibration(void) {
     }
 
     // Wait two seconds to ensure everything is up and running.
-    usleep(2000000);
+    sleep(2);
 
     for (axis_identifier_t axis = axis_identifier_pan; axis <= axis_identifier_tilt; axis++) {
       int64_t value = getAxisPosition(axis);

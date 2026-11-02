@@ -1,7 +1,8 @@
 #include "tricaster_tally.h"
 #include "configurator.h"
 #include "constants.h"
-#include "panasonicptz.h"
+#include "panasonicptz.h"  // SET_TALLY_STATE
+#include "p2protocol.h"    // SET_TALLY_STATE
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -16,7 +17,7 @@
 #include <unistd.h>
 
 // Retry every 5 seconds.
-#define RECONNECT_DELAY 5000000
+#define RECONNECT_DELAY 5
 
 bool tricasterDebug = false;
 
@@ -28,13 +29,13 @@ static pthread_t tricaster_tally_thread;
 #endif
 static char *tally_source_name = NULL;
 
-static _Atomic(tallyState) gTricasterTallyState;
+static _Atomic(tallyStateType) gTricasterTallyState;
 
-void handleResponses(int sock);
+static void handleResponses(int sock);
 ssize_t handleResponse(char *buf, ssize_t length);
-void handleTag(char *tag);
+static void handleTag(char *tag);
 void *runTricasterTallyThread(void *argIgnored);
-void teardown(int sock);
+void tricasterModuleTeardown(int sock);
 
 static char *gTricasterIPAddress = NULL;
 
@@ -70,7 +71,7 @@ bool tricasterModuleStart(void) {
 // Public function.  Docs in header.
 //
 // Returns the most recently retrieved tally light state.
-tallyState tricaster_getTallyState(void) {
+tallyStateType tricaster_getTallyState(void) {
   return atomic_load(&gTricasterTallyState);
 }
 
@@ -93,16 +94,16 @@ tallyState tricaster_getTallyState(void) {
       address.sin_family = AF_INET;
 
       address.sin_addr.s_addr = inet_addr(gTricasterIPAddress);
-
       address.sin_port = htons(port);
 
-      if (connect(sock, (struct sockaddr *)&address, sizeof(address)) != 0) {
-          fprintf(stderr, "tricaster_tally: Tricaster connection failed.  Sleeping a bit.\n");
-          close(sock);
-          usleep(RECONNECT_DELAY);
-	  continue;
+      if (address.sin_addr.s_addr == INADDR_NONE ||
+          connect(sock, (struct sockaddr *)&address, sizeof(address)) != 0) {
+        fprintf(stderr, "tricaster_tally: Tricaster connection failed.  Sleeping a bit.\n");
+        close(sock);
+        sleep(RECONNECT_DELAY);
+        continue;
       } else if (tricasterDebug) {
-          fprintf(stderr, "Connected to Tricaster.\n");
+        fprintf(stderr, "Connected to Tricaster.\n");
       }
       handleResponses(sock);
       close(sock);
@@ -114,7 +115,7 @@ tallyState tricaster_getTallyState(void) {
    * Handles source tally change messages on a Tricaster socket continuously until the
    * connection fails.
    */
-  void handleResponses(int sock) {
+  static void handleResponses(int sock) {
     int flags = fcntl(sock, F_GETFL);
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
@@ -213,7 +214,7 @@ tallyState tricaster_getTallyState(void) {
   }
 
   /** Posts tally state changes to the camera, if applicable, and updates the internal state. */
-  void setTallyStateFromTricaster(tallyState newState) {
+  void setTallyStateFromTricaster(tallyStateType newState) {
     fprintf(stderr, "Tally state: %s\n",
             (newState == kTallyStateRed) ? "Red (Program)" :
             (newState == kTallyStateGreen) ? "Green (Preview)" :
@@ -229,7 +230,7 @@ tallyState tricaster_getTallyState(void) {
   // <shortcut_state name="program_tally" value="INPUT1|BFR2|DDR3" type="" sender="" />
   // <shortcut_state name="preview_tally" value="INPUT7" type="" sender="" />
   /** Processes a single XML tag looking for tally information. */
-  void handleTag(char *tag) {
+  static void handleTag(char *tag) {
     bool setProgram = (strstr(tag, "name=\"program_tally\"") != NULL);
     bool setPreview = (strstr(tag, "name=\"preview_tally\"") != NULL);
     if (!setProgram && !setPreview) {

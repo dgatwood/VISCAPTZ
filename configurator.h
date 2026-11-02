@@ -32,7 +32,7 @@ int64_t getConfigKeyInteger(const char *key);
  *
  * @property key   The name of the key.  This key must not contain
  *                 any equals signs.
- * @property value The vale for the key.  This value must not
+ * @property value The value for the key.  This value must not
  *                 contain any newline characters.  If the value
  *                 is NULL, the key is removed.
  */
@@ -45,7 +45,7 @@ bool setConfigKey(const char *key, const char *value);
 bool setConfigKeyBool(const char *key, bool value);
 
 /**
- * Sets the specified configuration key to 0/1.
+ * Sets the specified configuration key to the specified value.
  * See setConfigKey for more details.
  */
 bool setConfigKeyInteger(const char *key, int64_t value);

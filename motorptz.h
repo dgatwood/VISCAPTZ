@@ -45,10 +45,10 @@ bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw);
  * Gets the current pan and tilt position from the encoders.  The scale is
  * arbitrary and depends on the encoder and gearing.
  *
- * @param panPosition Storage for the position of the pan encoder (output parameter)
- *                    or NULL.
- * @param panPosition Storage for the position of the pan encoder (output parameter)
- *                    or NULL.
+ * @param panPosition  Storage for the position of the pan encoder (output parameter)
+ *                     or NULL.
+ * @param tiltPosition Storage for the position of the tilt encoder (output parameter)
+ *                     or NULL.
  */
 bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
 
@@ -60,7 +60,7 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition);
 int64_t motorMinimumPanPositionsPerSecond(void);
 
 /**
- * Returns the number of encoder positions per second that the pan axis moves
+ * Returns the number of encoder positions per second that the tilt axis moves
  * when operating at its slowest non-stalled speed (i.e. the slowest speed
  * at which the encoder moves at nonzero positions per second).  Returns 0 if
  * no calibration data is available.
@@ -68,7 +68,7 @@ int64_t motorMinimumPanPositionsPerSecond(void);
 int64_t motorMinimumTiltPositionsPerSecond(void);
 
 /**
- * Returns the number of encoder positions per second that the tilt axis moves
+ * Returns the number of encoder positions per second that the pan axis moves
  * when operating at its fastest speed.  Returns 0 if no calibration data is
  * available.
  */
@@ -94,8 +94,6 @@ int64_t motorMaximumTiltPositionsPerSecond(void);
                                   panDuration, tiltDuration, panStartTime, tiltStartTime) \
         (setAxisPositionIncrementally(axis_identifier_pan, panPosition, panSpeed, panDuration, panStartTime) && \
         setAxisPositionIncrementally(axis_identifier_tilt, tiltPosition, tiltSpeed, tiltDuration, tiltStartTime))
-    #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
-    #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
 
     #define PAN_AND_TILT_POSITION_SUPPORTED true
 

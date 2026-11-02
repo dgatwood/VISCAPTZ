@@ -10,7 +10,7 @@ bool obsModuleInit(void);
 bool obsModuleStart(void);
 
 /** Returns the current tally state based on the active OBS scene. */
-tallyState obs_getTallyState(void);
+tallyStateType obs_getTallyState(void);
 
 // If the OBS tally source is enabled, map the standard tally getter
 // macro to a function in this module.

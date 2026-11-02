@@ -32,7 +32,7 @@ bool p2GetZoomRange(int64_t *min, int64_t *max);
  * Sets the zoom speed.
  *
  * @param speed The zoom speed.
- * @param isRaw If true, the speed is in hardware scale (-49 to 49).
+ * @param isRaw If true, the speed is in hardware scale (-8 to 8).
  *              If false, the speed is in core scale.
  */
 bool p2SetZoomSpeed(int64_t speed, bool isRaw);
@@ -59,7 +59,7 @@ int64_t p2MaximumZoomPositionsPerSecond(void);
 #if USE_PANASONIC_PTZ && ENABLE_P2_MODE
 
     #define MODULE_INIT() p2ModuleInit()
-    #define SET_IP_ADDR(address) p2SetIPAddress(address);
+    #define SET_IP_ADDR(address) p2SetIPAddress(address)
 
     // If the Panasonic tally source is enabled, map the tally state getter
     // macro onto a function in this module.

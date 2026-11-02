@@ -97,7 +97,7 @@ int64_t panaMakeZoomLinear(int64_t zoomPosition) {
   // The value of zoomPosition may be zero initially.  Clamp to minZoom so this
   // doesn't crash.
   int64_t entry = MAX(zoomPosition - minZoom, 0);  // Subtract the base.
-  entry = MIN(entry, maxZoom - minZoom + 1);       // Clamp the maximum.
+  entry = MIN(entry, maxZoom - minZoom);           // Clamp the maximum.
 
   int64_t retval = zoom_position_map[entry];
   fprintf(stderr, "panaMakeZoomLinear: minZoom: %" PRId64 "\nEntry:%lld\nCount: %d\n", minZoom, (long long)entry, zoom_position_map_count);
@@ -106,6 +106,8 @@ int64_t panaMakeZoomLinear(int64_t zoomPosition) {
   return retval;
 }
 
+// No attempt is made to free any preexisting tables.  This function
+// should be called exactly once per launch.
 void populateZoomNonlinearityTable(void) {
   bool localDebug = false || pana_enable_debugging;
   int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
@@ -126,7 +128,7 @@ void populateZoomNonlinearityTable(void) {
 
   // If this assertion fails, your camera will require a different nonlinearity map.
   // Turn on debugging in printZoomNonlinearityComputation(), convert the table into
-  // a third-degree equation with a polynomial solver (e.g. https://arachnoid.com/polysolve/)
+  // a fourth-degree equation with a polynomial solver (e.g. https://arachnoid.com/polysolve/)
   // and update the values in scaleLinearZoomToRawZoom(), guarding your changes with a
   // compile-time flag.  You can get the raw points by defining the
   // SHOW_NONLINEARITY_DATA_POINTS macro.
@@ -222,7 +224,7 @@ void panaModuleCalibrate(void) {
     // By default, generate a smallish number of points.  You can use a
     // smaller number like 2 for more data.  The original equation was
     // computed at a speed of 2.
-    const nonlinearityComputationSpeed = ZOOM_SCALE_HARDWARE / 2;
+    const int nonlinearityComputationSpeed = ZOOM_SCALE_HARDWARE / 2;
 
     // Zoom all the way in to determine the upper zoom limit and capture
     // calibration data to determine the nonlinearity of the zoom position data.
@@ -412,7 +414,7 @@ int64_t panaMaximumTiltPositionsPerSecond(void) {
 //
 // Returns the number of zoom positions per second at the camera's fastest speed.
 int64_t panaMaximumZoomPositionsPerSecond(void) {
-  return sharedCalibrationData[ZOOM_SCALE_HARDWARE];
+  return sharedCalibrationData[ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE];
 }
 
 #endif  // USE_PANASONIC_PTZ

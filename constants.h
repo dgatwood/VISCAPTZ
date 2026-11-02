@@ -17,7 +17,7 @@ typedef enum {
   kTallyStateUnknown4 = 4,
   kTallyStateRed = 5,
   kTallyStateGreen = 6
-} tallyState;
+} tallyStateType;
 
 #define PAN_SCALE_VISCA   24
 #define TILT_SCALE_VISCA  24

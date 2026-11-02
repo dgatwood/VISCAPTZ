@@ -73,7 +73,7 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
 #if USE_PANASONIC_PTZ && !ENABLE_P2_MODE
 
     #define MODULE_INIT() panaModuleInit()
-    #define SET_IP_ADDR(address) panaSetIPAddress(address);
+    #define SET_IP_ADDR(address) panaSetIPAddress(address)
 
     // If the Panasonic tally source is enabled, map the tally state getter
     // macro onto a function in this module.
@@ -119,8 +119,6 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define SET_PAN_TILT_POSITION(panPosition, panSpeed, tiltPosition, tiltSpeed, \
                                       panDuration, tiltDuration, panStartTime, tiltStartTime) \
             panaSetPanTiltPosition(panPosition, panSpeed, tiltPosition, tiltSpeed)
-        #define PAN_SPEED_SCALE(speedInt) (speedInt * 1.0)
-        #define TILT_SPEED_SCALE(speedInt) (speedInt * 1.0)
         #define PAN_AND_TILT_POSITION_SUPPORTED true
 
         // Panasonic defines the range as 0 to 99, with 50 idle.  We remap this to
@@ -133,16 +131,16 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define MAX_TILT_POSITIONS_PER_SECOND() panaMaximumTiltPositionsPerSecond()
 
         /** The pan calibration data in raw form (positions per second for each speed). */
-        int64_t *pana_pan_data = NULL;
+        extern int64_t *pana_pan_data = NULL;
 
         /** The pan calibration data in core-scaled form (1000 * value / max_value). */
-        int32_t *pana_pan_scaled_data = NULL;
+        extern int32_t *pana_pan_scaled_data = NULL;
 
         /** The pan calibration data in raw form (positions per second for each speed). */
-        int64_t *pana_tilt_data = NULL;
+        extern int64_t *pana_tilt_data = NULL;
 
         /** The tilt calibration data in core-scaled form (1000 * value / max_value). */
-        int32_t *pana_tilt_scaled_data = NULL;
+        extern int32_t *pana_tilt_scaled_data = NULL;
 
     #endif  // !PANASONIC_PTZ_ZOOM_ONLY
 

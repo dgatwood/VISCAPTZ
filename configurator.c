@@ -3,6 +3,7 @@
 #define ENABLE_CONFIGURATOR_DEBUGGING 0
 
 #include <libgen.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -37,7 +38,7 @@ int64_t getConfigKeyInteger(const char *key) {
   if (localDebug) {
     fprintf(stderr, "String value: %s\n", stringValue);
   }
-  uint64_t intValue = strtoll(stringValue, NULL, 10);
+  int64_t intValue = strtoll(stringValue, NULL, 10);
   free(stringValue);
   return intValue;
 }
@@ -61,19 +62,24 @@ bool getConfigKeyBool(const char *key) {
 const char *getConfigFilePath(void) {
   #ifdef CONFIG_FILE_PATH
     return CONFIG_FILE_PATH;
-  #endif
+  #else
+    static pthread_mutex_t configFileMutex = PTHREAD_MUTEX_INITIALIZER;
+    static char *value = NULL;
 
-  static char *value = NULL;
+    pthread_mutex_lock(&configFileMutex);
+    if (value != NULL) {
+      pthread_mutex_unlock(&configFileMutex);
+      return value;
+    }
 
-  if (value != NULL) {
+    struct passwd *pw = getpwuid(getuid());
+
+    const char *basepath = (pw != NULL && pw->pw_dir != NULL) ? pw->pw_dir : getenv("HOME");
+    asprintf(&value, "%s/.viscaptz.conf", (basepath ?: "."));
+
+    pthread_mutex_unlock(&configFileMutex);
     return value;
-  }
-
-  struct passwd *pw = getpwuid(getuid());
-
-  const char *basepath = (pw != NULL && pw->pw_dir != NULL) ? pw->pw_dir : getenv("HOME");
-  asprintf(&value, "%s/.viscaptz.conf", (basepath ?: "."));
-  return value;
+  #endif
 }
 
 // Returns the value of the specified key as a string.
@@ -90,7 +96,7 @@ char *getConfigKey(const char *key) {
   while (fp != NULL) {
     ssize_t length = getline(&buf, &linecapacity, fp);
     if (localDebug) {
-      fprintf(stderr, "Got line %s\n", buf);
+      fprintf(stderr, "Got line %s\n", buf ?: "<EOF>");
     }
     if (length == -1) break;
     if (lineMatchesKey(buf, key)) {
@@ -188,10 +194,11 @@ bool setConfigKey(const char *key, const char *value) {
   if (fp) {
     fclose(fp);
   }
-  fclose(fq);
+  bool newError = fclose(fq);
+  error = error || newError;
 
   if (!error) {
-    bool newError = (rename(tempfilename, getConfigFilePath()) != 0);
+    newError = (rename(tempfilename, getConfigFilePath()) != 0);
     error = error || newError;
     if (error) {
       fprintf(stderr, "Error renaming temp file.\n");

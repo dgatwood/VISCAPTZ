@@ -1,3 +1,5 @@
+#include <stdbool.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #include "constants.h"
@@ -17,7 +19,7 @@ extern bool gCalibrationModeQuick;
 extern bool gRecenter;
 
 /** Returns a string providing the name of a tally state. */
-const char *tallyStateName(tallyState);
+const char *tallyStateName(tallyStateType);
 
 /** Sets the tally light to red (if possible). */
 bool setTallyRed(void);
@@ -200,4 +202,4 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData);
  * Returns the current tally state as cached in main.c.  Used if there is
  * no other tally source defined.
  */
-tallyState VISCA_getTallyState(void);
+tallyStateType VISCA_getTallyState(void);
