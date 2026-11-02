@@ -62,7 +62,10 @@ void printZoomNonlinearityComputation(timed_position_t *positionArray, int count
 
 #pragma mark - Globals
 
-/** The zoom calibration data in raw form (positions per second for each speed). */
+/**
+ * The zoom calibration data in raw form (positions per second for each speed).
+ * Range is 0 [minSpeed] .. n [maxSpeed - minSpeed].
+ */
 int64_t *sharedCalibrationData = NULL;
 
 #pragma mark - Functions

@@ -98,12 +98,14 @@ tallyState tricaster_getTallyState(void) {
 
       if (connect(sock, (struct sockaddr *)&address, sizeof(address)) != 0) {
           fprintf(stderr, "tricaster_tally: Tricaster connection failed.  Sleeping a bit.\n");
+          close(sock);
           usleep(RECONNECT_DELAY);
 	  continue;
       } else if (tricasterDebug) {
           fprintf(stderr, "Connected to Tricaster.\n");
       }
       handleResponses(sock);
+      close(sock);
     }
     return NULL;
   }
@@ -139,16 +141,20 @@ tallyState tricaster_getTallyState(void) {
 
       if (select(sock + 1, &read_fds, NULL, NULL, NULL) > 0) {
         char buf[TRICASTER_BUF_SIZE + 1];
-        ssize_t length = read(sock, buf + pending, TRICASTER_BUF_SIZE);
-        if (length == 0) {
+        ssize_t length = read(sock, buf, TRICASTER_BUF_SIZE);
+        if (length < 0 && (errno == EAGAIN || errno == EWOULDBLOCK  || errno == EINTR)) {
+          continue;
+        }
+        if (length <= 0) {
           fprintf(stderr, "tricaster_tally: Could not read from socket.\n");
+          free(pendingBytes);
           return;
         }
 
-        buf[length + pending] = '\0';
+        buf[length] = '\0';
 
         char *concatBuf = NULL;
-        asprintf(&concatBuf, "%s%s", pendingBytes, buf);
+        asprintf(&concatBuf, "%s%s", pendingBytes ?: "", buf);
 
         free(pendingBytes);
         pendingBytes = NULL;
@@ -157,18 +163,17 @@ tallyState tricaster_getTallyState(void) {
           fprintf(stderr, "Got Tricaster message:\n%s\n", buf);
         }
         ssize_t bytesProcessed = handleResponse(concatBuf, length + pending);
-        if (bytesProcessed < length) {
+        pending = length + pending - bytesProcessed;
+
+        pendingBytes = malloc(pending + 1);
+        bcopy(&concatBuf[bytesProcessed], pendingBytes, pending + 1);
+
+        if (tricasterDebug) {
           fprintf(stderr, "Bytes remaining in buffer: %" PRId64 "\n", (uint64_t)pending);
-
-          pendingBytes = malloc(pending + 1);
-
-          bcopy(&concatBuf[bytesProcessed], pendingBytes, (length - bytesProcessed));
-
-          free(concatBuf);
-
-          pending = length - bytesProcessed;
           fprintf(stderr, "Copy done.\n");
         }
+
+        free(concatBuf);
       }
     }
   }
@@ -192,10 +197,10 @@ tallyState tricaster_getTallyState(void) {
         }
         break;
       }
-      ssize_t length = end - pos + 1;
-      char *tag = malloc(length + 1);
-      strncpy(tag, pos, length);
-      tag[length] = '\0';
+      ssize_t tagLength = end - pos + 1;
+      char *tag = malloc(tagLength + 1);
+      strncpy(tag, pos, tagLength);
+      tag[tagLength] = '\0';
       if (tricasterDebug) {
         fprintf(stderr, "GOT TAG: %s\n", tag);
       }

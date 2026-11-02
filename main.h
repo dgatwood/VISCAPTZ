@@ -78,7 +78,7 @@ int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
  */
 bool writeCalibrationDataForAxis(axis_identifier_t axis,
                                  int64_t *calibrationData,
-                                 int length);
+                                 int maxSpeed);
 
 /**
  * Converts an array of raw scale values into a scaled array.

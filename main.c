@@ -3118,19 +3118,20 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
       }
     }
 
-    data[speed] = round(positionsPerSecondAverage);
+    int index = speed - minSpeed;
+    data[index] = round(positionsPerSecondAverage);
     fprintf(stderr, "Positions per second at speed %d (average): %lf (%lld)\n",
-            speed, positionsPerSecondAverage, (long long)data[speed]);
+            index, positionsPerSecondAverage, (long long)data[index]);
 
     // The motor may stall at low voltages, but once it gets moving, it should get faster
     // for each increase in voltage.  If not, something went wrong, and our results are invalid.
     // In some cases (e.g. for zoom motors hidden behind software), two speed values might result
     // in identical speeds, so it's potentially okay for it to not speed up, but it should never
     // slow down.
-    if (speed >= 1 && data[speed] < data[speed - 1] && data[speed] > 0) {
+    if (index >= 1 && data[index] < data[index - 1] && data[index] > 0) {
       if (pollingIsSlow) {
         fprintf(stderr, "Motor slowed down.  Assuming speed is unchanged.\n");
-        data[speed] = data[speed - 1];
+        data[index] = data[index - 1];
       } else {
         fprintf(stderr, "Motor slowed down.  Recomputing previous position and current position.\n");
         speed -= 2;
