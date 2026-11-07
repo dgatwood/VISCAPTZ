@@ -2546,7 +2546,7 @@ bool recallPreset(int presetNumber) {
         fprintf(stderr, "Failed to load preset %d (no data)\n", presetNumber);
         return false;
     }
-    if (fread((void *)&preset, sizeof(preset), 1, fp) < sizeof(preset)) {
+    if (fread((void *)&preset, 1, sizeof(preset), fp) < sizeof(preset)) {
         fprintf(stderr, "Truncated preset file for %d\n", presetNumber);
         fclose(fp);
         return false;

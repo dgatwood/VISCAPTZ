@@ -393,6 +393,9 @@ int64_t panaMinimumZoomPositionsPerSecond(void) {
 // Returns the number of pan positions per second at the camera's fastest speed.
 int64_t panaMaximumPanPositionsPerSecond(void) {
   #if !PANASONIC_PTZ_ZOOM_ONLY
+    if (pana_pan_data == NULL) {
+      return 0;
+    }
     return pana_pan_data[PAN_TILT_SCALE_HARDWARE];
   #else
     return 0;
@@ -404,6 +407,9 @@ int64_t panaMaximumPanPositionsPerSecond(void) {
 // Returns the number of tilt positions per second at the camera's fastest speed.
 int64_t panaMaximumTiltPositionsPerSecond(void) {
   #if !PANASONIC_PTZ_ZOOM_ONLY
+    if (pana_tilt_data == NULL) {
+      return 0;
+    }
     return pana_tilt_data[PAN_TILT_SCALE_HARDWARE];
   #else
     return 0;
@@ -414,6 +420,9 @@ int64_t panaMaximumTiltPositionsPerSecond(void) {
 //
 // Returns the number of zoom positions per second at the camera's fastest speed.
 int64_t panaMaximumZoomPositionsPerSecond(void) {
+  if (sharedCalibrationData == NULL) {
+    return 0;
+  }
   return sharedCalibrationData[ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE];
 }
 

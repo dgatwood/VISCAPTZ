@@ -431,7 +431,6 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     char *response = sendCommand("ptz", "#Z", &intSpeedString, 1, "zS");
     if (!response || atoi(response) != intSpeed) {
         retval = false;
-        free(response);
     }
     free(intSpeedString);
     free(response);

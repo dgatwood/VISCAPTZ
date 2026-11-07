@@ -696,6 +696,9 @@ int64_t motorMinimumTiltPositionsPerSecond(void) {
 // Returns the number of positions per second that the pan axis moves at its fastest
 // speed.
 int64_t motorMaximumPanPositionsPerSecond(void) {
+  if (motor_pan_data == NULL) {
+    return 0;
+  }
   return motor_pan_data[PAN_TILT_SCALE_HARDWARE];
 }
 
@@ -704,6 +707,9 @@ int64_t motorMaximumPanPositionsPerSecond(void) {
 // Returns the number of positions per second that the tilt axis moves at its fastest
 // speed.
 int64_t motorMaximumTiltPositionsPerSecond(void) {
+  if (motor_tilt_data == NULL) {
+    return 0;
+  }
   return motor_tilt_data[PAN_TILT_SCALE_HARDWARE];
 }
 
