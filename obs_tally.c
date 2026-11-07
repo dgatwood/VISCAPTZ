@@ -78,7 +78,6 @@ bool obsModuleInit(void) {
       fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
       return false;
     }
-    free(tallySourceName);
 
     char *password = getConfigKey(kOBSPasswordKey);
     if (password == NULL) {
@@ -90,6 +89,7 @@ bool obsModuleInit(void) {
     }
 
     splitSourceNames(tallySourceName, &gTallySourceNames, &gNumberOfTallySourceNames);
+    free(tallySourceName);
   #endif  // USE_OBS_TALLY_SOURCE
 
   return true;
@@ -191,11 +191,12 @@ void addSceneOnProgram(const char *sceneName) {
  */
 void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
   if (isMonitoredScene(sceneName, gTallySourceNames, gNumberOfTallySourceNames)) {
-    addActiveSceneWithName(sceneName, kTallyStateGreen);
+    addActiveSceneWithName(sceneName, alsoOnProgram ? kTallyStateRed : kTallyStateGreen);
     if (obs_tally_debug) {
       fprintf(stderr, "Preview source %s is a monitored source.\n",
               sceneName);
     }
+    updateTallyState();
   } else if (obs_tally_debug) {
     fprintf(stderr, "Preview source %s is not a monitored source.\n",
             sceneName);
@@ -214,6 +215,7 @@ void markSceneInactive(const char *sceneName) {
               sceneName);
     }
     removeActiveSceneWithName(sceneName);
+    updateTallyState();
   } else if (obs_tally_debug) {
     fprintf(stderr, "Inactive source %s is not a monitored source.\n",
             sceneName);
@@ -247,6 +249,7 @@ void runOBSTests(void) {
 }
 
 void addActiveSceneWithName(const char *name, tallyStateType tallyState) {
+  removeActiveSceneWithName(name);
   tally_scene_item_t *item = malloc(sizeof(*item));
   asprintf(&item->scene_name, "%s", name);
   item->tallyState = tallyState;
@@ -260,13 +263,12 @@ void removeActiveSceneWithName(const char *name) {
     if (!strcmp(item->scene_name, name)) {
       if (last) {
         last->next = item->next;
-        free(item);
-        return;
       } else {
-        activeScenes->next = item->next;
-        free(item);
-        return;
+        activeScenes = item->next;
       }
+      free(item->scene_name);
+      free(item);
+      return;
     }
     last = item;
   }
