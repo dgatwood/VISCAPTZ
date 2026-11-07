@@ -2932,6 +2932,13 @@ double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
 
   // If the motor was already moving in the right direction, don't wait as long.
   static bool inMotion = false;
+  static axis_identifier_t lastAxis = -1;
+  static int lastSpeed = -1;
+  if (axis != lastAxis || speed != lastSpeed) {
+    inMotion = false;
+    lastAxis = axis;
+    lastSpeed = speed;
+  }
 
   // If we don't get values because a half second moves too far, set to true.
   bool movedTooFast = false;
@@ -2994,14 +3001,13 @@ double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
     direction = -direction;
 
     inMotion = false;
-    attempts++;
   }
   motionEndPosition = getAxisPosition(axis);
 
   int64_t distance = llabs(motionEndPosition - motionStartPosition);
 
   inMotion = true;
-  double distancePerSecond = ((double)distance / actualDuration);
+  double distancePerSecond = (actualDuration > 0) ? ((double)distance / actualDuration) : 0;
   if (localDebug) {
     fprintf(stderr, "Returning distance per second %lf\n", distancePerSecond);
   }
@@ -3068,6 +3074,7 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
         // getting any more values.
         if (value == sameValue && i == (MIN_SAMPLES - 1)) {
           // We got MIN_SAMPLES with identical values.  Bail early.
+          positionsPerSecondAverage = sameValue;
           done = true;
           break;
         } else if (value != sameValue) {
