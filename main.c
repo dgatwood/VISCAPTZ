@@ -974,7 +974,8 @@ void handleRecallUpdates(void) {
           }
 
           // Compute how long we have left to move at peak speed.
-          double timeBeforeSlowingDown = MAX(remainingTime - (0.1 * duration), 0);
+          double timeBeforeSlowingDown =
+              MAX(remainingTime - ((1.0 - moveTimeFractionBeforeSlowdown) * duration), 0);
           if (localDebug) {
             fprintf(stderr, "Axis %s time before slowing down: %lf\n", nameForAxis(axis), timeBeforeSlowingDown);
           }
@@ -982,14 +983,16 @@ void handleRecallUpdates(void) {
           // Update the peak speed.
           int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
           int64_t distanceMoved = llabs(axisPosition - startPosition);
-          int64_t distanceLeft = moveDistanceBeforeStartOfSlowdown - distanceMoved;
+          int64_t distanceLeft = MAX(moveDistanceBeforeStartOfSlowdown - distanceMoved, 0);
 
           if (localDebug) {
             fprintf(stderr, "Axis %s max PPS for axis: %" PRId64" remaining distance: %" PRId64 "\n",
                     nameForAxis(axis), maxPPSForAxis, distanceLeft);
           }
 
-          peakSpeed = (1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown);
+          if (maxPPSForAxis > 0 && timeBeforeSlowingDown > 0) {
+            peakSpeed = MAX((int)((1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown)), 1);
+          }
 
           if (localDebug) {
             fprintf(stderr, "Axis %s peak speed after adjustment: %d\n", nameForAxis(axis), peakSpeed);
@@ -1645,6 +1648,9 @@ int64_t maximumPositionsPerSecondForAxis(axis_identifier_t axis) {
 // We then divide by moveTimeFractionBeforeSlowdown.
 int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPosition, double time) {
   bool localDebug = false;
+  if (time <= 0) {
+    return SCALE_CORE;
+  }
   double peakPositionsPerSecond = (llabs(fromPosition - toPosition) / time) / moveTimeFractionBeforeSlowdown;
 
   if (localDebug) {
@@ -1653,6 +1659,9 @@ int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPos
   }
 
   int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
+  if (maxPPSForAxis == 0) {
+    return SCALE_CORE;
+  }
   int peakSpeed = (peakPositionsPerSecond * 1000) / maxPPSForAxis;
 
   if (localDebug) {

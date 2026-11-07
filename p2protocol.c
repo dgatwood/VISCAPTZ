@@ -473,7 +473,7 @@ int64_t p2GetZoomPosition(void) {
 
     if (!gCalibrationMode) {
       int64_t zoomMin, zoomMax;
-      if (p2GetZoomRange(&zoomMin, &zoomMax) {
+      if (p2GetZoomRange(&zoomMin, &zoomMax)) {
         retval += estimatedPositionsSinceLastPositionData();
         retval = MAX(zoomMin, retval);
         retval = MIN(zoomMax, retval);
@@ -584,7 +584,7 @@ char *getP2Auth(int sock) {
   char *user = getenv("PANA_USER");
   char *password = getenv("PANA_PASS");
 
-  if (!user || !paassword) {
+  if (!user || !password) {
     fprintf(stderr, "This feature is in development.  For now, you must set the\n"
                     "PANA_USER and PANA_PASS environment variables.\n");
     exit(1);
