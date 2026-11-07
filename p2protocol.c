@@ -908,7 +908,7 @@ bool timeToRequestZoomPosition(void) {
 void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSize) {
   uint8_t message_type = packetBuffer[0];
   if (message_type == 6) {
-    if (packetSize < sizeof(p2_optical_data_t) {
+    if (packetSize < sizeof(p2_optical_data_t)) {
       fprintf(stderr, "Ignoring short packet for message type 6 (optical data).\n");
       return;
     }
@@ -931,7 +931,7 @@ void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSi
     freeSpeedChanges();
     pthread_cond_broadcast(&gZoomDataCond);
   } else if (message_type == 0x0A) {
-    if (packetSize < sizeof(p2_camera_data_t) {
+    if (packetSize < sizeof(p2_camera_data_t)) {
       fprintf(stderr, "Ignoring short packet for message type 0xA (camera data).\n");
       return;
     }
