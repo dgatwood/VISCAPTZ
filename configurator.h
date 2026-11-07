@@ -1,6 +1,10 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * Returns the value of the specified configuration key (or NULL).
  * Values must be freed by the caller.
@@ -55,3 +59,7 @@ bool setConfigKeyInteger(const char *key, int64_t value);
  * See setConfigKey for more details.
  */
 bool removeConfigKey(const char *key);
+
+#ifdef __cplusplus
+}
+#endif

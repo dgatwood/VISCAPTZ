@@ -3400,13 +3400,17 @@ void runStartupTests(void) {
   assert(!strcmp(value2, "value2"));
 
   assert(setConfigKey("key1", "value3"));
+  free(value1);
   value1 = getConfigKey("key1");
   assert(!strcmp(value1, "value3"));
   assert(!strcmp(value2, "value2"));
 
   assert(setConfigKey("key2", "value4"));
+  free(value2);
   value2 = getConfigKey("key2");
   assert(!strcmp(value2, "value4"));
+  free(value1);
+  free(value2);
 
   srand(time(NULL));
   int value = rand();
@@ -3423,6 +3427,7 @@ void runStartupTests(void) {
   for (int i=0; i <= maxSpeed; i++) {
     assert(fakeData[i] == fakeData2[i]);
   }
+  free(fakeData2);
 
   int32_t *translatedData = convertSpeedValues(fakeData, 3, 0);
   int32_t expectedResuls[] = { 0, 285, 571, 857 };
@@ -3431,6 +3436,11 @@ void runStartupTests(void) {
   for (int i=0; i <= maxSpeed; i++) {
     assert(translatedData[i] == expectedResuls[i]);
   }
+
+  assert(removeConfigKey("key1"));
+  assert(removeConfigKey("key2"));
+  assert(removeConfigKey("randomValue"));
+  assert(removeConfigKey(calibrationDataKeyNameForAxis(30)));
 
   int64_t source1000Values[] = {
     0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000
@@ -3461,4 +3471,5 @@ void runStartupTests(void) {
   for (int i = 0; i < (sizeof(source100Values) / sizeof(source100Values[0])); i++) {
     assert(scaleSpeed(-source100Values[i], 100, maxSpeed, translatedData) == -expectedValues[i]);
   }
+  free(translatedData);
 }

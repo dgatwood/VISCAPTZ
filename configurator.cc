@@ -12,17 +12,64 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <string>
+#include <unordered_map>
+
 #include "constants.h"
 #include "configurator.h"
 
 static bool configuratorDebug = false;
+static pthread_mutex_t configFileMutex = PTHREAD_MUTEX_INITIALIZER;
+static std::unordered_map<std::string, std::string> configMap;
+static bool configLoaded = false;
+
+static const char *getConfigFilePath(void);
 
 // Returns true if the specified line's key portion matches the specified key.
-bool lineMatchesKey(const char *buf, const char *key) {
+static bool lineMatchesKey(const char *buf, const char *key) {
   size_t keyLength = strlen(key);
   return (strlen(buf) > (keyLength + 1)) &&
       !strncmp(key, buf, keyLength) &&
       (buf[keyLength] == '=');
+}
+
+static void loadConfigurationIfNeeded(void) {
+  if (configLoaded) {
+    return;
+  }
+  configLoaded = true;
+
+  bool localDebug = configuratorDebug || false;
+  const char *configFilePath = getConfigFilePath();
+  FILE *fp = fopen(configFilePath, "r");
+  if (fp == NULL) {
+    if (localDebug) {
+      perror("viscaptz");
+      fprintf(stderr, "Could not open file \"%s\" for reading\n", configFilePath);
+    }
+    return;
+  }
+
+  char *buf = NULL;
+  size_t linecapacity = 0;
+  while (true) {
+    ssize_t length = getline(&buf, &linecapacity, fp);
+    if (localDebug) {
+      fprintf(stderr, "Got line %s\n", buf ?: "<EOF>");
+    }
+    if (length == -1) break;
+
+    while (length > 0 && (buf[length - 1] == '\r' || buf[length - 1] == '\n')) {
+      buf[--length] = '\0';
+    }
+    char *equalsPos = strchr(buf, '=');
+    if (equalsPos != NULL && equalsPos != buf && *(equalsPos + 1) != '\0') {
+      *equalsPos = '\0';
+      configMap[buf] = equalsPos + 1;
+    }
+  }
+  free(buf);
+  fclose(fp);
 }
 
 // Returns the value of the specified key as a 64-bit signed integer value.
@@ -59,16 +106,14 @@ bool getConfigKeyBool(const char *key) {
 }
 
 // Returns the configuration file path (~/.viscaptz.conf unless overridden).
-const char *getConfigFilePath(void) {
+// Must be called with configFileMutex held.
+static const char *getConfigFilePath(void) {
   #ifdef CONFIG_FILE_PATH
     return CONFIG_FILE_PATH;
   #else
-    static pthread_mutex_t configFileMutex = PTHREAD_MUTEX_INITIALIZER;
     static char *value = NULL;
 
-    pthread_mutex_lock(&configFileMutex);
     if (value != NULL) {
-      pthread_mutex_unlock(&configFileMutex);
       return value;
     }
 
@@ -77,7 +122,6 @@ const char *getConfigFilePath(void) {
     const char *basepath = (pw != NULL && pw->pw_dir != NULL) ? pw->pw_dir : getenv("HOME");
     asprintf(&value, "%s/.viscaptz.conf", (basepath ?: "."));
 
-    pthread_mutex_unlock(&configFileMutex);
     return value;
   #endif
 }
@@ -86,70 +130,63 @@ const char *getConfigFilePath(void) {
 char *getConfigKey(const char *key) {
   bool localDebug = configuratorDebug || false;
 
-  FILE *fp = fopen(getConfigFilePath(), "r");
-  if (localDebug && fp == NULL) {
-    perror("viscaptz");
-    fprintf(stderr, "Could not open file \"%s\" for reading\n", getConfigFilePath());
-  }
-  char *buf = NULL;
-  size_t linecapacity = 0;
-  while (fp != NULL) {
-    ssize_t length = getline(&buf, &linecapacity, fp);
+  pthread_mutex_lock(&configFileMutex);
+  loadConfigurationIfNeeded();
+
+  auto it = configMap.find(key);
+  if (it != configMap.end()) {
+    char *retval = strdup(it->second.c_str());
     if (localDebug) {
-      fprintf(stderr, "Got line %s\n", buf ?: "<EOF>");
+      fprintf(stderr, "MATCHES KEY %s, will return \"%s\"\n", key, retval);
     }
-    if (length == -1) break;
-    if (lineMatchesKey(buf, key)) {
-      if (localDebug) {
-        fprintf(stderr, "MATCHES KEY %s\n", key);
-      }
-      char *retval = NULL;
-      asprintf(&retval, "%s", &buf[strlen(key) + 1]);
-      while ((strlen(retval) > 0) &&
-             (retval[strlen(retval)-1] == '\r' || 
-              retval[strlen(retval)-1] == '\n')) {
-          retval[strlen(retval)-1] = '\0';  // Remove terminating newline
-      }
-      if (localDebug) {
-        fprintf(stderr, "Will return \"%s\"\n", retval);
-      }
-      free(buf);
 #if ENABLE_CONFIGURATOR_DEBUGGING
-      fprintf(stderr, "Key %s value %s\n", key, retval);
+    fprintf(stderr, "Key %s value %s\n", key, retval);
 #endif
-      fclose(fp);
-      return retval;
-    } else {
-      if (localDebug) {
-        fprintf(stderr, "DOES NOT MATCH KEY %s\n", key);
-      }
-    }
+    pthread_mutex_unlock(&configFileMutex);
+    return retval;
   }
-  free(buf);
-  if (fp) {
-    fclose(fp);
+
+  if (localDebug) {
+    fprintf(stderr, "DOES NOT MATCH KEY %s\n", key);
   }
+  pthread_mutex_unlock(&configFileMutex);
   return NULL;
 }
 
 // Sets the configuration key to the specified string value.
 bool setConfigKey(const char *key, const char *value) {
-  FILE *fp = fopen(getConfigFilePath(), "r");
+  pthread_mutex_lock(&configFileMutex);
+  loadConfigurationIfNeeded();
+
+  if (value == NULL || value[0] == '\0') {
+    configMap.erase(key);
+  } else {
+    configMap[key] = value;
+  }
+
+  const char *configFilePath = getConfigFilePath();
+  FILE *fp = fopen(configFilePath, "r");
   if (!fp) {
     fprintf(stderr, "WARNING: Could not open %s for reading",
-            getConfigFilePath());
+            configFilePath);
   }
 
   // Some dirname implementations modify their buffer.  Be safe.
   char *configFilePathCopy = NULL;
-  asprintf(&configFilePathCopy, "%s", getConfigFilePath());
+  asprintf(&configFilePathCopy, "%s", configFilePath);
   char *directory = dirname(configFilePathCopy);
 
-  char *tempfilename = tempnam(directory, "viscaptz-temp-");
+  char *tempfilename = NULL;
+  asprintf(&tempfilename, "%s/.viscaptz-temp-XXXXXX", directory);
+  int tempfd = mkstemp(tempfilename);
   char *buf = NULL;
   size_t linecapacity = 0;
-  FILE *fq = fopen(tempfilename, "w");
+  FILE *fq = (tempfd != -1) ? fdopen(tempfd, "w") : NULL;
   if (!fq) {
+    if (tempfd != -1) {
+      close(tempfd);
+      unlink(tempfilename);
+    }
     if (fp) {
       fclose(fp);
     }
@@ -157,6 +194,7 @@ bool setConfigKey(const char *key, const char *value) {
     free(configFilePathCopy);
     fprintf(stderr, "Could not open file %s for writing.\n", tempfilename);
     free(tempfilename);
+    pthread_mutex_unlock(&configFileMutex);
     return false;
   }
 
@@ -194,11 +232,11 @@ bool setConfigKey(const char *key, const char *value) {
   if (fp) {
     fclose(fp);
   }
-  bool newError = fclose(fq);
+  bool newError = (fclose(fq) != 0);
   error = error || newError;
 
   if (!error) {
-    newError = (rename(tempfilename, getConfigFilePath()) != 0);
+    newError = (rename(tempfilename, configFilePath) != 0);
     error = error || newError;
     if (error) {
       fprintf(stderr, "Error renaming temp file.\n");
@@ -210,6 +248,7 @@ bool setConfigKey(const char *key, const char *value) {
   free(tempfilename);
   free(buf);
   free(configFilePathCopy);
+  pthread_mutex_unlock(&configFileMutex);
   return !error;
 }
 

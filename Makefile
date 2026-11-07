@@ -21,7 +21,7 @@ USE_TRICASTER_TALLY_SOURCE=1
 
 UNAME := $(shell uname)
 
-CFLAGS+=-std=gnu99 -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -Wall -Wno-unknown-pragmas -Wshadow -g -O0 -fno-omit-frame-pointer
+CFLAGS+=-I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -Wall -Wno-unknown-pragmas -Wshadow -g -O0 -fno-omit-frame-pointer
 
 # If not using hardware, remove -lbcm2835
 ifeq ($(UNAME), Linux)
@@ -56,7 +56,10 @@ else
 endif
 
 %.o: %.c *.h
-	${CC} -c ${CFLAGS} -o $@ $<
+	${CC} -c -std=gnu99 ${CFLAGS} -o $@ $<
+
+%.o: %.cc *.h
+	${CXX} -c -std=c++11 ${CFLAGS} ${CXXFLAGS} -o $@ $<
 
 ifeq ($(UNAME), Linux)
 LINUX_TARGETS=motorcontrol/libmotorcontrol.so
@@ -65,7 +68,7 @@ LINUX_TARGETS=
 endif
 
 viscaptz: main.o obs_tally.o tricaster_tally.o configurator.o panasonic_shared.o panasonicptz.o p2protocol.o motorptz.o ${LINUX_TARGETS} *.h
-	${CC} ${CFLAGS} main.o obs_tally.o tricaster_tally.o configurator.o panasonic_shared.o panasonicptz.o p2protocol.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
+	${CXX} ${CFLAGS} main.o obs_tally.o tricaster_tally.o configurator.o panasonic_shared.o panasonicptz.o p2protocol.o motorptz.o -lcurl -g -O0 ${LDFLAGS} -o viscaptz
 
 motorcontrol/libmotorcontrol.so:
 	cd motorcontrol ; make libmotorcontrol.so ; sudo make install
