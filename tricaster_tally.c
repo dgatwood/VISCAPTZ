@@ -43,6 +43,7 @@ static char *gTricasterIPAddress = NULL;
 //
 // Initializes the Tricaster tally module.
 bool tricasterModuleInit(void) {
+  #if USE_TRICASTER_TALLY_SOURCE
   tally_source_name = getConfigKey(kTallySourceName);
 
   gTricasterIPAddress = getConfigKey(kTricasterIPKey);
@@ -57,6 +58,7 @@ bool tricasterModuleInit(void) {
     fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
     return false;
   }
+  #endif  // USE_TRICASTER_TALLY_SOURCE
 
   return true;
 }
