@@ -1163,7 +1163,7 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData) {
       // junk values if the stick is near the center,
       // not the responsiblity of the VISCA interpreter/
       // motor controller.)
-      if (scaleData[i - 1] == 0) {
+      if (i == 0 || scaleData[i - 1] == 0) {
         int retval = i * sign;
         if (localDebug) {
           fprintf(stderr, "SCALED %d to %d.  ERROR: %d (%lf%%)\n",
@@ -1434,13 +1434,19 @@ double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPos
 #else
   // Compute the duration based on fractions of the speed that the axes can actually move,
   // in a manner of speaking, with a capped maximum duration of 30 seconds.
-  double longestPanDuration = slowestMoveForAxisToPosition(axis_identifier_pan, panPosition);
-  double longestTiltDuration = slowestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
-  double longestZoomDuration = slowestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
+  double longestPanDuration = (flags & kFlagMovePan) ?
+      slowestMoveForAxisToPosition(axis_identifier_pan, panPosition) : 0;
+  double longestTiltDuration = (flags & kFlagMoveTilt) ?
+      slowestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition) : 0;
+  double longestZoomDuration = (flags & kFlagMoveZoom) ?
+      slowestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition) : 0;
 
-  double shortestPanDuration = fastestMoveForAxisToPosition(axis_identifier_pan, panPosition);
-  double shortestTiltDuration = fastestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition);
-  double shortestZoomDuration = fastestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition);
+  double shortestPanDuration = (flags & kFlagMovePan) ?
+      fastestMoveForAxisToPosition(axis_identifier_pan, panPosition) : 0;
+  double shortestTiltDuration = (flags & kFlagMoveTilt) ?
+      fastestMoveForAxisToPosition(axis_identifier_tilt, tiltPosition) : 0;
+  double shortestZoomDuration = (flags & kFlagMoveZoom) ?
+      fastestMoveForAxisToPosition(axis_identifier_zoom, zoomPosition) : 0;
 
   if (localDebug) {
     fprintf(stderr, "longestPanDuration: %lf\n", longestPanDuration);

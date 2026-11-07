@@ -295,7 +295,8 @@ void panaModuleCalibrate(void) {
   int64_t *zoomCalibrationData = calibrationDataForMoveAlongAxis(
       axis_identifier_zoom, maximumZoom, minimumZoom, ZOOM_MIN_HARDWARE, ZOOM_SCALE_HARDWARE, true);
 
-  writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData, ZOOM_SCALE_HARDWARE);
+  writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData,
+                              ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE);
 }
 
 
@@ -385,7 +386,8 @@ int64_t panaMinimumTiltPositionsPerSecond(void) {
 //
 // Returns the number of zoom positions per second at the camera's slowest speed.
 int64_t panaMinimumZoomPositionsPerSecond(void) {
-  return minimumPositionsPerSecondForData(sharedCalibrationData, ZOOM_SCALE_HARDWARE);
+  return minimumPositionsPerSecondForData(sharedCalibrationData,
+                                          ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE);
 }
 
 // Public function.  Docs in header.

@@ -282,12 +282,12 @@ bool p2ModuleReload(void) {
     int maxSpeed = 0;
     bool localDebug = false;
     panasonicSharedInit(&p2ZoomCalibrationData, &maxSpeed);
-    if (maxSpeed == ZOOM_SCALE_HARDWARE) {
+    if (maxSpeed == ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE) {
         p2ScaledZoomCalibrationData =
-            convertSpeedValues(p2ZoomCalibrationData, ZOOM_SCALE_HARDWARE,
+            convertSpeedValues(p2ZoomCalibrationData, maxSpeed,
                                axis_identifier_zoom);
         if (localDebug) {
-          for (int i=0; i<=ZOOM_SCALE_HARDWARE; i++) {
+          for (int i=0; i<=maxSpeed; i++) {
             fprintf(stderr, "%d: raw: %" PRId64 "\n", i, p2ZoomCalibrationData[i]);
             fprintf(stderr, "%d: scaled: %d\n", i, p2ScaledZoomCalibrationData[i]);
           }
