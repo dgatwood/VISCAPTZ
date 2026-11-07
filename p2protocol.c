@@ -406,16 +406,25 @@ int p2GetMaxZoomSpeed(void) {
 
 bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
     bool localDebug = false || p2_enable_debugging;
-    gLastZoomSpeed = speed;
 
-    // This is wrong.
-    int intSpeed =
-        isRaw ? speed : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE,
-                                          p2ScaledZoomCalibrationData);
+    int intSpeed = 0;
+    if (isRaw) {
+      intSpeed = speed;
+    } else if (speed != 0) {
+      if (p2ScaledZoomCalibrationData == NULL) {
+        intSpeed = scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE, NULL);
+      } else {
+        int offset = (speed < 0) ? -ZOOM_MIN_HARDWARE : ZOOM_MIN_HARDWARE;
+        intSpeed = scaleSpeed(speed, SCALE_CORE,
+                              ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE,
+                              p2ScaledZoomCalibrationData) + offset;
+      }
+    }
+    gLastZoomSpeed = intSpeed;
 
     if (localDebug) {
         fprintf(stderr, "Zoom Core speed %" PRId64 "\n", speed);
-        fprintf(stderr, "Zoom Speed %d\n", intSpeed - 50);
+        fprintf(stderr, "Zoom Speed %d\n", intSpeed);
     }
 
     static int maxZoomSpeed = 0;
@@ -430,6 +439,7 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
     asprintf(&command, "<CamCtl>$ZmSpd:=%d</CamCtl>", intSpeed);
     char *response = NULL;
     bool ok = sendP2Request(command, &response);
+    free(command);
 
     fprintf(stderr, "In p2SetZoomSpeed: response: %s\n", response);
 
@@ -437,8 +447,8 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
 
     if (!ok /* || !response || atoi(response) != intSpeed */) {
         retval = false;
-        free(response);
     }
+    free(response);
     markSpeedChange(intSpeed);
     return retval;
 }
@@ -1067,7 +1077,7 @@ int64_t estimatedPositionsSinceLastPositionData(void) {
   pthread_mutex_lock(&gSpeedLock);
 
   double positions = 0.0;
-  for (speed_time_t *pos = gSpeedHead; pos && pos->next; pos = pos->next) {
+  for (speed_time_t *pos = gSpeedHead; pos != NULL; pos = pos->next) {
     double nextTimestamp = (pos->next == NULL) ? timestamp : pos->next->timestamp;
     double sec = nextTimestamp - pos->timestamp;
     positions += (panaZoomPositionsPerSecondAtSpeed(pos->speed) * sec);
@@ -1133,10 +1143,13 @@ fail:
 //
 // Returns the number of zoom positions per second at the camera's fastest speed.
 int64_t panaZoomPositionsPerSecondAtSpeed(int speed) {
+  if (p2ZoomCalibrationData == NULL) {
+    return 0;
+  }
   int absSpeed = abs(speed);
-  if (speed > 0 && speed <= ZOOM_SCALE_HARDWARE) {
-    return p2ScaledZoomCalibrationData[absSpeed] * (speed < 0 ? -1 : 1) ;
-  } 
+  if (absSpeed >= ZOOM_MIN_HARDWARE && absSpeed <= ZOOM_SCALE_HARDWARE) {
+    return p2ZoomCalibrationData[absSpeed - ZOOM_MIN_HARDWARE] * (speed < 0 ? -1 : 1);
+  }
   return 0;
 } 
 
