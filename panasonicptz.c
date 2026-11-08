@@ -226,16 +226,17 @@ void freeMulti(char **array, ssize_t count) {
 // Sets the pan and tilt speed in core scale or hardware scale (if isRaw is true).
 bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
     int scaledPanSpeed =
-        isRaw ? panSpeed + 50: scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                                       pana_pan_scaled_data);
+        (isRaw ? panSpeed : scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                                       pana_pan_scaled_data)) + PANASONIC_HARDWARE_SCALE_OFFSET;
     int scaledTiltSpeed =
-        isRaw ? tiltSpeed + 50: scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                                       pana_tilt_scaled_data);
+        (isRaw ? tiltSpeed : scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                                        pana_tilt_scaled_data)) + PANASONIC_HARDWARE_SCALE_OFFSET;
 
-    bool localDebug = pana_enable_debugging || false;
-    static int64_t last_zoom_position = 0;
-    char *values[2] = { panaIntString(scaledPanSpeed, 3, true), panaIntString(scaledTiltSpeed, 3, true) };
-    char *response = sendCommand("ptz", "#PTS", values, 2, "gz");
+    char *values[2] = {
+        panaIntString(scaledPanSpeed, 2, false),
+        panaIntString(scaledTiltSpeed, 2, false)
+    };
+    char *response = sendCommand("ptz", "#PTS", values, 2, "pTS");
     bool retval = false;
     if (response != NULL) {
         retval = true;
@@ -417,13 +418,13 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     gLastZoomSpeed = speed;
 
     int intSpeed =
-        isRaw ? (speed + 50) : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE,
-                                          panasonicScaledZoomCalibrationData) + 50;
+        (isRaw ? speed : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE,
+                                    panasonicScaledZoomCalibrationData)) + PANASONIC_HARDWARE_SCALE_OFFSET;
     char *intSpeedString = panaIntString(intSpeed, 2, false);
 
     if (localDebug) {
         fprintf(stderr, "Zoom Core speed %" PRId64 "\n", speed);
-        fprintf(stderr, "Zoom Speed %d\n", intSpeed - 50);
+        fprintf(stderr, "Zoom Speed %d\n", intSpeed - PANASONIC_HARDWARE_SCALE_OFFSET);
         fprintf(stderr, "Zoom Speed string %s\n", intSpeedString);
     }
 
@@ -455,6 +456,12 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
         if (localDebug) fprintf(stderr, "Pan position: %" PRId64 "\n", last_pan_position);
         if (localDebug) fprintf(stderr, "Tilt position: %" PRId64 "\n", last_tilt_position);
         free(response);
+    }
+    if (panPosition != NULL) {
+        *panPosition = last_pan_position;
+    }
+    if (tiltPosition != NULL) {
+        *tiltPosition = last_tilt_position;
     }
     return retval;
 }

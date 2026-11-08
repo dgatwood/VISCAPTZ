@@ -94,6 +94,7 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
     // Possible future options: LANC max is 8 (officially 0-7 plus "stopped").
     #define ZOOM_SCALE_HARDWARE 49
     #define ZOOM_MIN_HARDWARE 0  // 0..49
+    #define PANASONIC_HARDWARE_SCALE_OFFSET 50
 
     // Cameras without pan and tilt motors do not allow you to jump to a specific
     // zoom position.  Others don't provide speed control, so you may not want to
@@ -131,16 +132,16 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define MAX_TILT_POSITIONS_PER_SECOND() panaMaximumTiltPositionsPerSecond()
 
         /** The pan calibration data in raw form (positions per second for each speed). */
-        extern int64_t *pana_pan_data = NULL;
+        extern int64_t *pana_pan_data;
 
         /** The pan calibration data in core-scaled form (1000 * value / max_value). */
-        extern int32_t *pana_pan_scaled_data = NULL;
+        extern int32_t *pana_pan_scaled_data;
 
         /** The pan calibration data in raw form (positions per second for each speed). */
-        extern int64_t *pana_tilt_data = NULL;
+        extern int64_t *pana_tilt_data;
 
         /** The tilt calibration data in core-scaled form (1000 * value / max_value). */
-        extern int32_t *pana_tilt_scaled_data = NULL;
+        extern int32_t *pana_tilt_scaled_data;
 
     #endif  // !PANASONIC_PTZ_ZOOM_ONLY
 
