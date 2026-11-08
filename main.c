@@ -1924,28 +1924,28 @@ bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, s
 
 visca_response_t *failedVISCAResponse(void) {
   static visca_response_t response;
-  uint8_t data[] = { 0x10, 0x60, 0x20, 0xff };
+  uint8_t data[] = { 0x90, 0x60, 0x02, 0xff };
   SET_RESPONSE(&response, data);
   return &response;
 }
 
 visca_response_t *enqueuedVISCAResponse(void) {
   static visca_response_t response;
-  uint8_t data[] = { 0x10, 0x41, 0xff };
+  uint8_t data[] = { 0x90, 0x41, 0xff };
   SET_RESPONSE(&response, data);
   return &response;
 }
 
 visca_response_t *completedVISCAResponse(void) {
   static visca_response_t response;
-  uint8_t data[] = { 0x10, 0x51, 0xff };
+  uint8_t data[] = { 0x90, 0x51, 0xff };
   SET_RESPONSE(&response, data);
   return &response;
 }
 
 visca_response_t *tallyEnabledResponse(int tallyState) {
   static visca_response_t response;
-  uint8_t data[] = { 0x10, 0x50, 0x00, 0xff };
+  uint8_t data[] = { 0x90, 0x50, 0x00, 0xff };
   data[2] = tallyState;
   SET_RESPONSE(&response, data);
   return &response;
@@ -1953,7 +1953,7 @@ visca_response_t *tallyEnabledResponse(int tallyState) {
 
 visca_response_t *tallyModeResponse(int tallyState) {
   static visca_response_t response;
-  uint8_t data[] = { 0x10, 0x50, 0x00, 0xff };
+  uint8_t data[] = { 0x90, 0x50, 0x00, 0xff };
   data[2] = tallyState;
   SET_RESPONSE(&response, data);
   return &response;
@@ -1974,7 +1974,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
             static visca_response_t response;
             uint8_t data[] = {
-                0x10, 0x50, 0xde, 0xad, 0xbe, 0xef, 0xfe, 0xed, 0xba, 0xbe,
+                0x90, 0x50, 0xde, 0xad, 0xbe, 0xef, 0xfe, 0xed, 0xba, 0xbe,
                 (SCALE_CORE >> 8) & 0xff, SCALE_CORE & 0xff, 0xff
             };
             SET_RESPONSE(&response, data);
@@ -2001,7 +2001,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
             static visca_response_t response;
             uint8_t data[] = {
-                0x10, 0x50, ((zoomPositionScaled >> 12) & 0x0f), ((zoomPositionScaled >> 8) & 0x0f),
+                0x90, 0x50, ((zoomPositionScaled >> 12) & 0x0f), ((zoomPositionScaled >> 8) & 0x0f),
                 ((zoomPositionScaled >> 4) & 0x0f), (zoomPositionScaled & 0x0f), 0xff
             };
             SET_RESPONSE(&response, data);
