@@ -78,6 +78,9 @@ const char *kZoomMotorReversedKey = "zoom_motor_reversed";
 /** String key containing the tally source name for the Tricaster or OBS module. */
 const char *kTallySourceName = "tally_source_name";
 
+/** Integer key containing the VISCA device ID (1..7, default 1). */
+const char *kVISCADeviceIDKey = "visca_device_id";
+
 #if USE_OBS_TALLY_SOURCE
   /** String key containing the websocket URL for the OBS module. */
   const char *kOBSWebSocketURLKey = "obs_websocket_url";
@@ -1922,30 +1925,43 @@ bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, s
   }
 }
 
+uint8_t getDeviceID(void) {
+  int64_t deviceID = getConfigKeyInteger(kVISCADeviceIDKey);
+  return (deviceID > 0 && deviceID <= 7) ? (uint8_t)deviceID : 0x1;
+}
+
+void setDeviceID(uint8_t deviceID) {
+  setConfigKeyInteger(kVISCADeviceIDKey, deviceID & 0x07);
+}
+
+uint8_t getDeviceResponseID(void) {
+  return (getDeviceID() << 4) | 0x80;
+}
+
 visca_response_t *failedVISCAResponse(void) {
   static visca_response_t response;
-  uint8_t data[] = { 0x90, 0x60, 0x02, 0xff };
+  uint8_t data[] = { getDeviceResponseID(), 0x60, 0x02, 0xff };
   SET_RESPONSE(&response, data);
   return &response;
 }
 
 visca_response_t *enqueuedVISCAResponse(void) {
   static visca_response_t response;
-  uint8_t data[] = { 0x90, 0x41, 0xff };
+  uint8_t data[] = { getDeviceResponseID(), 0x41, 0xff };
   SET_RESPONSE(&response, data);
   return &response;
 }
 
 visca_response_t *completedVISCAResponse(void) {
   static visca_response_t response;
-  uint8_t data[] = { 0x90, 0x51, 0xff };
+  uint8_t data[] = { getDeviceResponseID(), 0x51, 0xff };
   SET_RESPONSE(&response, data);
   return &response;
 }
 
 visca_response_t *tallyEnabledResponse(int tallyState) {
   static visca_response_t response;
-  uint8_t data[] = { 0x90, 0x50, 0x00, 0xff };
+  uint8_t data[] = { getDeviceResponseID(), 0x50, 0x00, 0xff };
   data[2] = tallyState;
   SET_RESPONSE(&response, data);
   return &response;
@@ -1953,7 +1969,7 @@ visca_response_t *tallyEnabledResponse(int tallyState) {
 
 visca_response_t *tallyModeResponse(int tallyState) {
   static visca_response_t response;
-  uint8_t data[] = { 0x90, 0x50, 0x00, 0xff };
+  uint8_t data[] = { getDeviceResponseID(), 0x50, 0x00, 0xff };
   data[2] = tallyState;
   SET_RESPONSE(&response, data);
   return &response;
@@ -1962,8 +1978,8 @@ visca_response_t *tallyModeResponse(int tallyState) {
 bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
   if (debug_verbose) fprintf(stderr, "GOT VISCA INQUIRY %s\n", VISCAMessageDebugString(command, len));
 
-  // All VISCA inquiries start with 0x81.  Responses start with 0x90.
-  if(command[0] != 0x81) return false;
+  // All VISCA inquiries start with 0x8x (default 0x81).  Responses start with 0xy0 (default 0x90).
+  if (command[0] != (0x80 | getDeviceID())) return false;
 
   switch(command[1]) {
     case 0x09:
@@ -1974,7 +1990,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
             static visca_response_t response;
             uint8_t data[] = {
-                0x90, 0x50, 0xde, 0xad, 0xbe, 0xef, 0xfe, 0xed, 0xba, 0xbe,
+                getDeviceResponseID(), 0x50, 0xde, 0xad, 0xbe, 0xef, 0xfe, 0xed, 0xba, 0xbe,
                 (SCALE_CORE >> 8) & 0xff, SCALE_CORE & 0xff, 0xff
             };
             SET_RESPONSE(&response, data);
@@ -2001,7 +2017,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
             static visca_response_t response;
             uint8_t data[] = {
-                0x90, 0x50, ((zoomPositionScaled >> 12) & 0x0f), ((zoomPositionScaled >> 8) & 0x0f),
+                getDeviceResponseID(), 0x50, ((zoomPositionScaled >> 12) & 0x0f), ((zoomPositionScaled >> 8) & 0x0f),
                 ((zoomPositionScaled >> 4) & 0x0f), (zoomPositionScaled & 0x0f), 0xff
             };
             SET_RESPONSE(&response, data);
@@ -2134,7 +2150,7 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
 
   // All VISCA commands start with 0x8x, where x is the camera number.  For IP, always 1.
-  if(command[0] != 0x81) return false;
+  if (command[0] != (0x80 | getDeviceID())) return false;
 
   switch(command[1]) {
     case 0x01:

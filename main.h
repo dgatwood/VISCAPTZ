@@ -203,3 +203,12 @@ int scaleSpeed(int speed, int fromScale, int toScale, int32_t *scaleData);
  * no other tally source defined.
  */
 tallyStateType VISCA_getTallyState(void);
+
+/** Returns the VISCA device ID (default 0x1). */
+uint8_t getDeviceID(void);
+
+/** Sets the VISCA device ID (1..7). */
+void setDeviceID(uint8_t deviceID);
+
+/** Returns the VISCA response address byte for this device ((getDeviceID() << 4) | 0x80, default 0x90). */
+uint8_t getDeviceResponseID(void);
