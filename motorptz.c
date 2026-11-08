@@ -363,13 +363,15 @@ void handleCANFrame(struct can_frame *response) {
     bool localDebug = false;
     if (localDebug) fprintf(stderr, "Processing CAN frame.\n");
     if (response->data[0] == 0x7 && response->data[2] == 0x1) {
-        long value = response->data[3] | (response->data[4] << 8) |
-                     (response->data[5] << 16) | (response->data[6] << 24);
+        int64_t value = (uint32_t)response->data[3] |
+                        ((uint32_t)response->data[4] << 8) |
+                        ((uint32_t)response->data[5] << 16) |
+                        ((uint32_t)response->data[6] << 24);
         if (response->data[1] == panCANBusID) {
-            if (localDebug) fprintf(stderr, "Got pan: %ld.\n", value);
+            if (localDebug) fprintf(stderr, "Got pan: %" PRId64 ".\n", value);
             g_last_pan_position = value;
         } else if (response->data[1] == tiltCANBusID) {
-            if (localDebug) fprintf(stderr, "Got tilt: %ld.\n", value);
+            if (localDebug) fprintf(stderr, "Got tilt: %" PRId64 ".\n", value);
             g_last_tilt_position = value;
         } else {
             if (localDebug) fprintf(stderr, "Received message from unknown CAN bus ID %d", response->data[1]);
