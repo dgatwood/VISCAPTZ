@@ -14,7 +14,7 @@ TARGET = libmotorcontrol.so
 CC = gcc
 
 DEBUG = -g -O0 -Wall
-CFLAGS += $(DEBUG)
+CFLAGS += $(DEBUG) -fPIC
 
 # Warning: USE_BCM2835_LIB appears to cause hangs on RPi 4.
 # USELIB = USE_BCM2835_LIB
@@ -23,7 +23,7 @@ USELIB = USE_WIRINGPI_LIB
 
 # USELIB = USE_DEV_LIB
 
-DEBUG = -D $(USELIB) 
+CFLAGS += -D $(USELIB)
 ifeq ($(USELIB), USE_BCM2835_LIB)
     LIB = -lbcm2835 -lm 
 else ifeq ($(USELIB), USE_WIRINGPI_LIB)

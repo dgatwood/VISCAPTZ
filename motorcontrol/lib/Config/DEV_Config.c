@@ -23,41 +23,38 @@ Info:   Only supports Jetson Nano and Raspberry Pi
 static int DEV_Equipment_Testing(void)
 {
 	int i;
-	int fd;
+	int issue_fd;
 	char value_str[20];
-	fd = open("/etc/issue", O_RDONLY);
+	issue_fd = open("/etc/issue", O_RDONLY);
     printf("Current environment: ");
-	while(1) {
-		if (fd < 0) {
+	if (issue_fd < 0) {
+		return -1;
+	}
+	for(i=0; i < (int)sizeof(value_str) - 1; i++) {
+		if (read(issue_fd, &value_str[i], 1) <= 0) {
+			close(issue_fd);
 			return -1;
 		}
-		for(i=0;; i++) {
-			if (read(fd, &value_str[i], 1) < 0) {
-				return -1;
-			}
-			if(value_str[i] ==32) {
-				printf("\r\n");
-				break;
-			}
-			printf("%c",value_str[i]);
+		if(value_str[i] == 32) {
+			printf("\r\n");
+			break;
 		}
-		break;
+		printf("%c",value_str[i]);
 	}
+	value_str[i] = '\0';
+	close(issue_fd);
 
 	if(i<5) {
 		printf("Unrecognizable\r\n");
         return -1;
 	} else {
-		char RPI_System[10]   = {"Raspbian"};
-		for(i=0; i<6; i++) {
-			if(RPI_System[i] != value_str[i]) {
-                #if USE_DEV_LIB    
-                    return 'J';
-                #endif
-                return -1;
-			}
+		if (!strncmp(value_str, "Raspbian", 6) || !strncmp(value_str, "Debian", 6)) {
+			return 'R';
 		}
-        return 'R';
+		#if USE_DEV_LIB
+			return 'J';
+		#endif
+		return -1;
 	}
 	return -1;
 }
