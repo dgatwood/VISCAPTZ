@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -66,13 +67,13 @@ static bool position_monitor_thread_started __attribute__((unused)) = false;
 void *runMotorControlThread(void *argIgnored);
 void *runPositionMonitorThread(void *argIgnored);
 
-static volatile int64_t g_pan_speed = 0;
-static volatile int64_t g_tilt_speed = 0;
+static pthread_mutex_t g_motor_speed_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int64_t g_pan_speed = 0;
+static int64_t g_tilt_speed = 0;
+static bool g_pan_tilt_raw = false;
 
-static volatile int64_t g_last_pan_position = 0;
-static volatile int64_t g_last_tilt_position = 0;
-
-static volatile bool g_pan_tilt_raw = false;
+static _Atomic int64_t g_last_pan_position = 0;
+static _Atomic int64_t g_last_tilt_position = 0;
 
 const char *kMotorsAreSwappedKey = "motors_are_swapped";
 
@@ -101,8 +102,8 @@ bool motorModuleInit(void) {
     Motor_Init();
   #else
     // Start the fake hardware in the middle.
-    g_last_pan_position = 1000000;
-    g_last_tilt_position = 1000000;
+    atomic_store(&g_last_pan_position, 1000000);
+    atomic_store(&g_last_tilt_position, 1000000);
   #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
   if (localDebug) fprintf(stderr, "Motor initialized\n");
   return true;
@@ -110,8 +111,10 @@ bool motorModuleInit(void) {
 
 bool motorModuleStart(void) {
   bool localDebug = motor_enable_debugging || false;
-  // Start the motor control thread in the background.
   if (motor_enable_debugging) fprintf(stderr, "Motor module init\n");
+  bool reloadOK = motorModuleReload();
+
+  // Start the motor control thread in the background after calibration data is loaded.
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
 
   #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
@@ -120,7 +123,7 @@ bool motorModuleStart(void) {
   #endif  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
 
   if (localDebug) fprintf(stderr, "Motor module init done\n");
-  return motorModuleReload();
+  return reloadOK;
 }
 
 // Public function.  Docs in header.
@@ -161,9 +164,11 @@ bool motorModuleReload(void) {
 // the hardware drivers and ensures that all changes to hardware speed
 // happen in a single thread.
 bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
+  pthread_mutex_lock(&g_motor_speed_mutex);
   g_pan_tilt_raw = isRaw;
   g_pan_speed = panSpeed;
   g_tilt_speed = tiltSpeed;
+  pthread_mutex_unlock(&g_motor_speed_mutex);
   return true;
 }
 
@@ -178,10 +183,10 @@ bool motorSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
 // confused by requests from multiple threads overlapping.
 bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
   if (panPosition != NULL) {
-    *panPosition = g_last_pan_position;
+    *panPosition = atomic_load(&g_last_pan_position);
   }
   if (tiltPosition != NULL) {
-    *tiltPosition = g_last_tilt_position;
+    *tiltPosition = atomic_load(&g_last_tilt_position);
   }
   return true;
 }
@@ -379,10 +384,10 @@ void handleCANFrame(struct can_frame *response) {
                         ((uint32_t)response->data[6] << 24);
         if (response->data[1] == panCANBusID) {
             if (localDebug) fprintf(stderr, "Got pan: %" PRId64 ".\n", value);
-            g_last_pan_position = value;
+            atomic_store(&g_last_pan_position, value);
         } else if (response->data[1] == tiltCANBusID) {
             if (localDebug) fprintf(stderr, "Got tilt: %" PRId64 ".\n", value);
-            g_last_tilt_position = value;
+            atomic_store(&g_last_tilt_position, value);
         } else {
             if (localDebug) fprintf(stderr, "Received message from unknown CAN bus ID %d", response->data[1]);
         }
@@ -563,7 +568,7 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
         if (readSerialBytes(pan_fd, responseBuf, sizeof(responseBuf)) &&
             responseBuf[0] == 0x01 && responseBuf[1] == 0x03 && responseBuf[2] == 0x02) {
             uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
-            g_last_pan_position = pan_position;
+            atomic_store(&g_last_pan_position, pan_position);
         }
     }
 
@@ -572,7 +577,7 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
         if (readSerialBytes(tilt_fd, responseBuf, sizeof(responseBuf)) &&
             responseBuf[0] == 0x01 && responseBuf[1] == 0x03 && responseBuf[2] == 0x02) {
             uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
-            g_last_tilt_position = tilt_position;
+            atomic_store(&g_last_tilt_position, tilt_position);
         }
     }
 }
@@ -616,13 +621,19 @@ void *runMotorControlThread(void *argIgnored) {
 #endif
 
   while (1) {
-    int scaledPanSpeed = g_pan_tilt_raw ?
-        llabs(g_pan_speed) :
-        llabs(scaleSpeed(g_pan_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+    pthread_mutex_lock(&g_motor_speed_mutex);
+    int64_t panSpeed = g_pan_speed;
+    int64_t tiltSpeed = g_tilt_speed;
+    bool isRaw = g_pan_tilt_raw;
+    pthread_mutex_unlock(&g_motor_speed_mutex);
+
+    int scaledPanSpeed = isRaw ?
+        llabs(panSpeed) :
+        llabs(scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
                          motor_pan_scaled_data));
-    int scaledTiltSpeed = g_pan_tilt_raw ?
-        llabs(g_tilt_speed) :
-        llabs(scaleSpeed(g_tilt_speed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+    int scaledTiltSpeed = isRaw ?
+        llabs(tiltSpeed) :
+        llabs(scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
                          motor_tilt_scaled_data));
 
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
@@ -631,29 +642,29 @@ void *runMotorControlThread(void *argIgnored) {
 
     // Set the pan motor speed.
     if (localDebug) fprintf(stderr, "Setting motor A speed to %d.\n", scaledPanSpeed);
-    Motor_Run(motorsAreSwapped ? MOTORB : MOTORA, g_pan_speed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
+    Motor_Run(motorsAreSwapped ? MOTORB : MOTORA, panSpeed > 0 ? FORWARD : BACKWARD, scaledPanSpeed);
 
     // Set the tilt motor speed.
     if (localDebug) fprintf(stderr, "Setting motor B speed to %d.\n", scaledTiltSpeed);
-    Motor_Run(motorsAreSwapped ? MOTORA : MOTORB, g_tilt_speed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
+    Motor_Run(motorsAreSwapped ? MOTORA : MOTORB, tiltSpeed > 0 ? FORWARD : BACKWARD, scaledTiltSpeed);
 
     if (localDebug) fprintf(stderr, "Done.\n");
 
 #else  // !(ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
 
     int pan_sign = panEncoderReversed() ? -1 : 1;
-    int pan_sign_2 = (g_pan_speed < 0) ? -1 : 1;
+    int pan_sign_2 = (panSpeed < 0) ? -1 : 1;
 
     int tilt_sign = tiltEncoderReversed() ? -1 : 1;
-    int tilt_sign_2 = (g_tilt_speed < 0) ? -1 : 1;
+    int tilt_sign_2 = (tiltSpeed < 0) ? -1 : 1;
 
     /***************************************************************************
      * Fake hardware simulates encoder values based on the motor speed.  This  *
      * allows for some limited testing of recall functions without actual      *
      * hardware.                                                               *
      ***************************************************************************/
-    g_last_pan_position += 6 * scaledPanSpeed * pan_sign * pan_sign_2 / 100;
-    g_last_tilt_position += 6 * scaledTiltSpeed * tilt_sign * tilt_sign_2 / 100;
+    atomic_fetch_add(&g_last_pan_position, 6 * scaledPanSpeed * pan_sign * pan_sign_2 / 100);
+    atomic_fetch_add(&g_last_tilt_position, 6 * scaledTiltSpeed * tilt_sign * tilt_sign_2 / 100);
 
 #endif  // ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE
 
@@ -671,8 +682,10 @@ void *runMotorControlThread(void *argIgnored) {
         printf("PAN SPEED: %" PRId64 " (%d) TILT SPEED: %" PRId64 " (%d) "
                "PAN POSITION: %" PRId64 " TILT POSITION: %" PRId64
                " ZOOM SPEED: %" PRId64 " ZOOM POSITION: %010" PRId64 "\n",
-               g_pan_speed, scaledPanSpeed, g_tilt_speed, scaledTiltSpeed,
-               g_last_pan_position, g_last_tilt_position, zoom_speed, zoom_position);
+               panSpeed, scaledPanSpeed, tiltSpeed, scaledTiltSpeed,
+               (int64_t)atomic_load(&g_last_pan_position),
+               (int64_t)atomic_load(&g_last_tilt_position),
+               zoom_speed, zoom_position);
 #if ENABLE_HARDWARE
     }
 #endif  // ENABLE_HARDWARE
