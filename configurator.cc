@@ -1,4 +1,6 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE  // For asprintf, because Linux is weird.
+#endif
 
 #define ENABLE_CONFIGURATOR_DEBUGGING 0
 
