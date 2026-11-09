@@ -232,6 +232,9 @@ void *runPositionMonitorThread(void *argIgnored) {
     #if USE_CANBUS
         if (!updatePositionsCANBus(sock)) {
             if (localDebug) fprintf(stderr, "Reopening socket after failure.\n");
+            // NOTE: Do NOT add a backoff delay here.  Encoder position monitoring is
+            // latency-critical while motors are moving, so CAN bus recovery must retry
+            // immediately without waiting an extra millisecond.
             sock = motorOpenCANSock();
         }
     #else  // !USE_CANBUS
