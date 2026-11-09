@@ -491,7 +491,7 @@ void resetCenterPositionsCANBus(int sock) {
  * position encoders.
  */
 int motorOpenSerialDev(char *path) {
-  int fd = open(path, O_RDWR);
+  int fd = open(path, O_RDWR | O_NOCTTY);
 
   if (fd < 0) return fd;
 
@@ -501,6 +501,11 @@ int motorOpenSerialDev(char *path) {
     perror("Failed to get termios structure");
     exit(2);
   }
+  cfmakeraw(&serial_port_settings);
+  serial_port_settings.c_cflag |= (CLOCAL | CREAD);
+  serial_port_settings.c_cc[VMIN] = 0;
+  serial_port_settings.c_cc[VTIME] = 1;  // 100 ms read timeout.
+
   retval = cfsetospeed(&serial_port_settings, B9600);
   if (retval < 0) {
     perror("Failed to set 9600 output baud rate");
@@ -511,6 +516,7 @@ int motorOpenSerialDev(char *path) {
     perror("Failed to set 9600 input baud rate");
     exit(4);
   }
+  tcflush(fd, TCIFLUSH);
   retval = tcsetattr(fd, TCSANOW, &serial_port_settings);
   if (retval < 0) {
     perror("Failed to set serial attributes");
@@ -519,16 +525,29 @@ int motorOpenSerialDev(char *path) {
   return fd;
 }
 
+/** Reads `count` bytes from a serial file descriptor, retrying until complete or timeout/EOF. */
+static bool readSerialBytes(int fd, uint8_t *buf, size_t count) {
+  size_t totalRead = 0;
+  while (totalRead < count) {
+    ssize_t n = read(fd, buf + totalRead, count - totalRead);
+    if (n <= 0) {
+      return false;
+    }
+    totalRead += (size_t)n;
+  }
+  return true;
+}
+
 /** Updates the current encoder positions (serial/Modbus version). */
 void updatePositionsSerial(int pan_fd, int tilt_fd) {
     static const uint8_t requestBuf[] =
         { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0a };
-    uint8_t responseBuf[5];
+    uint8_t responseBuf[7];
 
     // Read the pan position.
     if (waitwrite(pan_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
-
-        if (read(pan_fd, (void *)responseBuf, sizeof(responseBuf)) == sizeof(responseBuf)) {
+        if (readSerialBytes(pan_fd, responseBuf, sizeof(responseBuf)) &&
+            responseBuf[0] == 0x01 && responseBuf[1] == 0x03 && responseBuf[2] == 0x02) {
             uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
             g_last_pan_position = pan_position;
         }
@@ -536,7 +555,8 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
 
     // Read the tilt position.
     if (waitwrite(tilt_fd, requestBuf, sizeof(requestBuf)) == sizeof(requestBuf)) {
-        if (read(tilt_fd, (void *)responseBuf, sizeof(responseBuf)) == sizeof(responseBuf)) {
+        if (readSerialBytes(tilt_fd, responseBuf, sizeof(responseBuf)) &&
+            responseBuf[0] == 0x01 && responseBuf[1] == 0x03 && responseBuf[2] == 0x02) {
             uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
             g_last_tilt_position = tilt_position;
         }
@@ -545,21 +565,23 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
 
 /** Resets the center position of the encoders to the current position (serial/Modbus version). */
 void resetCenterPositionsSerial(int tilt_fd, int pan_fd) {
-    // Register 0x000E: Write 0x0001.  (Function support code 0x06)
-    // [Device ID = 1] 06 00 01 00 0E [CRC high] [CRC low]
+    // Register 0x0001: Write 0x000E.  (Function support code 0x06)
+    // [Device ID = 1] 06 00 01 00 0E [CRC low] [CRC high]
 
-    static const uint8_t requestBuf[] = { 0x01, 0x06, 0x00, 0x01, 0x00, 0x0E, 0xCE, 0x59 };
-    uint8_t responseBuf[5];
+    static const uint8_t requestBuf[] = { 0x01, 0x06, 0x00, 0x01, 0x00, 0x0E, 0x59, 0xCE };
+    uint8_t responseBuf[8];
 
     waitwrite(pan_fd, requestBuf, sizeof(requestBuf));
-    read(pan_fd, (void *)responseBuf, sizeof(responseBuf));
+    bool panReadOK = readSerialBytes(pan_fd, responseBuf, sizeof(responseBuf));
+    assert(panReadOK);
     assert(responseBuf[0] == 1);
-    assert(responseBuf[1] == 0x10);
+    assert(responseBuf[1] == 0x06);
 
     waitwrite(tilt_fd, requestBuf, sizeof(requestBuf));
-    read(tilt_fd, (void *)responseBuf, sizeof(responseBuf));
+    bool tiltReadOK = readSerialBytes(tilt_fd, responseBuf, sizeof(responseBuf));
+    assert(tiltReadOK);
     assert(responseBuf[0] == 1);
-    assert(responseBuf[1] == 0x10);
+    assert(responseBuf[1] == 0x06);
 }
 
 #endif  // USE_CANBUS
