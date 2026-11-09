@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "main.h"
@@ -61,6 +62,7 @@ static bool motor_enable_debugging = false;
 
 pthread_t motor_control_thread;
 pthread_t position_monitor_thread;
+static bool position_monitor_thread_started __attribute__((unused)) = false;
 void *runMotorControlThread(void *argIgnored);
 void *runPositionMonitorThread(void *argIgnored);
 
@@ -113,6 +115,7 @@ bool motorModuleStart(void) {
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
 
   #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
+    position_monitor_thread_started = true;
     pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
   #endif  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
 
@@ -276,6 +279,7 @@ int motorOpenCANSock(void) {
     }
 
     struct ifreq interfaceRequest;
+    memset(&interfaceRequest, 0, sizeof(interfaceRequest));
     strcpy(interfaceRequest.ifr_name, "can0");
     int retval = ioctl(sock, SIOCGIFINDEX, &interfaceRequest);
     if (retval < 0) {
@@ -285,6 +289,7 @@ int motorOpenCANSock(void) {
     }
 
     struct sockaddr_can sockaddr;
+    memset(&sockaddr, 0, sizeof(sockaddr));
     sockaddr.can_family = AF_CAN;
     sockaddr.can_ifindex = interfaceRequest.ifr_ifindex;
     retval = bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
@@ -366,6 +371,8 @@ void handleCANFrame(struct can_frame *response) {
     bool localDebug = false;
     if (localDebug) fprintf(stderr, "Processing CAN frame.\n");
     if (response->data[0] == 0x7 && response->data[2] == 0x1) {
+        // NOTE: The encoder reports an unsigned 32-bit position (centered around its
+        // midpoint); do NOT sign-extend this to int32_t before widening to int64_t.
         int64_t value = (uint32_t)response->data[3] |
                         ((uint32_t)response->data[4] << 8) |
                         ((uint32_t)response->data[5] << 16) |
@@ -397,9 +404,9 @@ bool sendCANRequestFrame(int sock, uint8_t deviceID) {
         fprintf(stderr, "Writing to socket %d frame %d %d\n", sock, message.can_id, message.can_dlc);
     }
 
-    ssize_t bytesWritten = -1;
-    if (waitwrite(sock, &message, sizeof(message)) != sizeof(message)) {
-        fprintf(stderr, "CANBus write failed (expected length %zu, got %zu)\n", sizeof(message), bytesWritten);
+    ssize_t bytesWritten = waitwrite(sock, &message, sizeof(message));
+    if (bytesWritten != (ssize_t)sizeof(message)) {
+        fprintf(stderr, "CANBus write failed (expected length %zu, got %zd)\n", sizeof(message), bytesWritten);
         return false;
     }
     return true;
@@ -442,6 +449,7 @@ void reassign_encoder_device_id(int oldCANBusID, int newCANBusID) {
             }
         } else {
             fprintf(stderr, "Reassignment failed (socket read).\n");
+            exit(1);
         }
     } else {
         fprintf(stderr, "Reassignment failed (socket write).\n");
@@ -457,18 +465,24 @@ void resetCenterPositionOfCANBusEncoder(int sock, int CANBusID) {
     fprintf(stderr, "Setting the midpint of the encoder to the current position.\n");
     if (waitwrite(sock, &message, sizeof(message)) == sizeof(message)) {
         struct can_frame response;
-        if (read(sock, &response, sizeof(response)) == sizeof(response)) {
-            if (response.data[0] == 0x4 && response.data[1] == CANBusID &&
-                response.data[2] == 0xC && response.data[3] == 0) {
-                    fprintf(stderr, "Reset successful.\n");
-            } else {
-                fprintf(stderr, "Reset failed with error %d\n", response.data[3]);
+        for (int attempt = 0; attempt < 16; attempt++) {
+            if (read(sock, &response, sizeof(response)) != sizeof(response)) {
+                fprintf(stderr, "Reset failed (socket read).\n");
                 exit(1);
             }
-        } else {
-            fprintf(stderr, "Reset failed (socket read).\n");
-            exit(1);
+            if (response.data[0] == 0x4 && response.data[1] == CANBusID &&
+                response.data[2] == 0xC) {
+                if (response.data[3] == 0) {
+                    fprintf(stderr, "Reset successful.\n");
+                    return;
+                } else {
+                    fprintf(stderr, "Reset failed with error %d\n", response.data[3]);
+                    exit(1);
+                }
+            }
         }
+        fprintf(stderr, "Reset failed (no matching response received).\n");
+        exit(1);
     } else {
         fprintf(stderr, "Reset failed (socket write).\n");
         exit(1);
@@ -741,9 +755,9 @@ int64_t motorMaximumTiltPositionsPerSecond(void) {
 }
 
 double getVISCATimestamp(void) {
-    struct timeval curTime;
-    gettimeofday(&curTime, NULL);
-    return curTime.tv_sec + (curTime.tv_usec / 1000000.0);
+    struct timespec curTime;
+    clock_gettime(CLOCK_MONOTONIC, &curTime);
+    return curTime.tv_sec + (curTime.tv_nsec / 1000000000.0);
 }
 
 ssize_t waitwrite(int fd, const void *buf, size_t count) {
@@ -759,10 +773,11 @@ ssize_t waitwrite(int fd, const void *buf, size_t count) {
     // fprintf(stderr, "sleepTime = %lf timestamp %lf lastTimestamp %lf sleepUntil %lf to CAN\n",
             // sleepTime, timestamp, lastTimestamp, sleepUntil);
     usleep(sleepTime * 1000000);
+    timestamp = getVISCATimestamp();
   }
   lastTimestamp = timestamp;
-  
-  assert(pthread_self() == position_monitor_thread);
+
+  assert(!position_monitor_thread_started || pthread_equal(pthread_self(), position_monitor_thread));
 #endif // THROTTLE
 
   return write(fd, buf, count);
