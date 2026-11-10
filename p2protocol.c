@@ -916,6 +916,9 @@ bool timeToRequestZoomPosition(void) {
 }
 
 void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSize) {
+  if (packetSize == 0) {
+    return;
+  }
   uint8_t message_type = packetBuffer[0];
   if (message_type == 6) {
     if (packetSize < sizeof(p2_optical_data_t)) {
@@ -978,10 +981,16 @@ void *runP2UDPThread(void *argIgnored) {
     if (retval > 0) {
       // fprintf(stderr, "Got UDP response.  Reading data.\n");
       uint8_t buf[4096];
+      struct sockaddr_in sender_addr;
+      socklen_t sender_len = sizeof(sender_addr);
       ssize_t length = recvfrom(gP2UDPSocket, buf, sizeof(buf),
-               0, NULL, NULL);
+               0, (struct sockaddr *)&sender_addr, &sender_len);
       // fprintf(stderr, "Length %ld\n", length);
-      updateZoomPositionAndTallyFromP2Data(buf, length);
+      if (length > 0 &&
+          sender_addr.sin_family == AF_INET &&
+          sender_addr.sin_addr.s_addr == gP2Addr.sin_addr.s_addr) {
+        updateZoomPositionAndTallyFromP2Data(buf, (size_t)length);
+      }
     }
   }
 }
