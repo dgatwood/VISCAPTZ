@@ -134,7 +134,8 @@ void splitSourceNames(char *sourceNameString, char ***outArray, int *outCount) {
 // Main loop of the OBS tally module listener thread.
 void *runOBSTallyThread(void *argIgnored) {
   char *OBSWebSocketURL = getConfigKey(kOBSWebSocketURLKey);
-  char *password = getConfigKey(kOBSPasswordKey) ?: "";
+  char *rawPassword = getConfigKey(kOBSPasswordKey);
+  char *password = rawPassword ?: "";
 
   #if USE_OBS_TALLY_SOURCE
     registerOBSProgramCallback(&addSceneOnProgram);
@@ -142,8 +143,10 @@ void *runOBSTallyThread(void *argIgnored) {
     registerOBSInactiveCallback(&markSceneInactive);
   #endif  // USE_OBS_TALLY_SOURCE
 
-  // Function never returns.
+  // Function never returns when USE_OBS_TALLY_SOURCE is enabled.
   runOBSTally(OBSWebSocketURL, password);
+  free(OBSWebSocketURL);
+  free(rawPassword);
   return NULL;
 }
 
@@ -277,15 +280,11 @@ void removeActiveSceneWithName(const char *name) {
 static void updateTallyState(void) {
   tallyStateType maxState = kTallyStateOff;
   for (tally_scene_item_t *item = activeScenes ; item ; item = item->next) {
-    if (maxState < kTallyStateRed) {
-      // Tally light is off.  Just use the value (promote to anything or not).
-      maxState = item->tallyState;
-
-    } else if (maxState == kTallyStateGreen) {
-      // Tally light is green for preview.  Upgrade to red if needed, else ignore.
-      if (item->tallyState == kTallyStateRed) {
-        maxState = kTallyStateRed;
-      }
+    if (item->tallyState == kTallyStateRed) {
+      maxState = kTallyStateRed;
+      break;
+    } else if (item->tallyState == kTallyStateGreen && maxState == kTallyStateOff) {
+      maxState = kTallyStateGreen;
     }
   }
   atomic_store(&gCurrentOBSTallyState, maxState);

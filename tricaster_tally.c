@@ -30,10 +30,12 @@ static pthread_t tricaster_tally_thread;
 static char *tally_source_name = NULL;
 
 static _Atomic(tallyStateType) gTricasterTallyState;
+static bool gTricasterTallyInitialized = false;
 
 static void handleResponses(int sock);
 ssize_t handleResponse(char *buf, ssize_t length);
 static void handleTag(char *tag);
+void setTallyStateFromTricaster(tallyStateType newState);
 void *runTricasterTallyThread(void *argIgnored);
 void tricasterModuleTeardown(int sock);
 
@@ -109,6 +111,10 @@ tallyStateType tricaster_getTallyState(void) {
       }
       handleResponses(sock);
       close(sock);
+      g_onProgram = false;
+      g_onPreview = false;
+      setTallyStateFromTricaster(kTallyStateOff);
+      sleep(RECONNECT_DELAY);
     }
     return NULL;
   }
@@ -142,7 +148,16 @@ tallyStateType tricaster_getTallyState(void) {
       FD_ZERO(&read_fds);
       FD_SET(sock, &read_fds);
 
-      if (select(sock + 1, &read_fds, NULL, NULL, NULL) > 0) {
+      int selectResult = select(sock + 1, &read_fds, NULL, NULL, NULL);
+      if (selectResult < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        perror("tricaster_tally: select");
+        free(pendingBytes);
+        return;
+      }
+      if (selectResult > 0) {
         char buf[TRICASTER_BUF_SIZE + 1];
         ssize_t length = read(sock, buf, TRICASTER_BUF_SIZE);
         if (length < 0 && (errno == EAGAIN || errno == EWOULDBLOCK  || errno == EINTR)) {
@@ -212,11 +227,34 @@ tallyStateType tricaster_getTallyState(void) {
       pos = end + 1;
       lastend = pos;
     }
+    if (pos != NULL) {
+      // Incomplete <shortcut_state tag at pos; discard anything before pos,
+      // or discard everything if the incomplete tag exceeds TRICASTER_BUF_SIZE.
+      lastend = ((buf + length) - pos <= TRICASTER_BUF_SIZE) ? pos : (buf + length);
+    } else {
+      // No <shortcut_state tag found in the remainder. Keep only a trailing partial
+      // prefix of "<shortcut_state " if present; discard all other trailing data.
+      const char *prefix = "<shortcut_state ";
+      ssize_t prefixLen = strlen(prefix);
+      char *lastOpen = strrchr(lastend, '<');
+      if (lastOpen != NULL &&
+          (buf + length) - lastOpen < prefixLen &&
+          !strncmp(lastOpen, prefix, (buf + length) - lastOpen)) {
+        lastend = lastOpen;
+      } else {
+        lastend = buf + length;
+      }
+    }
     return lastend - buf;
   }
 
   /** Posts tally state changes to the camera, if applicable, and updates the internal state. */
   void setTallyStateFromTricaster(tallyStateType newState) {
+    if (gTricasterTallyInitialized && atomic_load(&gTricasterTallyState) == newState) {
+      return;
+    }
+    gTricasterTallyInitialized = true;
+
     fprintf(stderr, "Tally state: %s\n",
             (newState == kTallyStateRed) ? "Red (Program)" :
             (newState == kTallyStateGreen) ? "Green (Preview)" :
