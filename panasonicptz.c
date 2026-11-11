@@ -255,8 +255,8 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
     // Panasonic's documentation makes no sense, so this is probably wrong,
     // and I don't have the hardware required to try it, so this should be
     // considered entirely unsupported.  Why don't these use PAN_TILT_SCALE_HARDWARE?
-    int convertedPanSpeed = scaleSpeed(panSpeed, SCALE_CORE, 0x1D, NULL) - 1;    // Speeds are 0 through 0x1D?
-    int convertedTiltSpeed = scaleSpeed(tiltSpeed, SCALE_CORE, 3, NULL) - 1;  // Speeds are 0, 1, or 2?
+    int convertedPanSpeed = MAX(scaleSpeed(panSpeed, SCALE_CORE, 0x1D, NULL) - 1, 0);    // Speeds are 0 through 0x1D?
+    int convertedTiltSpeed = MAX(scaleSpeed(tiltSpeed, SCALE_CORE, 3, NULL) - 1, 0);  // Speeds are 0, 1, or 2?
 
     char *values[4] = {
         panaIntString(panPosition, 4, true),
@@ -449,7 +449,7 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
     bool retval = false;
     if (response != NULL) {
         retval = true;
-        int32_t value = strtol(response, NULL, 16);
+        uint32_t value = (uint32_t)strtoul(response, NULL, 16);
         last_pan_position = (value >> 16) & 0xffff;
         last_tilt_position = value & 0xffff;
 
@@ -542,8 +542,8 @@ bool panaSetTallyState(int tallyState) {
     }
 
     bool localDebug = pana_enable_debugging || false;
-    int redState = (tallyState == 5);
-    int greenState = (tallyState == 6);
+    int redState = (tallyState == kTallyStateRed);
+    int greenState = (tallyState == kTallyStateGreen);
     if (localDebug) fprintf(stderr, "Fetching RED\n");
 
     char *redTallyState = panaIntString(redState, 1, false);

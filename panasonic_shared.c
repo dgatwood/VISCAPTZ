@@ -85,6 +85,7 @@ void panasonicSharedInit(int64_t **calibrationDataBuffer, int *maxSpeed) {
 //
 // Anyway, this converts a hardware zoom value into something roughly linear.
 int64_t panaMakeZoomLinear(int64_t zoomPosition) {
+  bool localDebug = false || pana_enable_debugging;
   if (zoom_position_map_count == 0) {
     fprintf(stderr, "WARNING: Zoom position map empty.\n");
     return zoomPosition;
@@ -100,8 +101,10 @@ int64_t panaMakeZoomLinear(int64_t zoomPosition) {
   entry = MIN(entry, maxZoom - minZoom);           // Clamp the maximum.
 
   int64_t retval = zoom_position_map[entry];
-  fprintf(stderr, "panaMakeZoomLinear: minZoom: %" PRId64 "\nEntry:%lld\nCount: %d\n", minZoom, (long long)entry, zoom_position_map_count);
-  fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", (long long)zoomPosition, (long long)retval);
+  if (localDebug) {
+    fprintf(stderr, "panaMakeZoomLinear: minZoom: %" PRId64 "\nEntry:%lld\nCount: %d\n", minZoom, (long long)entry, zoom_position_map_count);
+    fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", (long long)zoomPosition, (long long)retval);
+  }
 
   return retval;
 }
@@ -163,7 +166,9 @@ void populateZoomNonlinearityTable(void) {
 
     position++;
     scaledPosition = scaleLinearZoomToRawZoom(position);
-    fprintf(stderr, "Scaled position: %lld\n", (long long)scaledPosition);
+    if (localDebug) {
+      fprintf(stderr, "Scaled position: %lld\n", (long long)scaledPosition);
+    }
   }
   fprintf(stderr, "Nonlinearity table populated.\n");
 }
