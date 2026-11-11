@@ -30,7 +30,7 @@ static const char *getConfigFilePath(void);
 // Returns true if the specified line's key portion matches the specified key.
 static bool lineMatchesKey(const char *buf, const char *key) {
   size_t keyLength = strlen(key);
-  return (strlen(buf) > (keyLength + 1)) &&
+  return (strlen(buf) >= (keyLength + 1)) &&
       !strncmp(key, buf, keyLength) &&
       (buf[keyLength] == '=');
 }
@@ -65,7 +65,7 @@ static void loadConfigurationIfNeeded(void) {
       buf[--length] = '\0';
     }
     char *equalsPos = strchr(buf, '=');
-    if (equalsPos != NULL && equalsPos != buf && *(equalsPos + 1) != '\0') {
+    if (equalsPos != NULL && equalsPos != buf) {
       *equalsPos = '\0';
       configMap[buf] = equalsPos + 1;
     }
@@ -160,12 +160,6 @@ bool setConfigKey(const char *key, const char *value) {
   pthread_mutex_lock(&configFileMutex);
   loadConfigurationIfNeeded();
 
-  if (value == NULL || value[0] == '\0') {
-    configMap.erase(key);
-  } else {
-    configMap[key] = value;
-  }
-
   const char *configFilePath = getConfigFilePath();
   FILE *fp = fopen(configFilePath, "r");
   if (!fp) {
@@ -208,7 +202,7 @@ bool setConfigKey(const char *key, const char *value) {
       // Matching line.
       if (value != NULL) {
         // Write the new value if it is non-NULL, else treat it as a deletion.
-        bool newError = (fprintf(fq, "%s=%s\n", key, value) == -1);
+        bool newError = (fprintf(fq, "%s=%s\n", key, value) < 0);
         error = error || newError;
         if (newError) {
           fprintf(stderr, "Error rewriting key line.\n");
@@ -216,7 +210,8 @@ bool setConfigKey(const char *key, const char *value) {
       }
       found = true;
     } else {
-      bool newError = (fprintf(fq, "%s", buf) == -1);
+      bool needsNewline = (length > 0 && buf[length - 1] != '\n');
+      bool newError = (fprintf(fq, "%s%s", buf, needsNewline ? "\n" : "") < 0);
       error = error || newError;
       if (error) {
         fprintf(stderr, "Error writing non-key line.\n");
@@ -224,7 +219,7 @@ bool setConfigKey(const char *key, const char *value) {
     }
   }
   if ((!found) && value != NULL) {
-    bool newError = (fprintf(fq, "%s=%s\n", key, value) == -1);
+    bool newError = (fprintf(fq, "%s=%s\n", key, value) < 0);
     error = error || newError;
     if (error) {
       fprintf(stderr, "Error writing key line.\n");
@@ -243,6 +238,12 @@ bool setConfigKey(const char *key, const char *value) {
     if (error) {
       fprintf(stderr, "Error renaming temp file.\n");
       unlink(tempfilename);
+    } else {
+      if (value == NULL) {
+        configMap.erase(key);
+      } else {
+        configMap[key] = value;
+      }
     }
   } else {
     unlink(tempfilename);
