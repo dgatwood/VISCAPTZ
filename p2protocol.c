@@ -737,7 +737,7 @@ bool requestEnv(char *authToken, int sock) {
   }
 
   char buf[4097];
-  length = syncRead(sock, buf, 4096);
+  length = syncReadLong(sock, buf, 4096);
   if (length <= 0) return false;
 
   buf[length] = '\0';
@@ -756,7 +756,7 @@ bool requestEnv(char *authToken, int sock) {
     return false;
   }
 
-  length = syncRead(sock, buf, 4096);
+  length = syncReadLong(sock, buf, 4096);
   if (length <= 0) {
     fprintf(stderr, "No response from camera.\n");
     return false;
@@ -764,12 +764,20 @@ bool requestEnv(char *authToken, int sock) {
 
   fprintf(stderr, "Parsing auth message.\n");
   xmlDocPtr doc = xmlReadMemory(buf, length, "response.xml", NULL, 0);
+  if (doc == NULL) {
+    fprintf(stderr, "Could not parse environment/connect response.\n");
+    return false;
+  }
 
   xmlNode *root_element = xmlDocGetRootElement(doc);
-  xmlNode *camctl = root_element->children;
+  xmlNode *camctl = (root_element != NULL) ? root_element->children : NULL;
+  while (camctl != NULL && camctl->type != XML_ELEMENT_NODE) {
+    camctl = camctl->next;
+  }
 
-  if (strcmp((const char *)camctl->name, "CamCtl")) {
-    fprintf(stderr, "Invalid first tag %s in response\n", (const char *)camctl->name);
+  if (camctl == NULL || strcmp((const char *)camctl->name, "CamCtl")) {
+    fprintf(stderr, "Invalid first tag %s in response\n",
+            camctl ? (const char *)camctl->name : "<none>");
     xmlFreeDoc(doc);
     return false;
   }
@@ -1130,11 +1138,14 @@ char *textForResponseElement(char *tag, char *result) {
   if (root_element == NULL) goto fail;
 
   xmlNode *response = root_element->children;  // Response
+  while (response != NULL && response->type != XML_ELEMENT_NODE) {
+    response = response->next;
+  }
   if (response == NULL) goto fail;
   xmlNode *startNode = (!strcmp((const char *)response->name, "Response")) ? response->children : response;
 
   for (xmlNode *curnode = startNode; curnode; curnode = curnode->next) {
-    if (!strcmp((const char *)curnode->name, tag)) {
+    if (curnode->type == XML_ELEMENT_NODE && !strcmp((const char *)curnode->name, tag)) {
       asprintf(&resultBuf, "%s", (const char *)xmlNodeGetContent(curnode));
       xmlFreeDoc(doc);
       return resultBuf;
