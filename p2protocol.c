@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <curl/curl.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <math.h>
 #include <netdb.h>
@@ -15,6 +16,7 @@
 #include <sys/param.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -62,6 +64,7 @@ int64_t p2GetZoomPositionRaw(void);
 char *md5_string(uint8_t *hashbuf);
 char *getP2Auth(int sock);
 
+char *generateCamControlRequest(const char *command);
 bool sendP2Request(char *request, char **buf);
 bool requestEnv(char *authToken, int sock);
 
@@ -377,8 +380,10 @@ static bool p2FetchZoomSpeedLimits(void) {
   }
 
   bool localDebug = false || p2_enable_debugging;
+  char *request = generateCamControlRequest("$ZmSpd:c");
   char *result = NULL;
-  bool ok = sendP2Request("<CamCtl>$ZmSpd:c</CamCtl>", &result);
+  bool ok = sendP2Request(request, &result);
+  free(request);
   if (!ok) {
     fprintf(stderr, "Could not send request.\n");
     return false;
@@ -454,16 +459,16 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
                               p2ScaledZoomCalibrationData) + offset;
       }
     }
-    gLastZoomSpeed = intSpeed;
-
     if (localDebug) {
         fprintf(stderr, "Zoom Core speed %" PRId64 "\n", speed);
         fprintf(stderr, "Zoom Speed %d\n", intSpeed);
     }
 
     bool retval = true;
-    char *command = NULL;
-    asprintf(&command, "<CamCtl>$ZmSpd:=%d</CamCtl>", intSpeed);
+    char *rawCommand = NULL;
+    asprintf(&rawCommand, "$ZmSpd:=%d", intSpeed);
+    char *command = generateCamControlRequest(rawCommand);
+    free(rawCommand);
     char *response = NULL;
     bool ok = sendP2Request(command, &response);
     free(command);
@@ -474,9 +479,11 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
 
     if (!ok /* || !response || atoi(response) != intSpeed */) {
         retval = false;
+    } else {
+        gLastZoomSpeed = intSpeed;
+        markSpeedChange(intSpeed);
     }
     free(response);
-    markSpeedChange(intSpeed);
     return retval;
 }
 
@@ -488,9 +495,20 @@ int64_t p2GetZoomPositionRaw(void) {
       // taking this mutex, because we know the value won't change quickly (twice per second),
       // but the pthreads API doesn't allow condition waits without a mutex, so we'll just burn
       // the extra cycles.
+      struct timeval now;
+      gettimeofday(&now, NULL);
+      struct timespec timeout;
+      timeout.tv_sec = now.tv_sec + 5;
+      timeout.tv_nsec = now.tv_usec * 1000;
+
       pthread_mutex_lock(&gSpeedLock);
-      pthread_cond_wait(&gZoomDataCond, &gSpeedLock);
+      int err = pthread_cond_timedwait(&gZoomDataCond, &gSpeedLock, &timeout);
       pthread_mutex_unlock(&gSpeedLock);
+      if (err != 0) {
+        fprintf(stderr, "Timed out waiting for P2 UDP zoom position broadcast during calibration.  Bailing.\n");
+        p2SetZoomSpeed(0, true);
+        exit(1);
+      }
     }
 
     return gLastZoomPosition;
@@ -535,20 +553,22 @@ int p2GetTallyState(void) {
 //
 // Sets the camera's tally light state.
 bool p2SetTallyState(int tallyState) {
-  bool retval = true;
-
-  char *redRequest = (tallyState == kTallyStateRed) ?  "$RTlySw:=On" : "$RTlySw:=Off";
-  char *greenRequest = (tallyState == kTallyStateGreen) ?  "$GTlySw:=On" : "$GTlySw:=Off";
+  char *redRequest = generateCamControlRequest(
+      (tallyState == kTallyStateRed) ? "$RTlySw:=On" : "$RTlySw:=Off");
+  char *greenRequest = generateCamControlRequest(
+      (tallyState == kTallyStateGreen) ? "$GTlySw:=On" : "$GTlySw:=Off");
 
   char *junkbuf = NULL;
-  sendP2Request(redRequest, &junkbuf);
+  bool redOk = sendP2Request(redRequest, &junkbuf);
+  free(redRequest);
   if (junkbuf != NULL) free(junkbuf);
 
   junkbuf = NULL;
-  sendP2Request(greenRequest, &junkbuf);
+  bool greenOk = sendP2Request(greenRequest, &junkbuf);
+  free(greenRequest);
   if (junkbuf != NULL) free(junkbuf);
 
-  return retval;
+  return redOk && greenOk;
 }
 
 
@@ -839,6 +859,12 @@ char *md5_string(uint8_t *hashbuf) {
   return buf;
 }
 
+char *generateCamControlRequest(const char *command) {
+  char *request = NULL;
+  asprintf(&request, "<CamCtl>%s</CamCtl>", command);
+  return request;
+}
+
 bool sendP2Request(char *request, char **buf) {
   if (buf == NULL) return false;
   *buf = NULL;
@@ -1058,6 +1084,13 @@ ssize_t syncRead(int fd, void *buf, size_t count) {
     int retval = select(fd + 1, &read_fds, NULL, NULL, &tv);
     if (retval > 0) {
       len = read(fd, buf, count);
+      if (len == 0) {
+        // EOF: peer closed connection.
+        break;
+      }
+      if (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+        break;
+      }
     }
     retries++;
   }
@@ -1111,8 +1144,18 @@ void markSpeedChange(int newSpeed) {
  * is already held.
  */
 void markSpeedChangeNoLock(int newSpeed) {
+  double now = timeStamp();
+
+  // Prune stale entries older than 30 seconds in case UDP broadcasts have stopped arriving.
+  while (gSpeedHead != NULL && gSpeedHead->next != NULL &&
+         (now - gSpeedHead->next->timestamp) > 30.0) {
+    speed_time_t *stale = gSpeedHead;
+    gSpeedHead = gSpeedHead->next;
+    free(stale);
+  }
+
   speed_time_t *newSpeedItem = malloc(sizeof(speed_time_t));
-  newSpeedItem->timestamp = timeStamp();
+  newSpeedItem->timestamp = now;
   newSpeedItem->speed = newSpeed;
   newSpeedItem->next = NULL;
 
