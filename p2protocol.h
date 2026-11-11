@@ -55,6 +55,12 @@ int64_t p2MinimumZoomPositionsPerSecond(void);
 /** The number of zoom positions moved in one second at the maximum speed. */
 int64_t p2MaximumZoomPositionsPerSecond(void);
 
+/** Gets the minimum hardware zoom speed supported by the camera. */
+int p2GetMinZoomSpeed(void);
+
+/** Gets the maximum hardware zoom speed supported by the camera. */
+int p2GetMaxZoomSpeed(void);
+
 // If Panasonic zoom is enabled, map the standard motion and position macros to functions in this module.
 #if USE_PANASONIC_PTZ && ENABLE_P2_MODE
 
@@ -77,8 +83,8 @@ int64_t p2MaximumZoomPositionsPerSecond(void);
     #define ZOOM_POSITION_SUPPORTED true
     #define SET_ZOOM_SPEED(speed, isRaw) p2SetZoomSpeed(speed, isRaw)
 
-    #define ZOOM_SCALE_HARDWARE 8
-    #define ZOOM_MIN_HARDWARE 1  // 1..8
+    #define ZOOM_SCALE_HARDWARE p2GetMaxZoomSpeed()
+    #define ZOOM_MIN_HARDWARE p2GetMinZoomSpeed()
 
     #define SET_ZOOM_POSITION(position, maxSpeed, time, startTime) \
         setAxisPositionIncrementally(axis_identifier_zoom, position, maxSpeed, time, startTime)

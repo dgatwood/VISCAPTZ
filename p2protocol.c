@@ -106,6 +106,10 @@ static char *g_cameraIPAddr = NULL;
 static char *gAuthToken = NULL;
 static char *gSessionID = NULL;
 
+/** Cached minimum and maximum hardware zoom speeds queried from the camera via $ZmSpd:c. */
+static int gMinZoomSpeed = 0;
+static int gMaxZoomSpeed = 0;
+
 #if USE_PANASONIC_PTZ
   /** The zoom calibration data in raw form (positions per second for each speed). */
   int64_t *p2ZoomCalibrationData = NULL;
@@ -250,6 +254,7 @@ bool p2ModuleInit(void) {
     if (bind(gP2UDPSocket, (struct sockaddr *)&sa_recv, sizeof(sa_recv)) != 0) {
         perror("Bind failed");
         close(gP2UDPSocket);
+        gP2UDPSocket = -1;
         return false;
     }
 
@@ -282,7 +287,10 @@ bool p2ModuleReload(void) {
     int maxSpeed = 0;
     bool localDebug = false;
     panasonicSharedInit(&p2ZoomCalibrationData, &maxSpeed);
-    if (maxSpeed == ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE) {
+    int minZoomSpeed = ZOOM_MIN_HARDWARE;
+    int maxZoomSpeed = ZOOM_SCALE_HARDWARE;
+    if (p2ZoomCalibrationData != NULL && maxZoomSpeed > 0 &&
+        maxSpeed == maxZoomSpeed - minZoomSpeed) {
         p2ScaledZoomCalibrationData =
             convertSpeedValues(p2ZoomCalibrationData, maxSpeed,
                                axis_identifier_zoom);
@@ -354,50 +362,67 @@ int64_t p2GetZoomSpeed(void) {
     return gLastZoomSpeed;
 }
 
-// Gets the maximum zoom speed.
-int p2GetMaxZoomSpeed(void) {
-  // Query $ZmSpd:c and that gets the maximum value.  Then send $ZmSpd:=value where value
-  // is 0..max or 0..-max.
+// Queries $ZmSpd:c and caches the minimum and maximum zoom speeds.
+//
+// Message:
+// <P2Control><Auth>5029c78a681b8bdb80ab868bbabb1393</Auth><SessionID>007</SessionID><CamCtl>$ZmSpd:c</CamCtl></P2Control>
+//
+// Response:
+// <P2Control><Response><CamCtl>$ZmSpd:i20,30000</CamCtl></Response></P2Control>
+//
+// Valid speeds for '$ZmSpd:=i'max','min are -max..-min, 0, and min..max.
+static bool p2FetchZoomSpeedLimits(void) {
+  if (gMaxZoomSpeed > 0) {
+    return true;
+  }
 
-  // Message:
-  // <P2Control><Auth>5029c78a681b8bdb80ab868bbabb1393</Auth><SessionID>007</SessionID><CamCtl>$ZmSpd:c</CamCtl></P2Control>
-  //
-  // Response:
-  // <P2Control><CamCtl>$ZmSpd:i-8,8</CamCtl></P2Control
-
-  bool localDebug = false;
+  bool localDebug = false || p2_enable_debugging;
   char *result = NULL;
   bool ok = sendP2Request("<CamCtl>$ZmSpd:c</CamCtl>", &result);
   if (!ok) {
     fprintf(stderr, "Could not send request.\n");
-    return 0;
+    return false;
   }
-
-  // <P2Control><Response><CamCtl>$ZmSpd:8</CamCtl></Response></P2Control>
-  // <P2Control><Response><CamCtl>$ZmSpd:i-8,8</CamCtl></Response></P2Control>
 
   if (localDebug) fprintf(stderr, "Zoom speed response: %s\n", result);
 
   char *text = textForResponseElement("CamCtl", result);
+  free(result);
 
   if (localDebug) fprintf(stderr, "Zoom speed result: %s\n", text);
 
-  if (!strncmp(text, "$ZmSpd:", 7)) {
-    char *speed = text + 7;
-    // If intelligent zoom is active, skip the intelligent zoom speed and get the hardware zoom speed after the comma.
-    if (localDebug) fprintf(stderr, "Speed part: \"%s\"\n", speed);
-    if (speed[0] == 'i') {
-      speed = strstr(speed, ",");
-      if (speed != NULL) {
-        speed++;  // Return the character after the comma.
-      } else {
-        return 0;
+  bool parsed = false;
+  if (!strncmp(text, "$ZmSpd:i", 8)) {
+    char *minPart = text + 8;
+    if (localDebug) fprintf(stderr, "Speed part: \"%s\"\n", minPart);
+    char *comma = NULL;
+    long minSpeed = strtol(minPart, &comma, 10);
+    if (comma != minPart && *comma == ',') {
+      char *maxPart = comma + 1;
+      char *endPtr = NULL;
+      long maxSpeed = strtol(maxPart, &endPtr, 10);
+      if (endPtr != maxPart && *endPtr == '\0' &&
+          minSpeed >= 0 && maxSpeed > 0 && maxSpeed >= minSpeed) {
+        gMinZoomSpeed = (int)minSpeed;
+        gMaxZoomSpeed = (int)maxSpeed;
+        parsed = true;
       }
     }
-    return atoi(speed);
-  } else {
-    return 0;
   }
+  free(text);
+  return parsed;
+}
+
+// Gets the minimum zoom speed.
+int p2GetMinZoomSpeed(void) {
+  p2FetchZoomSpeedLimits();
+  return gMinZoomSpeed;
+}
+
+// Gets the maximum zoom speed.
+int p2GetMaxZoomSpeed(void) {
+  p2FetchZoomSpeedLimits();
+  return gMaxZoomSpeed;
 }
 
 // Public function.  Docs in header.
@@ -407,16 +432,25 @@ int p2GetMaxZoomSpeed(void) {
 bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
     bool localDebug = false || p2_enable_debugging;
 
+    int minZoomSpeed = ZOOM_MIN_HARDWARE;
+    int maxZoomSpeed = ZOOM_SCALE_HARDWARE;
+    if (maxZoomSpeed <= 0) {
+      fprintf(stderr, "Could not determine zoom speed range.\n");
+      return false;
+    }
+
     int intSpeed = 0;
     if (isRaw) {
       intSpeed = speed;
     } else if (speed != 0) {
       if (p2ScaledZoomCalibrationData == NULL) {
-        intSpeed = scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE, NULL);
-      } else {
-        int offset = (speed < 0) ? -ZOOM_MIN_HARDWARE : ZOOM_MIN_HARDWARE;
+        int offset = (speed < 0) ? -(minZoomSpeed - 1) : (minZoomSpeed - 1);
         intSpeed = scaleSpeed(speed, SCALE_CORE,
-                              ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE,
+                              maxZoomSpeed - minZoomSpeed + 1, NULL) + offset;
+      } else {
+        int offset = (speed < 0) ? -minZoomSpeed : minZoomSpeed;
+        intSpeed = scaleSpeed(speed, SCALE_CORE,
+                              maxZoomSpeed - minZoomSpeed,
                               p2ScaledZoomCalibrationData) + offset;
       }
     }
@@ -425,13 +459,6 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
     if (localDebug) {
         fprintf(stderr, "Zoom Core speed %" PRId64 "\n", speed);
         fprintf(stderr, "Zoom Speed %d\n", intSpeed);
-    }
-
-    static int maxZoomSpeed = 0;
-    if (maxZoomSpeed == 0) {
-      maxZoomSpeed = p2GetMaxZoomSpeed();
-      fprintf(stderr, "Max zoom speed %d expected %d\n", maxZoomSpeed, ZOOM_SCALE_HARDWARE);
-      // assert(maxZoomSpeed == ZOOM_SCALE_HARDWARE);
     }
 
     bool retval = true;
@@ -569,6 +596,7 @@ int openP2Socket(void) {
   if (connect(sock, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
         perror("connect");
         printf("Connection with the server failed...\n");
+        close(sock);
         return -1;
   }
 
@@ -654,15 +682,15 @@ char *getP2Auth(int sock) {
   while (curnode) {
     if (!strcmp((const char *)curnode->name, "Realm")) {
       if (realm != NULL) {
-        free(realm);
+        xmlFree(realm);
       }
-      realm = (const char *)xmlNodeGetContent(curnode);
+      realm = (char *)xmlNodeGetContent(curnode);
     }
     if (!strcmp((const char *)curnode->name, "Nonce")) {
       if (nonce != NULL) {
-        free(nonce);
+        xmlFree(nonce);
       }
-      nonce = (const char *)xmlNodeGetContent(curnode);
+      nonce = (char *)xmlNodeGetContent(curnode);
     }
     curnode = curnode->next;
   }
@@ -729,8 +757,11 @@ bool requestEnv(char *authToken, int sock) {
   }
   gAuthToken = authToken;
 
-  ssize_t length = write(sock, message, strlen(message));
-  if (length != strlen(message)) {
+  ssize_t expectedLength = strlen(message);
+  ssize_t length = write(sock, message, expectedLength);
+  free(message);
+  message = NULL;
+  if (length != expectedLength) {
     perror("write");
     fprintf(stderr, "Could not write auth message 2; got %" PRId64 "\n", (uint64_t)length);
     return false;
@@ -744,14 +775,15 @@ bool requestEnv(char *authToken, int sock) {
 
   fprintf(stderr, "Environment:\n%s\n", buf);
 
-  free(message);
-
   asprintf(&message, "<P2Control><Auth>%s</Auth><SessionID></SessionID><CamCtl>$Connect:=On</CamCtl><CamCtl>$MyName:%s</CamCtl></P2Control>", authToken, P2_APP_NAME);
 
   fprintf(stderr, "Auth message: %s", message);
 
-  length = write(sock, message, strlen(message));
-  if (length != strlen(message)) {
+  expectedLength = strlen(message);
+  length = write(sock, message, expectedLength);
+  free(message);
+  message = NULL;
+  if (length != expectedLength) {
     fprintf(stderr, "Could not write auth message 3; got %" PRId64 "\n", (uint64_t)length);
     return false;
   }
@@ -784,6 +816,8 @@ bool requestEnv(char *authToken, int sock) {
   for (xmlAttr *attribute = camctl->properties; attribute ; attribute = attribute->next) {
     if (!strcmp((const char *)attribute->name, "SessionID")) {
       xmlChar *attributeValue = xmlNodeListGetString(doc, attribute->children, 1);
+      free(gSessionID);
+      gSessionID = NULL;
       asprintf(&gSessionID, "%s", (const char *)attributeValue);
       xmlFree(attributeValue);
     }
@@ -807,6 +841,7 @@ char *md5_string(uint8_t *hashbuf) {
 
 bool sendP2Request(char *request, char **buf) {
   if (buf == NULL) return false;
+  *buf = NULL;
 
   static double timestampForCrappyFirmware = 0;
   pthread_mutex_lock(&gSocketLock);
@@ -856,16 +891,22 @@ bool sendP2Request(char *request, char **buf) {
   }
 
   fprintf(stderr, "In sendP2Request: Waiting for response.\n");
-  char *localBuf = (char *)malloc(4096);
+  char *localBuf = (char *)malloc(4097);
   ssize_t length = syncRead(gP2TCPSocket, localBuf, 4096);
-  *buf = localBuf;
 
-  localBuf[MAX(length, 0)] = '\0';
+  if (!retval || length <= 0) {
+    free(localBuf);
+    pthread_mutex_unlock(&gSocketLock);
+    return false;
+  }
+
+  localBuf[length] = '\0';
+  *buf = localBuf;
 
   fprintf(stderr, "In sendP2Request: Got response %s\n", localBuf);
 
   pthread_mutex_unlock(&gSocketLock);
-  return retval && (length > 0);
+  return true;
 }
 
 // Helper function that computes the zoom position from a P2 data packet.
@@ -1146,7 +1187,11 @@ char *textForResponseElement(char *tag, char *result) {
 
   for (xmlNode *curnode = startNode; curnode; curnode = curnode->next) {
     if (curnode->type == XML_ELEMENT_NODE && !strcmp((const char *)curnode->name, tag)) {
-      asprintf(&resultBuf, "%s", (const char *)xmlNodeGetContent(curnode));
+      xmlChar *content = xmlNodeGetContent(curnode);
+      asprintf(&resultBuf, "%s", content ? (const char *)content : "");
+      if (content != NULL) {
+        xmlFree(content);
+      }
       xmlFreeDoc(doc);
       return resultBuf;
     }
@@ -1163,12 +1208,14 @@ fail:
 //
 // Returns the number of zoom positions per second at the camera's fastest speed.
 int64_t panaZoomPositionsPerSecondAtSpeed(int speed) {
-  if (p2ZoomCalibrationData == NULL) {
+  if (p2ScaledZoomCalibrationData == NULL || p2ZoomCalibrationData == NULL || speed == 0) {
     return 0;
   }
   int absSpeed = abs(speed);
-  if (absSpeed >= ZOOM_MIN_HARDWARE && absSpeed <= ZOOM_SCALE_HARDWARE) {
-    return p2ZoomCalibrationData[absSpeed - ZOOM_MIN_HARDWARE] * (speed < 0 ? -1 : 1);
+  int minZoomSpeed = ZOOM_MIN_HARDWARE;
+  int maxZoomSpeed = ZOOM_SCALE_HARDWARE;
+  if (maxZoomSpeed > 0 && absSpeed >= minZoomSpeed && absSpeed <= maxZoomSpeed) {
+    return p2ZoomCalibrationData[absSpeed - minZoomSpeed] * (speed < 0 ? -1 : 1);
   }
   return 0;
 } 

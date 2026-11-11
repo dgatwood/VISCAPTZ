@@ -386,6 +386,9 @@ int64_t panaMinimumTiltPositionsPerSecond(void) {
 //
 // Returns the number of zoom positions per second at the camera's slowest speed.
 int64_t panaMinimumZoomPositionsPerSecond(void) {
+  if (ZOOM_SCALE_HARDWARE <= 0) {
+    return 0;
+  }
   return minimumPositionsPerSecondForData(sharedCalibrationData,
                                           ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE);
 }
@@ -422,7 +425,7 @@ int64_t panaMaximumTiltPositionsPerSecond(void) {
 //
 // Returns the number of zoom positions per second at the camera's fastest speed.
 int64_t panaMaximumZoomPositionsPerSecond(void) {
-  if (sharedCalibrationData == NULL) {
+  if (sharedCalibrationData == NULL || ZOOM_SCALE_HARDWARE <= 0) {
     return 0;
   }
   return sharedCalibrationData[ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE];
