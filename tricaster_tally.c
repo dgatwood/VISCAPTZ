@@ -35,7 +35,6 @@ static bool gTricasterTallyInitialized = false;
 static void handleResponses(int sock);
 ssize_t handleResponse(char *buf, ssize_t length);
 static void handleTag(char *tag);
-void setTallyStateFromTricaster(tallyStateType newState);
 void *runTricasterTallyThread(void *argIgnored);
 void tricasterModuleTeardown(int sock);
 
@@ -111,9 +110,8 @@ tallyStateType tricaster_getTallyState(void) {
       }
       handleResponses(sock);
       close(sock);
-      g_onProgram = false;
-      g_onPreview = false;
-      setTallyStateFromTricaster(kTallyStateOff);
+      // Do not clear or reset the tally state if the connection drops; assume the
+      // camera's tally state remains unchanged until the Tricaster sends a new state.
       sleep(RECONNECT_DELAY);
     }
     return NULL;
@@ -227,24 +225,8 @@ tallyStateType tricaster_getTallyState(void) {
       pos = end + 1;
       lastend = pos;
     }
-    if (pos != NULL) {
-      // Incomplete <shortcut_state tag at pos; discard anything before pos,
-      // or discard everything if the incomplete tag exceeds TRICASTER_BUF_SIZE.
-      lastend = ((buf + length) - pos <= TRICASTER_BUF_SIZE) ? pos : (buf + length);
-    } else {
-      // No <shortcut_state tag found in the remainder. Keep only a trailing partial
-      // prefix of "<shortcut_state " if present; discard all other trailing data.
-      const char *prefix = "<shortcut_state ";
-      ssize_t prefixLen = strlen(prefix);
-      char *lastOpen = strrchr(lastend, '<');
-      if (lastOpen != NULL &&
-          (buf + length) - lastOpen < prefixLen &&
-          !strncmp(lastOpen, prefix, (buf + length) - lastOpen)) {
-        lastend = lastOpen;
-      } else {
-        lastend = buf + length;
-      }
-    }
+    char *lastOpen = strrchr(lastend, '<');
+    lastend = (lastOpen != NULL) ? lastOpen : (buf + length);
     return lastend - buf;
   }
 

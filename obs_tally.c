@@ -280,11 +280,16 @@ void removeActiveSceneWithName(const char *name) {
 static void updateTallyState(void) {
   tallyStateType maxState = kTallyStateOff;
   for (tally_scene_item_t *item = activeScenes ; item ; item = item->next) {
-    if (item->tallyState == kTallyStateRed) {
-      maxState = kTallyStateRed;
-      break;
-    } else if (item->tallyState == kTallyStateGreen && maxState == kTallyStateOff) {
-      maxState = kTallyStateGreen;
+    if (maxState < kTallyStateRed) {
+      // Tally light is off or in a state that we don't support.  Just use the
+      // value (promote to anything).
+      maxState = item->tallyState;
+
+    } else if (maxState == kTallyStateGreen) {
+      // Tally light is green for preview.  Upgrade to red if needed, else ignore.
+      if (item->tallyState == kTallyStateRed) {
+        maxState = kTallyStateRed;
+      }
     }
   }
   atomic_store(&gCurrentOBSTallyState, maxState);
