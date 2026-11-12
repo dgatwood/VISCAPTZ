@@ -136,19 +136,22 @@ typedef enum {
 
 #pragma mark - Data structures
 
-/** A data structure representing a VISCA request (command/inquiry) packet over the wire. */
+/** The 8-byte VISCA-over-IP packet header preceding the payload. */
 typedef struct {
   uint8_t cmd[2];
   uint16_t len;  // Big endian!  (Network byte order.)
   uint32_t sequence_number;
+} visca_header_t;
+
+/** A data structure representing a VISCA request (command/inquiry) packet over the wire. */
+typedef struct {
+  visca_header_t header;
   uint8_t data[65519];  // Maximum theoretical IPv6 UDP packet size minus above.
 } visca_cmd_t;
 
 /** A data structure representing a VISCA response packet over the wire. */
 typedef struct {
-  uint8_t cmd[2];
-  uint16_t len;  // Big endian!  (Network byte order.)
-  uint32_t sequence_number;
+  visca_header_t header;
   uint8_t data[65527];  // Maximum theoretical IPv6 UDP packet size.
 } visca_response_t;
 
@@ -367,7 +370,7 @@ bool savePreset(int presetNumber);
 // VISCA-related functions
 
 /** Stringifies a VISCA command or inquiry for debugging. */
-char *VISCAMessageDebugString(uint8_t *command, uint8_t len);
+char *VISCAMessageDebugString(uint8_t *command, uint16_t len);
 
 /**
  * Gets a default zoom speed (in VISCA range) based on the current tally state,
@@ -384,7 +387,7 @@ int getVISCAZoomSpeedFromTallyState(bool isRaw);
 int getVISCARecallSpeed(void);
 
 /** Processes a single VISCA command or inquiry packet. */
-bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, socklen_t structLength);
+bool handleVISCAPacket(visca_cmd_t *command, int sock, struct sockaddr *client, socklen_t structLength);
 
 /* Sets the speed for future recall operations (from a VISCA source, using VISCA scale). */
 void setRecallSpeedVISCA(int value);
@@ -419,10 +422,10 @@ double timeStamp(void);
 bool sendVISCAResponse(visca_response_t *response, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
 
 /** Handles a VISCA inquiry packet. */
-bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
+bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
 
 /** Handles a VISCA command packet. */
-bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
+bool handleVISCACommand(uint8_t *command, uint16_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength);
 
 /** Populates the specified VISCA response with the specified data bytes. */
 #define SET_RESPONSE(response, array) setResponseArray(response, array, (uint8_t)(sizeof(array) / sizeof(array[0])))
@@ -1242,7 +1245,11 @@ int getInteractiveScale() {
 
   int64_t zoomPosition = getAxisPosition(axis_identifier_zoom) - zoomMin;
   int64_t zoomScale = zoomMax - zoomMin;
+  if (zoomScale <= 0) {
+    return 1;
+  }
   double floatPosition = (zoomPosition * 1.0) / zoomScale;
+  floatPosition = MAX(0.0, MIN(1.0, floatPosition));
 
   // If zoom is zoomMax, zoomPosition = zoomMax - zoomMin and zoomPositiion == zoomScale.
   // Then floatPosition = 1.0, and this returns 4.0.
@@ -1872,11 +1879,17 @@ void *runNetworkThread(void *argIgnored) {
       if (bytes_received < 0) {
         perror("recvfrom");
       } else if (structLength > 0) {
-        bool success = handleVISCAPacket(command, sock, (struct sockaddr *)&client, structLength);
+        ssize_t headerSize = sizeof(visca_header_t);
+        uint16_t payloadLen = (bytes_received >= headerSize) ? ntohs(command.header.len) : 0;
+        bool success = (bytes_received >= headerSize && payloadLen > 0 &&
+                        payloadLen <= (bytes_received - headerSize)) &&
+            handleVISCAPacket(&command, sock, (struct sockaddr *)&client, structLength);
         if (!success) {
           fprintf(stderr, "VISCA error\n");
-          int failCount = 0;
-          while (!sendVISCAResponse(failedVISCAResponse(), command.sequence_number, sock, (struct sockaddr *)&client, structLength) && ++failCount < 10);
+          if (bytes_received >= headerSize) {
+            int failCount = 0;
+            while (!sendVISCAResponse(failedVISCAResponse(), command.header.sequence_number, sock, (struct sockaddr *)&client, structLength) && ++failCount < 10);
+          }
         }
       }
     }
@@ -1888,10 +1901,10 @@ void *runNetworkThread(void *argIgnored) {
 }
 
 bool sendVISCAResponse(visca_response_t *response, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
-  uint16_t length = htons(response->len);
-  response->sequence_number = sequenceNumber;
+  uint16_t length = htons(response->header.len);
+  response->header.sequence_number = sequenceNumber;
   if (length > 0) {
-    length += 8;  // 8-byte UDP header.
+    length += sizeof(visca_header_t);
     if (sendto(sock, response, length, 0, client, structLength) < 0) {
       perror("sendto");
       return false;
@@ -1911,17 +1924,18 @@ void printbuf(uint8_t *buf, int len) {
   fprintf(stderr, "\n");
 }
 
-bool handleVISCAPacket(visca_cmd_t command, int sock, struct sockaddr *client, socklen_t structLength) {
-  if (debug_verbose) fprintf(stderr, "GOT VISCA PACKET %s\n", VISCAMessageDebugString(command.data, htons(command.len)));
+bool handleVISCAPacket(visca_cmd_t *command, int sock, struct sockaddr *client, socklen_t structLength) {
+  uint16_t payloadLen = ntohs(command->header.len);
+  if (debug_verbose) fprintf(stderr, "GOT VISCA PACKET %s\n", VISCAMessageDebugString(command->data, payloadLen));
 
-  if (command.cmd[0] != 0x1) {
-    fprintf(stderr, "INVALID[0 = %02x]\n", command.cmd[0]);
+  if (command->header.cmd[0] != 0x1) {
+    fprintf(stderr, "INVALID[0 = %02x]\n", command->header.cmd[0]);
     return false;
   }
-  if (command.cmd[1] == 0x10) {
-    return handleVISCAInquiry(command.data, htons(command.len), command.sequence_number, sock, client, structLength);
+  if (command->header.cmd[1] == 0x10) {
+    return handleVISCAInquiry(command->data, payloadLen, command->header.sequence_number, sock, client, structLength);
   } else {
-    return handleVISCACommand(command.data, htons(command.len), command.sequence_number, sock, client, structLength);
+    return handleVISCACommand(command->data, payloadLen, command->header.sequence_number, sock, client, structLength);
   }
 }
 
@@ -1975,17 +1989,19 @@ visca_response_t *tallyModeResponse(int tallyState) {
   return &response;
 }
 
-bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
+bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
   if (debug_verbose) fprintf(stderr, "GOT VISCA INQUIRY %s\n", VISCAMessageDebugString(command, len));
 
   // All VISCA inquiries start with 0x8x (default 0x81).  Responses start with 0xy0 (default 0x90).
-  if (command[0] != (0x80 | getDeviceID())) return false;
+  if (len < 1 || command[0] != (0x80 | getDeviceID())) return false;
+  if (len < 2) return false;
 
   switch(command[1]) {
     case 0x09:
+      if (len < 3) return false;
       switch(command[2]) {
         case 0x04:
-          if (command[3] == 0x07 && command[4] == 0xFF) {
+          if (len >= 5 && command[3] == 0x07 && command[4] == 0xFF) {
             int failCount = 0;
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
             static visca_response_t response;
@@ -1999,12 +2015,12 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
             gVISCAUsesCoreScale = true;
             return true;
-          } else if (command[3] == 0x47 && command[4] == 0xFF) {
+          } else if (len >= 5 && command[3] == 0x47 && command[4] == 0xFF) {
 #ifndef GET_ZOOM_RANGE
             return false;
 #else
             int64_t zoomMin = 0, zoomMax = 0;
-            if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax)) {
+            if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax) || zoomMax <= zoomMin) {
               return false;
             }
             // Because this is a 30x zoom camera, scale the zoom position to the range
@@ -2013,6 +2029,7 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
             int64_t zoomRange = zoomMax - zoomMin;
             int64_t zoomPositionScaled = ((double)zoomPosition / (double)zoomRange) *
                 0x6000;
+            zoomPositionScaled = MAX(0, MIN(0x6000, zoomPositionScaled));
             int failCount = 0;
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
             static visca_response_t response;
@@ -2027,13 +2044,14 @@ bool handleVISCAInquiry(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
             return true;
 #endif
           }
+          break;
         case 0x7e:
-          if (command[3] == 0x01 && command[4] == 0x0a) {
+          if (len >= 6 && command[3] == 0x01 && command[4] == 0x0a) {
             int failCount = 0;
             while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
             int tallyState = GET_TALLY_STATE();
             visca_response_t *response = NULL;
-            if (command[5] == 0x01 && command[6] == 0xFF) {
+            if (len >= 7 && command[5] == 0x01 && command[6] == 0xFF) {
               // 8x 09 7E 01 0A 01 FF -> y0 50 0p FF
               response = tallyEnabledResponse(tallyState);
             } else if (command[5] == 0xFF) {
@@ -2119,13 +2137,13 @@ const char *tallyStateName(tallyStateType state) {
 }
 
 void setResponseArray(visca_response_t *response, uint8_t *array, uint8_t count) {
-  response->cmd[0] = 0x01;
-  response->cmd[1] = 0x11;
-  response->len = htons(count);
+  response->header.cmd[0] = 0x01;
+  response->header.cmd[1] = 0x11;
+  response->header.len = htons(count);
   bcopy(array, response->data, count);
 }
 
-char *VISCAMessageDebugString(uint8_t *command, uint8_t len) {
+char *VISCAMessageDebugString(uint8_t *command, uint16_t len) {
   static char *buf = NULL;
   if (buf != NULL) {
     free(buf);
@@ -2140,7 +2158,7 @@ char *VISCAMessageDebugString(uint8_t *command, uint8_t len) {
   return buf;
 }
 
-bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
+bool handleVISCACommand(uint8_t *command, uint16_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
 
   if (gCalibrationModeVISCADisabled) {
     return false;
@@ -2148,14 +2166,16 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
 
   if (debug_verbose) fprintf(stderr, "GOT VISCA COMMAND %s\n", VISCAMessageDebugString(command, len));
 
-
   // All VISCA commands start with 0x8x, where x is the camera number.  For IP, always 1.
-  if (command[0] != (0x80 | getDeviceID())) return false;
+  if (len < 1 || command[0] != (0x80 | getDeviceID())) return false;
+  if (len < 2) return false;
 
   switch(command[1]) {
     case 0x01:
+      if (len < 3) return false;
       switch(command[2]) {
         case 0x04:
+            if (len < 4) return false;
             switch(command[3]) {
               case 0x00: // Power on (2) / off (3): Not implemented.
                 break;
@@ -2164,13 +2184,19 @@ bool handleVISCACommand(uint8_t *command, uint8_t len, uint32_t sequenceNumber, 
                 break;
               case 0x07: // Zoom stop (00), tele (02 or 20-27), wide (03 or 30-37)
               {
-                int failCount = 0;
-                while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
+                if (len < 6) return false;
                 uint8_t zoomCmd = command[4];
                 if (zoomCmd == 2) zoomCmd = 0x23;
                 if (zoomCmd == 3) zoomCmd = 0x33;
 
-                uint32_t zoomSpeed = 0;
+                if (gVISCAUsesCoreScale && (zoomCmd == 0x2f || zoomCmd == 0x3f) && len < 8) {
+                  return false;
+                }
+
+                int failCount = 0;
+                while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
+
+                int32_t zoomSpeed = 0;
                 if (gVISCAUsesCoreScale && (zoomCmd == 0x2f || zoomCmd == 0x3f)) {
                     // Nonstandard zoom command.  Supported only after asking for the maximum
                     // allowable zoom speed.
@@ -2184,7 +2210,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
 
                 } else {
                     if (zoomCmd != 0) {  // Leave the speed at zero if the command is "zoom stop".
-                        int8_t zoomRawSpeed = command[4] & 0xf;
+                        int8_t zoomRawSpeed = zoomCmd & 0xf;
 
                         // VISCA zoom speeds go from 0 to 7, but the output speed's 0 is stopped, so
                         // immediately convert the range to be from 1 to 8 instead.
@@ -2232,7 +2258,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                      return false;
                  }
 
-                if (command[6] == 0xFF) {
+                if (len >= 7 && command[6] == 0xFF) {
                   int presetNumber = command[5];
                   switch(command[4]) {
                     case 0:
@@ -2257,6 +2283,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               case 0x47: // Absolute zoom.
 #if ZOOM_POSITION_SUPPORTED
               {
+                 if (len < 9) return false;
+
                  // Do not attempt to use absolute positioning while in calibration mode!
                  if (gCalibrationMode) {
                      fprintf(stderr, "Ignoring absolute zoom while in calibration mode.\n");
@@ -2267,6 +2295,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
                 uint32_t position = ((command[4] & 0xf) << 12) | ((command[5] & 0xf) << 8) |
                                     ((command[6] & 0xf) << 4) | (command[7] & 0xf);
+                position = MIN(position, 0x6000U);
                 // VISCA zoom speeds go from 0 to 7, but we need to treat 0 as stopped, so immediately
                 // convert that to be from 1 to 8.  But only do that if it is a command that has a speed
                 // parameter.  Otherwise go with a default based on whether the camera is live or not.
@@ -2278,11 +2307,12 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 // 0..0x6000.  This range is comparable to what PTZOptics uses, I think.
 
                 int64_t zoomMin = 0, zoomMax = 0;
-                if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax)) {
+                if (!GET_ZOOM_RANGE(&zoomMin, &zoomMax) || zoomMax <= zoomMin) {
                   return false;
                 }
                 int64_t zoomRange = zoomMax - zoomMin;
                 int64_t zoomPositionScaled = ((position * zoomRange) / 0x6000) + zoomMin;
+                zoomPositionScaled = MAX(zoomMin, MIN(zoomMax, zoomPositionScaled));
                 setZoomPosition(zoomPositionScaled, scaleVISCAZoomSpeedToCoreSpeed(speed), 0, 0);
 
                 // If (command[9] & 0xf0) == 0, then the low bytes of 9-12 are focus position,
@@ -2304,13 +2334,14 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
             }
           break;
         case 0x06:
+            if (len < 4) return false;
             switch(command[3]) {
               case 0x01:
               {
                 if (len == 6) {
                   // Recall speed.
                   setRecallSpeedVISCA(command[4]);
-                } else {
+                } else if (len >= 9) {
                   // Pan/tilt drive or recall speed
                   int failCount = 0;
                   while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
@@ -2333,6 +2364,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                     setAxisSpeed(axis_identifier_pan, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, true), false);
                     setAxisSpeed(axis_identifier_tilt, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, true), false);
                   }
+                } else {
+                  return false;
                 }
 
                 int failCount = 0;
@@ -2341,6 +2374,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               }
               case 0x02: // Pan/tilt absolute
               {
+                 if (len < 15) return false;
+
                  // Do not attempt to use absolute positioning while in calibration mode!
                  if (gCalibrationMode) {
                      fprintf(stderr, "Ignoring absolute pan/tilt while in calibration mode.\n");
@@ -2371,6 +2406,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               }
               case 0x03: // Pan/tilt relative
               {
+                 if (len < 15) return false;
+
                  // Do not attempt to use relative positioning while in calibration mode!
                  if (gCalibrationMode) {
                      fprintf(stderr, "Ignoring relative pan/tilt while in calibration mode.\n");
@@ -2417,7 +2454,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
           break;
 
         case 0x7E: // Tally
-          if (command[3] == 0x01 && command[4] == 0x0A) {
+          if (len >= 8 && command[3] == 0x01 && command[4] == 0x0A) {
             if (command[5] == 0x00 && command[7] == 0xFF) {
               // 0x81 01 7E 01 0A 00 0p FF : Tally: p=2: on p=3: off.
               //                             OR p=0: off, p=1: green, p=2: red, p=4: blue.
