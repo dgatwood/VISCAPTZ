@@ -70,4 +70,15 @@ typedef enum {
 #define kCalibrationDataTiltKey "calibration_data_tilt"
 #define kCalibrationDataZoomKey "calibration_data_zoom"
 
+// Panasonic cameras report highly nonlinear zoom positions.  While this
+// makes sense from a technical perspective, what we actually want is
+// a linear number, where moving twice as many positions at a given speed
+// takes roughly twice as long.
+//
+// These "internal" positions are raw values as provided by the camera.
+// The scaled (linearized) values are stored in kZoomInLimitKey and
+// kZoomOutLimitKey.
+#define kZoomInInternalLimitKey "zoom_in_internal_limit"
+#define kZoomOutInternalLimitKey "zoom_out_internal_limit"
+
 #endif  // __CONSTANTS_H__

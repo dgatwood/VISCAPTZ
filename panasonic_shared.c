@@ -38,12 +38,6 @@ static int64_t *zoom_position_map;
 
 static int zoom_position_map_count;
 
-/** Integer key providing the zoomed in limit for calibration and recalibration. */
-static const char *kZoomInInternalLimitKey = "zoom_in_internal_limit";
-
-/** Integer key providing the zoomed out limit for calibration and recalibration. */
-static const char *kZoomOutInternalLimitKey = "zoom_out_internal_limit";
-
 
 #pragma mark - Data types
 
@@ -212,6 +206,12 @@ uint64_t scaleLinearZoomToRawZoom(uint64_t linearZoom) {
 // speeds (in positions per second).
 void panaModuleCalibrate(void) {
   bool localDebug = false;
+
+  if (ZOOM_SCALE_HARDWARE <= ZOOM_MIN_HARDWARE) {
+    fprintf(stderr, "Could not determine valid zoom speed range (%d..%d) for calibration.\n",
+            (int)ZOOM_MIN_HARDWARE, (int)ZOOM_SCALE_HARDWARE);
+    exit(1);
+  }
 
   fprintf(stderr, "Calibrating zoom motors.  This takes about 20 minutes.\n");
 

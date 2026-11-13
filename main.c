@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -26,6 +27,7 @@
 #include <string.h>
 #include <sys/param.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 
@@ -203,7 +205,7 @@ pthread_t gVISCANetworkThread;
 // Data about the current automated move (recalls, absolute positioning calls, etc.)
 
 /** True if the specified axis is (still) involved in the currently active move. */
-static bool gAxisMoveInProgress[NUM_AXES];
+static _Atomic bool gAxisMoveInProgress[NUM_AXES];
 
 /** The start position of a given axis for the currently active move. */
 static int64_t gAxisMoveStartPosition[NUM_AXES];
@@ -259,7 +261,7 @@ static int gAxisStalls[NUM_AXES];
  * The current tally state as set by VISCA commands.  Used only if
  * the VISCA tally source is active.
  */
-volatile tallyStateType gTallyState = kTallyStateOff;
+_Atomic(tallyStateType) gTallyState = kTallyStateOff;
 
 /**
  * Set to true if a VISCA command has specified a particular recall speed.
@@ -516,7 +518,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Usage: viscaptz --setswappedmotors [0|1]\n");
         exit(1);
       }
-      setConfigKeyBool(kMotorsAreSwappedKey, atoi(argv[2]));
+      if (!setConfigKeyBool(kMotorsAreSwappedKey, atoi(argv[2]))) {
+        fprintf(stderr, "Failed to update configuration.\n");
+        exit(1);
+      }
 
       exit(0);
 #endif
@@ -585,15 +590,6 @@ int main(int argc, char *argv[]) {
   SET_IP_ADDR(cameraIP);
 #endif
 
-  if (!obsModuleInit()) {
-    fprintf(stderr, "OBS module init failed.  Bailing.\n");
-    exit(1);
-  }
-
-  if (!tricasterModuleInit()) {
-    fprintf(stderr, "Tricaster module init failed.  Bailing.\n");
-    exit(1);
-  }
   if (!motorModuleInit()) {
     fprintf(stderr, "Motor module init failed.  Bailing.\n");
     exit(1);
@@ -609,6 +605,16 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 #endif  // ENABLE_P2_MODE
+
+  if (!obsModuleInit()) {
+    fprintf(stderr, "OBS module init failed.  Bailing.\n");
+    exit(1);
+  }
+
+  if (!tricasterModuleInit()) {
+    fprintf(stderr, "Tricaster module init failed.  Bailing.\n");
+    exit(1);
+  }
 
   fprintf(stderr, "Starting threads\n");
 
@@ -851,7 +857,7 @@ int computeSpeed(int progress, int peakSpeed) {
 
 bool moveInProgress(void) {
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
-    if (gAxisMoveInProgress[axis]) {
+    if (atomic_load(&gAxisMoveInProgress[axis])) {
       return true;
     }
   }
@@ -862,7 +868,7 @@ void handleRecallUpdates(void) {
   int localDebug = 0;
 
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
-    if (gAxisMoveInProgress[axis]) {
+    if (atomic_load(&gAxisMoveInProgress[axis])) {
       if (localDebug) {
         fprintf(stderr, "UPDATING AXIS %d\n", axis);
       }
@@ -1053,7 +1059,7 @@ void handleRecallUpdates(void) {
           if (localDebug) {
             fprintf(stderr, "AXIS %d MOTION COMPLETE\n", axis);
           }
-          gAxisMoveInProgress[axis] = false;
+          atomic_store(&gAxisMoveInProgress[axis], false);
           gAxisStalls[axis] = 0;
           setAxisSpeed(axis, 0, false);
           if (localDebug) {
@@ -1746,7 +1752,9 @@ bool setAxisSpeedInternal(axis_identifier_t axis, int64_t speed, bool debug, boo
 
   if (debug) {
     fprintf(stderr, "Reverse motor direction for pan: %s tilt: %s zoom: %s\n",
-            panReversed ? "YES" : "NO", tiltReversed ? "YES" : "NO", zoomReversed ? "YES" : "NO");
+            (panReversed == -1) ? "YES" : "NO",
+            (tiltReversed == -1) ? "YES" : "NO",
+            (zoomReversed == -1) ? "YES" : "NO");
   }
 
   gAxisLastMoveSpeed[axis] = speed;
@@ -1777,10 +1785,10 @@ bool absolutePositioningSupportedForAxis(axis_identifier_t axis) {
 void cancelRecallIfNeeded(char *context) {
   bool didCancel = false;
   for (axis_identifier_t axis = axis_identifier_pan; axis < NUM_AXES; axis++) {
-    if (gAxisMoveInProgress[axis]) {
+    if (atomic_load(&gAxisMoveInProgress[axis])) {
       didCancel = true;
     }
-    gAxisMoveInProgress[axis] = false;
+    atomic_store(&gAxisMoveInProgress[axis], false);
     gAxisStalls[axis] = 0;
   }
   if (didCancel) {
@@ -1806,7 +1814,6 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
     fprintf(stderr, "DURATION COMPUTED AS: %lf\n", duration);
   }
 
-  gAxisMoveInProgress[axis] = true;
   gAxisStalls[axis] = 0;
   gAxisStartTime[axis] = startTime ?: timeStamp();
   gAxisDuration[axis] = duration;
@@ -1816,9 +1823,10 @@ bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int6
   gAxisPreviousPosition[axis] = gAxisMoveStartPosition[axis];
   gAxisPreviousPositionTimestamp[axis] = gAxisStartTime[axis];
   gAxisLastMoveSpeed[axis] = 0;
+  atomic_store(&gAxisMoveInProgress[axis], true);
 
   if (localDebug) {
-    fprintf(stderr, "gAxisMoveInProgress[%d] = %s\n", axis, gAxisMoveInProgress[axis] ? "true" : "false");
+    fprintf(stderr, "gAxisMoveInProgress[%d] = %s\n", axis, atomic_load(&gAxisMoveInProgress[axis]) ? "true" : "false");
     fprintf(stderr, "gAxisMoveStartPosition[%d] = %" PRId64 "\n", axis, gAxisMoveStartPosition[axis]);
     fprintf(stderr, "gAxisMoveTargetPosition[%d] = %" PRId64 "\n", axis, gAxisMoveTargetPosition[axis]);
     fprintf(stderr, "gAxisMoveMaxSpeed[%d] = %" PRId64 "\n", axis, gAxisMoveMaxSpeed[axis]);
@@ -2079,11 +2087,11 @@ bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber,
 }
 
 tallyStateType VISCA_getTallyState(void) {
-  return gTallyState;
+  return atomic_load(&gTallyState);
 }
 
 bool setTallyOff(void) {
-  gTallyState = kTallyStateOff;
+  atomic_store(&gTallyState, kTallyStateOff);
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateOff);
 #elif USE_VISCA_TALLY_SOURCE
@@ -2094,7 +2102,7 @@ bool setTallyOff(void) {
 }
 
 bool setTallyRed(void) {
-  gTallyState = kTallyStateRed;
+  atomic_store(&gTallyState, kTallyStateRed);
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateRed);
 #elif USE_VISCA_TALLY_SOURCE
@@ -2105,7 +2113,7 @@ bool setTallyRed(void) {
 }
 
 bool setTallyGreen(void) {
-  gTallyState = kTallyStateGreen;;
+  atomic_store(&gTallyState, kTallyStateGreen);
 #ifdef SET_TALLY_STATE
   return SET_TALLY_STATE(kTallyStateGreen);
 #elif USE_VISCA_TALLY_SOURCE
@@ -2509,9 +2517,11 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               return true;
             }
           }
+          break;
         default:
           break;
       }
+      break;
     case 0x0A: // Unimplemented
       // 0x81 0a 01 03 10 ff : AF calibration.
 
@@ -2559,8 +2569,15 @@ bool savePreset(int presetNumber) {
             return false;
         }
 
-        fwrite((void *)&preset, sizeof(preset), 1, fp);
-        fclose(fp);
+        if (fwrite((void *)&preset, sizeof(preset), 1, fp) != 1) {
+            fprintf(stderr, "Failed to write preset %d (I/O Error)\n", presetNumber);
+            fclose(fp);
+            return false;
+        }
+        if (fclose(fp) != 0) {
+            fprintf(stderr, "Failed to close preset %d (I/O Error)\n", presetNumber);
+            return false;
+        }
         fprintf(stderr, "Saving preset %d (pan=%" PRId64 ", tilt=%" PRId64
                         ", zoom=%" PRId64 "\n",
                 presetNumber,
@@ -2907,14 +2924,22 @@ void do_calibration(void) {
 }
 
 double timeStamp(void) {
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0);
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (double)ts.tv_sec + ((double)ts.tv_nsec / 1000000000.0);
 }
 
 void waitForAxisMove(axis_identifier_t axis) {
+  double startTime = timeStamp();
   while (1) {
-    if (!gAxisMoveInProgress[axis]) {
+    if (!atomic_load(&gAxisMoveInProgress[axis])) {
+      break;
+    }
+    if ((timeStamp() - startTime) > 60.0) {
+      fprintf(stderr, "Timed out waiting for axis %d move to complete.\n", axis);
+      atomic_store(&gAxisMoveInProgress[axis], false);
+      gAxisStalls[axis] = 0;
+      setAxisSpeed(axis, 0, false);
       break;
     }
     usleep(100000);  // Wake up 10x per second or so.
@@ -3074,6 +3099,11 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
                                      int32_t maxSpeed,
                                      bool pollingIsSlow) {
   bool localDebug = true;
+  if (minSpeed >= maxSpeed) {
+    fprintf(stderr, "Invalid speed range (%d..%d) when calibrating axis %d.\n",
+            minSpeed, maxSpeed, axis);
+    exit(1);
+  }
   if (localDebug) {
     fprintf(stderr, "Gathering calibration data for axis %d\n", axis);
   }
@@ -3086,7 +3116,14 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     fprintf(stderr, "Finished initial move.\n");
   }
 
+  int32_t highestSpeedReached = minSpeed - 1;
+  int slowdownRetries = 0;
+
   for (int32_t speed = minSpeed; speed <= maxSpeed; speed++) {
+    if (speed > highestSpeedReached) {
+      highestSpeedReached = speed;
+      slowdownRetries = 0;
+    }
     float dutyCycle = (speed - minSpeed) / (float)(maxSpeed - minSpeed);
 
     fprintf(stderr, "Computing calibration for speed %d\n", speed);
@@ -3174,19 +3211,24 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
             }
             count++;
           }
+          assert(count > 0);
           positionsPerSecondAverage = (double)total / count;
 
-          double error = (double)newmax - newmin;
-          double errorPercent = error / newmax;
-          if (error <= 2 || errorPercent < .1) {
+          if (newmax == 0) {
             done = true;
-          } else if (failures >= 3) {
-            done = true;
-            fprintf(stderr, "Total error is still too large, but too many retries, so giving up.\n");
           } else {
-            fprintf(stderr, "Total error %lf > 2 and error percent %lf >= .1.  Trying again.\n",
-                    error, errorPercent);
-            failures++;
+            double error = (double)newmax - newmin;
+            double errorPercent = error / newmax;
+            if (error <= 2 || errorPercent < .1) {
+              done = true;
+            } else if (failures >= 3) {
+              done = true;
+              fprintf(stderr, "Total error is still too large, but too many retries, so giving up.\n");
+            } else {
+              fprintf(stderr, "Total error %lf > 2 and error percent %lf >= .1.  Trying again.\n",
+                      error, errorPercent);
+              failures++;
+            }
           }
         }
         fprintf(stderr, "End loop\n");
@@ -3204,10 +3246,11 @@ int64_t *calibrationDataForMoveAlongAxis(axis_identifier_t axis,
     // in identical speeds, so it's potentially okay for it to not speed up, but it should never
     // slow down.
     if (index >= 1 && data[index] < data[index - 1] && data[index] > 0) {
-      if (pollingIsSlow) {
+      if (pollingIsSlow || slowdownRetries >= 3) {
         fprintf(stderr, "Motor slowed down.  Assuming speed is unchanged.\n");
         data[index] = data[index - 1];
       } else {
+        slowdownRetries++;
         fprintf(stderr, "Motor slowed down.  Recomputing previous position and current position.\n");
         speed -= 2;
       }
@@ -3254,6 +3297,9 @@ const char *calibrationDataKeyNameForAxis(axis_identifier_t axis) {
 // Reads calibration data from the configuration file.
 int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
                                     int *maxSpeed) {
+  if (maxSpeed) {
+    *maxSpeed = 0;
+  }
   char *rawCalibrationData = getConfigKey(calibrationDataKeyNameForAxis(axis));
   if (rawCalibrationData == NULL) {
     return NULL;
@@ -3325,6 +3371,10 @@ bool resetCalibration(void) {
   retval = removeConfigKey(kPanLimitRightKey) && retval;
   retval = removeConfigKey(kTiltLimitTopKey) && retval;
   retval = removeConfigKey(kTiltLimitBottomKey) && retval;
+  retval = removeConfigKey(kZoomInLimitKey) && retval;
+  retval = removeConfigKey(kZoomOutLimitKey) && retval;
+  retval = removeConfigKey(kZoomInInternalLimitKey) && retval;
+  retval = removeConfigKey(kZoomOutInternalLimitKey) && retval;
   retval = removeConfigKey(kCalibrationDataPanKey) && retval;
   retval = removeConfigKey(kCalibrationDataTiltKey) && retval;
   retval = removeConfigKey(kCalibrationDataZoomKey) && retval;
@@ -3401,7 +3451,10 @@ bool zoomEncoderReversed(void) {
 
 #if TALLY_SOURCE_NAME_REQUIRED
   void setTallySourceName(char *tallySourceName) {
-    setConfigKey(kTallySourceName, tallySourceName);
+    if (!setConfigKey(kTallySourceName, tallySourceName)) {
+      fprintf(stderr, "Failed to update configuration.\n");
+      exit(1);
+    }
   }
 #endif
 
@@ -3410,7 +3463,10 @@ bool zoomEncoderReversed(void) {
 
 #ifdef SET_IP_ADDR
   void setCameraIP(char *cameraIP) {
-    setConfigKey(kCameraIPKey, cameraIP);
+    if (!setConfigKey(kCameraIPKey, cameraIP)) {
+      fprintf(stderr, "Failed to update configuration.\n");
+      exit(1);
+    }
   }
 #endif
 
@@ -3419,7 +3475,10 @@ bool zoomEncoderReversed(void) {
 
 #if USE_TRICASTER_TALLY_SOURCE
 void setTricasterIP(char *TricasterIP) {
-    setConfigKey(kTricasterIPKey, TricasterIP);
+    if (!setConfigKey(kTricasterIPKey, TricasterIP)) {
+      fprintf(stderr, "Failed to update configuration.\n");
+      exit(1);
+    }
 }
 #endif
 
@@ -3428,11 +3487,17 @@ void setTricasterIP(char *TricasterIP) {
 
 #if USE_OBS_TALLY_SOURCE
   void setOBSPassword(char *password) {
-    setConfigKey(kOBSPasswordKey, password);
+    if (!setConfigKey(kOBSPasswordKey, password)) {
+      fprintf(stderr, "Failed to update configuration.\n");
+      exit(1);
+    }
   }
 
   void setOBSWebSocketURL(char *OBSWebSocketURL) {
-    setConfigKey(kOBSWebSocketURLKey, OBSWebSocketURL);
+    if (!setConfigKey(kOBSWebSocketURLKey, OBSWebSocketURL)) {
+      fprintf(stderr, "Failed to update configuration.\n");
+      exit(1);
+    }
   }
 #endif
 
