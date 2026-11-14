@@ -220,7 +220,8 @@ void panaModuleCalibrate(void) {
   SET_ZOOM_SPEED(-ZOOM_SCALE_HARDWARE, true);
   waitForZoomStop(NULL, NULL);
 
-  setConfigKeyInteger(kZoomOutInternalLimitKey, GET_RAW_ZOOM_POSITION());
+  int64_t rawZoomOutLimit = GET_RAW_ZOOM_POSITION(NULL);
+  setConfigKeyInteger(kZoomOutInternalLimitKey, rawZoomOutLimit);
 
   #ifdef SHOW_NONLINEARITY_DATA_POINTS
     int count = 0;
@@ -238,7 +239,8 @@ void panaModuleCalibrate(void) {
     waitForZoomStop(&positionArray, &count);
     fprintf(stderr, "Done capturing positions per second for nonlinearity.");
 
-    setConfigKeyInteger(kZoomInInternalLimitKey, GET_RAW_ZOOM_POSITION());
+    int64_t rawZoomInLimit = GET_RAW_ZOOM_POSITION(NULL);
+    setConfigKeyInteger(kZoomInInternalLimitKey, rawZoomInLimit);
 
     // Currently, I have a hard-coded computation based on the data gathered here.
     // At some point, we could maybe automate this, but for now, just print the data.
@@ -259,7 +261,8 @@ void panaModuleCalibrate(void) {
     // data for computing a new table or not!
     SET_ZOOM_SPEED(ZOOM_SCALE_HARDWARE, true);
     waitForZoomStop(NULL, NULL);
-    setConfigKeyInteger(kZoomInInternalLimitKey, GET_RAW_ZOOM_POSITION());
+    int64_t rawZoomInLimit = GET_RAW_ZOOM_POSITION(NULL);
+    setConfigKeyInteger(kZoomInInternalLimitKey, rawZoomInLimit);
 
     SET_ZOOM_SPEED(-ZOOM_SCALE_HARDWARE, true);
     waitForZoomStop(NULL, NULL);
@@ -274,7 +277,7 @@ void panaModuleCalibrate(void) {
   int64_t minimumZoom = GET_ZOOM_POSITION();
 
   if (localDebug) {
-    fprintf(stderr, "Minimum zoom (raw): %" PRId64 "\n", GET_RAW_ZOOM_POSITION());
+    fprintf(stderr, "Minimum zoom (raw): %" PRId64 "\n", GET_RAW_ZOOM_POSITION(NULL));
     fprintf(stderr, "Minimum zoom: %" PRId64 "\n", minimumZoom);
   }
 
@@ -286,7 +289,7 @@ void panaModuleCalibrate(void) {
   int64_t maximumZoom = GET_ZOOM_POSITION();
 
   if (localDebug) {
-    fprintf(stderr, "Maximum zoom (raw): %" PRId64 "\n", GET_RAW_ZOOM_POSITION());
+    fprintf(stderr, "Maximum zoom (raw): %" PRId64 "\n", GET_RAW_ZOOM_POSITION(NULL));
     fprintf(stderr, "Maximum zoom: %" PRId64 "\n", maximumZoom);
   }
 
@@ -307,10 +310,23 @@ void panaModuleCalibrate(void) {
 
 #pragma mark - Calibration
 
-/** Polls the zoom position 5x per second until it stops for at least a second. */
+/** Polls the zoom position 5x per second until it stops for at least two seconds. */
 void waitForZoomStop(timed_position_t **dataPointsOut, int *dataPointCountOut) {
   bool localDebug = false;
-  int64_t lastPosition = GET_RAW_ZOOM_POSITION();
+  bool isCached = false;
+  int cachedCount = 0;
+  int64_t lastPosition = 0;
+  do {
+    lastPosition = GET_RAW_ZOOM_POSITION(&isCached);
+    if (isCached) {
+      if (++cachedCount > RESPONSES_PER_SECOND) {
+        fprintf(stderr, "Failed to read initial zoom position in waitForZoomStop.\n");
+        SET_ZOOM_SPEED(0, true);
+        exit(1);
+      }
+      usleep(200000);
+    }
+  } while (isCached);
   int stoppedCount = 0;
 
   int dataPointCount = 1;
@@ -325,27 +341,36 @@ void waitForZoomStop(timed_position_t **dataPointsOut, int *dataPointCountOut) {
     fprintf(stderr, "Initial position: %" PRId64 "\n", lastPosition);
   }
 
-  // If no motion for a second, we're done, unless we never started, in which
+  // If no motion for two seconds, we're done, unless we never started, in which
   // case wait a little longer.
-  while (stoppedCount < ((dataPointCount <= 1) ? RESPONSES_PER_SECOND * 10 : RESPONSES_PER_SECOND)) {
-    int64_t currentPosition = GET_RAW_ZOOM_POSITION();
-
-    if (localDebug) {
-      fprintf(stderr, "Current position: %" PRId64 "\n", currentPosition);
-    }
-
-    if (currentPosition == lastPosition) {
-      stoppedCount++;
-    } else {
-      stoppedCount = 0;
-      dataPointCount++;
-      if (dataPointsOut != NULL) {
-        dataPoints = realloc(dataPoints, dataPointCount * sizeof(timed_position_t));
-        dataPoints[dataPointCount - 1].position = currentPosition;
-        dataPoints[dataPointCount - 1].timeStamp = timeStamp();
+  cachedCount = 0;
+  while (stoppedCount < ((dataPointCount <= 1) ? RESPONSES_PER_SECOND * 10 : RESPONSES_PER_SECOND * 2)) {
+    int64_t currentPosition = GET_RAW_ZOOM_POSITION(&isCached);
+    if (isCached) {
+      if (++cachedCount > RESPONSES_PER_SECOND) {
+        fprintf(stderr, "Failed to read zoom position in waitForZoomStop.\n");
+        SET_ZOOM_SPEED(0, true);
+        exit(1);
       }
+    } else {
+      cachedCount = 0;
+      if (localDebug) {
+        fprintf(stderr, "Current position: %" PRId64 "\n", currentPosition);
+      }
+
+      if (currentPosition == lastPosition) {
+        stoppedCount++;
+      } else {
+        stoppedCount = 0;
+        dataPointCount++;
+        if (dataPointsOut != NULL) {
+          dataPoints = realloc(dataPoints, dataPointCount * sizeof(timed_position_t));
+          dataPoints[dataPointCount - 1].position = currentPosition;
+          dataPoints[dataPointCount - 1].timeStamp = timeStamp();
+        }
+      }
+      lastPosition = currentPosition;
     }
-    lastPosition = currentPosition;
     usleep(200000);
   }
   if (dataPointsOut != NULL) {

@@ -412,7 +412,7 @@ int64_t panaGetZoomSpeed(void) {
 // Public function.  Docs in header.
 //
 // Sets the camera's zoom speed.
-int64_t panaGetZoomPositionRaw(void);
+int64_t panaGetZoomPositionRaw(bool *isCached);
 bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     bool localDebug = false || pana_enable_debugging;
     gLastZoomSpeed = speed;
@@ -468,7 +468,7 @@ bool panaGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
 
 // Similar to panaGetZoomPosition, but does not correct for the nonlinearity of
 // the position data.  [redacted swearing at Panasonic]
-int64_t panaGetZoomPositionRaw(void) {
+int64_t panaGetZoomPositionRaw(bool *isCached) {
     bool localDebug = pana_enable_debugging || false;
     static int64_t last_zoom_position = 0;
     char *response = sendCommand("ptz", "#GZ", NULL, 0, "gz");
@@ -477,9 +477,15 @@ int64_t panaGetZoomPositionRaw(void) {
         last_zoom_position = value;
         if (localDebug) fprintf(stderr, "Zoom position: %" PRId64 "\n", last_zoom_position);
         free(response);
+        if (isCached != NULL) {
+            *isCached = false;
+        }
     } else {
         if (response != NULL) { free(response); }
         if (localDebug) fprintf(stderr, "Did not get response from CGI.  Returning last value.\n");
+        if (isCached != NULL) {
+            *isCached = true;
+        }
     }
     return last_zoom_position;
 }
@@ -489,7 +495,7 @@ int64_t panaGetZoomPositionRaw(void) {
 // Gets the camera's current zoom position.
 int64_t panaGetZoomPosition(void) {
     bool localDebug = false;
-    int64_t nonlinearZoomPosition = panaGetZoomPositionRaw();
+    int64_t nonlinearZoomPosition = panaGetZoomPositionRaw(NULL);
     int64_t retval = panaMakeZoomLinear(nonlinearZoomPosition);
     if (localDebug) {
         fprintf(stderr, "ZOOMPOS: %" PRId64 "\n", retval);

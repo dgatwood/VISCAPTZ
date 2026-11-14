@@ -81,11 +81,11 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
         #define GET_TALLY_STATE() panaGetTallyState()
     #endif
 
-    int64_t panaGetZoomPositionRaw(void);
+    int64_t panaGetZoomPositionRaw(bool *isCached);
 
     #define SET_TALLY_STATE(state) panaSetTallyState(state)
     #define GET_ZOOM_RANGE(min, max) panaGetZoomRange(min, max)  // uint64_t *
-    #define GET_RAW_ZOOM_POSITION() panaGetZoomPositionRaw()
+    #define GET_RAW_ZOOM_POSITION(isCached) panaGetZoomPositionRaw(isCached)
     #define GET_ZOOM_POSITION() panaGetZoomPosition()
     #define GET_ZOOM_SPEED() panaGetZoomSpeed()
     #define ZOOM_POSITION_SUPPORTED true

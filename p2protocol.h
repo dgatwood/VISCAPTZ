@@ -73,10 +73,10 @@ int p2GetMaxZoomSpeed(void);
         #define GET_TALLY_STATE() p2GetTallyState()
     #endif
 
-    int64_t p2GetZoomPositionRaw(void);
+    int64_t p2GetZoomPositionRaw(bool *isCached);
 
     #define SET_TALLY_STATE(state) p2SetTallyState(state)
-    #define GET_RAW_ZOOM_POSITION() p2GetZoomPositionRaw()
+    #define GET_RAW_ZOOM_POSITION(isCached) p2GetZoomPositionRaw(isCached)
     #define GET_ZOOM_RANGE(min, max) p2GetZoomRange(min, max)  // uint64_t *
     #define GET_ZOOM_POSITION() p2GetZoomPosition()
     #define GET_ZOOM_SPEED() p2GetZoomSpeed()

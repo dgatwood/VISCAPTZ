@@ -489,7 +489,16 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
 
 // Similar to p2GetZoomPosition, but does not correct for the nonlinearity of
 // the position data.  [redacted swearing at Panasonic]
-int64_t p2GetZoomPositionRaw(void) {
+int64_t p2GetZoomPositionRaw(bool *isCached) {
+    if (isCached != NULL) {
+      // In P2 mode, the camera broadcasts zoom position over UDP periodically
+      // rather than responding to synchronous queries. Outside of calibration
+      // mode, this function returns the most recently received broadcast value
+      // (gLastZoomPosition) immediately, which is always cached. In calibration
+      // mode, it blocks on gZoomDataCond until a fresh broadcast packet arrives
+      // (or exits on timeout), so the returned value is never cached.
+      *isCached = !gCalibrationMode;
+    }
     if (gCalibrationMode) {
       // Wait for the next value to arrive from the camera.  There's really no point in
       // taking this mutex, because we know the value won't change quickly (twice per second),
@@ -519,7 +528,7 @@ int64_t p2GetZoomPositionRaw(void) {
 // Gets the camera's current zoom position.
 int64_t p2GetZoomPosition(void) {
     bool localDebug = false;
-    int64_t nonlinearZoomPosition = p2GetZoomPositionRaw();
+    int64_t nonlinearZoomPosition = p2GetZoomPositionRaw(NULL);
     fprintf(stderr, "ZOOMNONLINEARPOS: %" PRId64 "\n", nonlinearZoomPosition);
     int64_t retval = panaMakeZoomLinear(nonlinearZoomPosition);
     if (localDebug) {
