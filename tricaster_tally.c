@@ -30,7 +30,6 @@ static pthread_t tricaster_tally_thread;
 static char *tally_source_name = NULL;
 
 static _Atomic(tallyStateType) gTricasterTallyState;
-static bool gTricasterTallyInitialized = false;
 
 static void handleResponses(int sock);
 ssize_t handleResponse(char *buf, ssize_t length);
@@ -232,7 +231,8 @@ tallyStateType tricaster_getTallyState(void) {
 
   /** Posts tally state changes to the camera, if applicable, and updates the internal state. */
   void setTallyStateFromTricaster(tallyStateType newState) {
-    if (gTricasterTallyInitialized && atomic_load(&gTricasterTallyState) == newState) {
+    static bool isStateCurrent = false;
+    if (isStateCurrent && atomic_load(&gTricasterTallyState) == newState) {
       return;
     }
 
@@ -246,7 +246,7 @@ tallyStateType tricaster_getTallyState(void) {
     #ifdef SET_TALLY_STATE
       success = SET_TALLY_STATE(newState);
     #endif
-    gTricasterTallyInitialized = success;
+    isStateCurrent = success;
   }
 
 
