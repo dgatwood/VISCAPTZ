@@ -235,7 +235,6 @@ tallyStateType tricaster_getTallyState(void) {
     if (gTricasterTallyInitialized && atomic_load(&gTricasterTallyState) == newState) {
       return;
     }
-    gTricasterTallyInitialized = true;
 
     fprintf(stderr, "Tally state: %s\n",
             (newState == kTallyStateRed) ? "Red (Program)" :
@@ -243,9 +242,11 @@ tallyStateType tricaster_getTallyState(void) {
             "Off");
 
     atomic_store(&gTricasterTallyState, newState);
+    bool success = true;
     #ifdef SET_TALLY_STATE
-      SET_TALLY_STATE(newState);
+      success = SET_TALLY_STATE(newState);
     #endif
+    gTricasterTallyInitialized = success;
   }
 
 

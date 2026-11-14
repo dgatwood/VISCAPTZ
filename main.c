@@ -167,9 +167,6 @@ typedef struct {
 
 // General state
 
-/** True if VISCA commands use core scale, else false. */
-bool gVISCAUsesCoreScale = false;
-
 /** True if in calibration mode, else false. */
 bool gCalibrationMode = false;
 
@@ -1288,9 +1285,6 @@ int64_t scaleVISCAPanTiltSpeedToCoreSpeed(int speed, bool interactive) {
 }
 
 int64_t scaleVISCAZoomSpeedToCoreSpeed(int speed) {
-  if (gVISCAUsesCoreScale) {
-    return speed;
-  }
   int64_t retval = scaleSpeed(speed, ZOOM_SCALE_VISCA, SCALE_CORE, NULL);
   return retval;
 }
@@ -2021,7 +2015,6 @@ bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber,
             failCount = 0;
             while (!sendVISCAResponse(&response, sequenceNumber, sock, client, structLength) && ++failCount < 10);
 
-            gVISCAUsesCoreScale = true;
             return true;
           } else if (len >= 5 && command[3] == 0x47 && command[4] == 0xFF) {
 #ifndef GET_ZOOM_RANGE
@@ -2197,7 +2190,7 @@ bool handleVISCACommand(uint8_t *command, uint16_t len, uint32_t sequenceNumber,
                 if (zoomCmd == 2) zoomCmd = 0x23;
                 if (zoomCmd == 3) zoomCmd = 0x33;
 
-                if (gVISCAUsesCoreScale && (zoomCmd == 0x2f || zoomCmd == 0x3f) && len < 8) {
+                if ((zoomCmd == 0x2f || zoomCmd == 0x3f) && len < 8) {
                   return false;
                 }
 
@@ -2205,9 +2198,8 @@ bool handleVISCACommand(uint8_t *command, uint16_t len, uint32_t sequenceNumber,
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
 
                 int32_t zoomSpeed = 0;
-                if (gVISCAUsesCoreScale && (zoomCmd == 0x2f || zoomCmd == 0x3f)) {
-                    // Nonstandard zoom command.  Supported only after asking for the maximum
-                    // allowable zoom speed.
+                if (zoomCmd == 0x2f || zoomCmd == 0x3f) {
+                    // Nonstandard zoom command with a 16-bit core-scale speed.
 
                     zoomSpeed = (command[5] << 8) | command[6];
 
@@ -2223,6 +2215,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                         // VISCA zoom speeds go from 0 to 7, but the output speed's 0 is stopped, so
                         // immediately convert the range to be from 1 to 8 instead.
                         zoomSpeed = ((zoomCmd & 0xf0) == 0x20) ? zoomRawSpeed + 1 : - (zoomRawSpeed + 1);
+                        zoomSpeed = scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed);
                     }
                 }
                 // If there is a move (recall or position set) in progress, ignore any
@@ -2231,7 +2224,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 // stick, abort any in-progress move immediately.
                 if (!moveInProgress() || zoomSpeed != 0) {
                     cancelRecallIfNeeded("Zoom command received");
-                    setAxisSpeed(axis_identifier_zoom, scaleVISCAZoomSpeedToCoreSpeed(zoomSpeed), false);
+                    setAxisSpeed(axis_identifier_zoom, zoomSpeed, false);
                 }
                 failCount = 0;
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
