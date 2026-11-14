@@ -1257,7 +1257,7 @@ int getInteractiveScale() {
   double floatPosition = (zoomPosition * 1.0) / zoomScale;
   floatPosition = MAX(0.0, MIN(1.0, floatPosition));
 
-  // If zoom is zoomMax, zoomPosition = zoomMax - zoomMin and zoomPositiion == zoomScale.
+  // If zoom is zoomMax, zoomPosition = zoomMax - zoomMin and zoomPosition == zoomScale.
   // Then floatPosition = 1.0, and this returns 4.0.
   // If zoom is zoomMin, zoomPosition = 0.  Then floatPosition = 0, and this returns 1.0.
 
@@ -2291,7 +2291,9 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               case 0x47: // Absolute zoom.
 #if ZOOM_POSITION_SUPPORTED
               {
-                 if (len < 9) return false;
+                 // Accept the standard 9-byte command (8x 01 04 47 0p 0q 0r 0s FF) and the
+                 // 13-byte extension (4 additional bytes for focus).
+                 if ((len != 9 && len != 13) || command[len - 1] != 0xFF) return false;
 
                  // Do not attempt to use absolute positioning while in calibration mode!
                  if (gCalibrationMode) {
@@ -2304,11 +2306,7 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 uint32_t position = ((command[4] & 0xf) << 12) | ((command[5] & 0xf) << 8) |
                                     ((command[6] & 0xf) << 4) | (command[7] & 0xf);
                 position = MIN(position, 0x6000U);
-                // VISCA zoom speeds go from 0 to 7, but we need to treat 0 as stopped, so immediately
-                // convert that to be from 1 to 8.  But only do that if it is a command that has a speed
-                // parameter.  Otherwise go with a default based on whether the camera is live or not.
-                uint8_t speed = ((command[len - 2] & 0xf0) == 0) ? ((command[8] & 0xf) + 1) :
-                    getVISCAZoomSpeedFromTallyState(false);
+                uint8_t speed = getVISCAZoomSpeedFromTallyState(false);
                 cancelRecallIfNeeded("setZoomPosition");
 
                 // Because this is a 30x zoom camera, scale the zoom position to the range
@@ -2323,9 +2321,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 zoomPositionScaled = MAX(zoomMin, MIN(zoomMax, zoomPositionScaled));
                 setZoomPosition(zoomPositionScaled, scaleVISCAZoomSpeedToCoreSpeed(speed), 0, 0);
 
-                // If (command[9] & 0xf0) == 0, then the low bytes of 9-12 are focus position,
-                // and speed is at position 13, shared with focus.  If we ever add support for
-                // focusing, handle that case here.
+                // In the 13-byte extension, the low nibbles of bytes 8-11 are the focus
+                // position.  If we ever add support for focusing, handle that case here.
 
                 failCount = 0;
                 while (!sendVISCAResponse(completedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
@@ -3058,13 +3055,15 @@ double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
       const int duration = movedTooFast ? 1000000 : 2000000;
       const double minValidInterval = movedTooFast ? 1 : 1.5;
       actualDuration = spinAxis(axis, duration, startPosition, endPosition, direction);
+      motionEndPosition = getAxisPosition(axis);
       if (actualDuration >= minValidInterval) {
         if (localDebug) {
           fprintf(stderr, "Got speed data.\n");
         }
         break;
       }
-    } else if (attempts > 2) {
+    }
+    if (attempts > 2) {
       fprintf(stderr, "Axis spin failed.\n");
       if (localDebug) {
         fprintf(stderr, "Moved too fast.\n");
@@ -3080,7 +3079,6 @@ double calibrationValueForMoveAlongAxis(axis_identifier_t axis,
 
     inMotion = false;
   }
-  motionEndPosition = getAxisPosition(axis);
 
   int64_t distance = llabs(motionEndPosition - motionStartPosition);
 
