@@ -138,6 +138,9 @@ bool motorModuleReload(void) {
         motor_pan_scaled_data =
             convertSpeedValues(motor_pan_data, PAN_TILT_SCALE_HARDWARE,
                                axis_identifier_pan);
+    } else {
+        free(motor_pan_data);
+        motor_pan_data = NULL;
     }
 
     motor_tilt_data =
@@ -146,6 +149,9 @@ bool motorModuleReload(void) {
         motor_tilt_scaled_data =
             convertSpeedValues(motor_tilt_data, PAN_TILT_SCALE_HARDWARE,
                                axis_identifier_tilt);
+    } else {
+        free(motor_tilt_data);
+        motor_tilt_data = NULL;
     }
   #endif  // USE_MOTOR_PAN_AND_TILT
   return true;
@@ -243,7 +249,9 @@ void *runPositionMonitorThread(void *argIgnored) {
             // NOTE: Do NOT add a backoff delay here.  Encoder position monitoring is
             // latency-critical while motors are moving, so CAN bus recovery must retry
             // immediately without waiting an extra millisecond.
-            sock = motorOpenCANSock();
+            do {
+                sock = motorOpenCANSock();
+            } while (sock == -1);
         }
     #else  // !USE_CANBUS
         updatePositionsSerial(pan_fd, tilt_fd);

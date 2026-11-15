@@ -115,7 +115,8 @@ bool panaModuleReload(void) {
     int maxSpeed = 0;
     bool localDebug = false;
     panasonicSharedInit(&panasonicZoomCalibrationData, &maxSpeed);
-    if (maxSpeed == ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE) {
+    if (panasonicZoomCalibrationData != NULL &&
+        maxSpeed == ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE) {
         panasonicScaledZoomCalibrationData =
             convertSpeedValues(panasonicZoomCalibrationData, maxSpeed,
                                axis_identifier_zoom);
@@ -137,6 +138,9 @@ bool panaModuleReload(void) {
           pana_pan_scaled_data =
               convertSpeedValues(pana_pan_data, PAN_TILT_SCALE_HARDWARE,
                                axis_identifier_pan);
+      } else {
+          free(pana_pan_data);
+          pana_pan_data = NULL;
       }
 
       pana_tilt_data =
@@ -145,6 +149,9 @@ bool panaModuleReload(void) {
           pana_tilt_scaled_data =
               convertSpeedValues(pana_tilt_data, PAN_TILT_SCALE_HARDWARE,
                                axis_identifier_tilt);
+      } else {
+          free(pana_tilt_data);
+          pana_tilt_data = NULL;
       }
     #endif  // !PANASONIC_PTZ_ZOOM_ONLY
   #endif  // USE_PANASONIC_PTZ

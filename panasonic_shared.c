@@ -67,7 +67,14 @@ int64_t *sharedCalibrationData = NULL;
 void panasonicSharedInit(int64_t **calibrationDataBuffer, int *maxSpeed) {
   *calibrationDataBuffer =
       readCalibrationDataForAxis(axis_identifier_zoom, maxSpeed);
-  sharedCalibrationData = *calibrationDataBuffer;
+  if (*calibrationDataBuffer != NULL && ZOOM_SCALE_HARDWARE > ZOOM_MIN_HARDWARE &&
+      *maxSpeed == ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE) {
+    sharedCalibrationData = *calibrationDataBuffer;
+  } else {
+    free(*calibrationDataBuffer);
+    *calibrationDataBuffer = NULL;
+    sharedCalibrationData = NULL;
+  }
 }
 
 // Holy &)*@^(& @^$&!  Panasonic's zoom positions aren't even linear.  Zooming out
