@@ -21,7 +21,7 @@ USE_TRICASTER_TALLY_SOURCE=1
 
 UNAME := $(shell uname)
 
-CFLAGS+=-I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -Wall -Wno-unknown-pragmas -Wshadow -g -O0 -fno-omit-frame-pointer
+CFLAGS+=-D_GNU_SOURCE -I./motorcontrol/lib/Config -I./motorcontrol/lib/MotorDriver -I./motorcontrol/lib/PCA9685 -Wall -Wno-unknown-pragmas -Wshadow -g -O0 -fno-omit-frame-pointer
 
 # If not using hardware, remove -lbcm2835
 ifeq ($(UNAME), Linux)
