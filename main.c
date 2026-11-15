@@ -103,21 +103,29 @@ static const int kAxisStallThreshold = 100;
 /**
  * The decipercentage of the motion that should be used for ramping up or down.
  */
-static const int kRampUpPeriodEnd = 200;
+static const int kRampUpPeriodLength = 200;
 
 // Do not change.  The ramp up and ramp down periods must be equal.
-static const int kRampDownPeriodStart = 1000 - kRampUpPeriodEnd;
+static const int kRampDownPeriodStart = 1000 - kRampUpPeriodLength;
 
-// During the ramp up/down period, the axis moves at half speed, so each of these periods
-// moves half the distance. Therefore, the percentage of the total distance moved at maximum
-// speed is halfway between 100% and the percentage of time spent at maximum speed.  So for
-// a ramp-up/ramp-down period of 10%, it moves at maximum speed for 90% of the distance.
+// During the ramp-up and ramp-down periods, the axis moves at half of the move's peak speed
+// on average, so each ramp period covers half as much distance as it would at that peak speed.
+// For example, with a 20% ramp-up period and a 20% ramp-down period:
+//   - The 20% ramp-up at half of peak speed covers as much distance as 10% of the time at peak speed.
+//   - The middle 60% at peak speed covers 60%.
+//   - The 20% ramp-down at half of peak speed covers as much distance as 10% of the time at peak speed.
 //
-// Thus, the slowdown begins after the initial ramp-up period's 5% plus that 90%, or 95%.
+// In total, the move covers 80% (10% + 60% + 10%) of the distance that it would have covered
+// if it had moved at the move's peak speed the entire time, and 70% (10% + 60%) of that
+// peak-speed distance happens before the ramp-down begins.  Dividing the distance before
+// slowdown (70%) by the total distance covered (80%) gives the fraction of the move's actual
+// distance at which slowdown begins: 0.70 / 0.80 = 0.875 (87.5%).
 //
-// Assuming the ramp-up period and ramp-down period are equal, this can be simplified to
-// one minus half of the ramp-up period.
-static const double moveDistanceFractionBeforeSlowdown = 1 - ((kRampUpPeriodEnd / 1000.0) / 2);
+// More generally, for a ramp-up fraction r = (kRampUpPeriodLength / 1000.0), the distance before
+// slowdown is (1 - 1.5*r) and the total distance is (1 - r), so the fraction of the total
+// distance covered before slowdown is (1 - 1.5*r) / (1 - r).
+static const double moveDistanceFractionBeforeSlowdown =
+    (1.0 - 1.5 * (kRampUpPeriodLength / 1000.0)) / (1.0 - (kRampUpPeriodLength / 1000.0));
 
 // The time fraction mefore slowdown is just kRampDownPeriodStart / 1000.
 static const double moveTimeFractionBeforeSlowdown = (kRampDownPeriodStart / 1000.0);
@@ -738,7 +746,7 @@ int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t
 ///     @param peakSpeed        The computed maximum speed for the move, computed by
 ///                             a prior call to peakSpeedForMove().
 int computeSpeed(int progress, int peakSpeed) {
-    if (progress < kRampUpPeriodEnd || progress > kRampDownPeriodStart) {
+    if (progress < kRampUpPeriodLength || progress > kRampDownPeriodStart) {
         int decipercentProgressToStartOrEnd = (progress >= kRampDownPeriodStart) ? (1000 - progress) : progress;
 
         // Depending on whether you run this function before or after calibrating the
@@ -841,9 +849,12 @@ int computeSpeed(int progress, int peakSpeed) {
         // the scaling function then can use the scaled values to determine how close
         // each hardware speed is to the expected values, and can adjust them accordingly.
 
-        // The value of decipercentProgressToStartOrEnd is in the range 0..kRampUpPeriodEnd.
-        // Convert that to the range 0..100.
-        double percentOfRampDuration = (decipercentProgressToStartOrEnd * 100.0) / kRampUpPeriodEnd;
+        // Both decipercentProgressToStartOrEnd and kRampUpPeriodLength are in decipercents
+        // of the total move, so they are in the range 0..1000, representing tenths of a
+        // percent of progress.  Convert decipercentProgressToStartOrEnd (0..kRampUpPeriodLength)
+        // to a percentage of the ramp duration (0..100).
+        double rampProgressFraction = (double)decipercentProgressToStartOrEnd / kRampUpPeriodLength;
+        double percentOfRampDuration = rampProgressFraction * 100.0;
         double exponent = 7.0 - ((7.0 * percentOfRampDuration) / 50.0);
         double speedFromProgress = 1 / (1 + pow(M_E, exponent));
         return round(speedFromProgress * 1.0 * peakSpeed);
@@ -958,22 +969,34 @@ void handleRecallUpdates(void) {
 
       // In the middle part of the move, make sure we don't run behind or ahead too much.
       // We know when we plan to start slowing down, and that's a good enough goalpost.
-      if ((!usingPositionBasedProgress) && moveProgressByTime >= kRampUpPeriodEnd &&
+      if ((!usingPositionBasedProgress) && moveProgressByTime >= kRampUpPeriodLength &&
           moveProgressByTime <= kRampDownPeriodStart) {
 
-          // When the slowdown begins at the 80% mark, it should be at 90% of the final position,
-          // because it will move at, on average, half speed for 20% of the duration.
+          // When the slowdown begins at the 80% time mark (for r = 0.2), the axis should be at
+          // moveDistanceFractionBeforeSlowdown (87.5%) of the final position.
           int64_t moveDistanceBeforeStartOfSlowdown =
               moveDistanceFractionBeforeSlowdown * llabs(targetPosition - startPosition);
 
-          // First some debugging data.
-          double kFullSpeedPeriodByTime = kRampDownPeriodStart - kRampUpPeriodEnd;
-          double kFullSpeedPeriodByDistance = kRampUpPeriodEnd;
+          // First some debugging data to compare actual position progress (on a 0..1000
+          // decipercent scale) against expected position progress at moveProgressByTime:
+          //
+          // - rampDistanceFraction: fraction (0..1) of total move distance covered during
+          //   the ramp-up (or ramp-down) phase (e.g. 1.0 - 0.875 = 0.125).
+          // - kRampPeriodByDistance: distance covered during the ramp-up (or ramp-down)
+          //   phase in distance decipercents (0..1000, e.g. 0.125 * 1000 = 125).
+          // - kPeakSpeedPeriodByDistance: distance covered during the middle peak-speed
+          //   phase in distance decipercents (0..1000, e.g. 1000 - 2 * 125 = 750).
+          // - kPeakSpeedPeriodByTime: duration of the middle peak-speed phase in time
+          //   decipercents (0..1000, e.g. 800 - 200 = 600).
+          double rampDistanceFraction = 1.0 - moveDistanceFractionBeforeSlowdown;
+          double kRampPeriodByDistance = rampDistanceFraction * 1000.0;
+          double kPeakSpeedPeriodByDistance = 1000.0 - (2.0 * kRampPeriodByDistance);
+          double kPeakSpeedPeriodByTime = kRampDownPeriodStart - kRampUpPeriodLength;
           int expectedMoveProgressByPosition =
-              // Progress during first kRampUpPeriodEnd positions
-              50 +
-              // Progress from 20 to 80 scaled to be from 10 to 90.
-              ((moveProgressByTime - kRampUpPeriodEnd) * kFullSpeedPeriodByDistance / kFullSpeedPeriodByTime);
+              // Distance progress completed by the end of the ramp-up period
+              kRampPeriodByDistance +
+              // Plus the fraction of the peak-speed period elapsed so far, scaled to distance.
+              ((moveProgressByTime - kRampUpPeriodLength) * kPeakSpeedPeriodByDistance / kPeakSpeedPeriodByTime);
 
           if (localDebug) {
             fprintf(stderr, "Axis %s progressByTime: %d\n", nameForAxis(axis), moveProgress);
@@ -1000,7 +1023,7 @@ void handleRecallUpdates(void) {
           }
 
           if (maxPPSForAxis > 0 && timeBeforeSlowingDown > 0) {
-            peakSpeed = MAX((int)((1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown)), 1);
+            peakSpeed = MIN(MAX((int)((1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown)), 1), SCALE_CORE);
           }
 
           if (localDebug) {
@@ -1079,7 +1102,7 @@ void handleRecallUpdates(void) {
             MAX(computeSpeed(moveProgress, peakSpeed), MIN_PAN_TILT_SPEED) :
             computeSpeed(moveProgress, peakSpeed);
 
-        if (axisPositionHasChanged || usingPositionBasedProgress || moveProgress < kRampUpPeriodEnd ||
+        if (axisPositionHasChanged || usingPositionBasedProgress || moveProgress < kRampUpPeriodLength ||
             moveProgress > kRampDownPeriodStart || gAxisLastMoveSpeed[axis] == 0) {
           setAxisSpeed(axis, speed * direction, localDebug);
         } else if (localDebug) {
@@ -1088,7 +1111,7 @@ void handleRecallUpdates(void) {
         if (localDebug) {
             fprintf(stderr, "SPEEDINFO AXIS: %d POS: %04d TIME: %04d SPEED: %d (%s)\n",
                     axis, moveProgressByPosition, usingPositionBasedProgress ? -1 : moveProgress, speed * direction,
-                    (moveProgress < kRampUpPeriodEnd) ? "RAMP UP" :
+                    (moveProgress < kRampUpPeriodLength) ? "RAMP UP" :
                         (moveProgress > kRampDownPeriodStart) ? "RAMP DOWN" : "NORMAL");
             fprintf(stderr, "AXIS %d SPEED NOW %d * %d (%d) at %d\n",
                     axis, speed, direction, speed * direction, moveProgress);
@@ -1672,7 +1695,7 @@ int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPos
   if (maxPPSForAxis == 0) {
     return SCALE_CORE;
   }
-  int peakSpeed = (peakPositionsPerSecond * 1000) / maxPPSForAxis;
+  int peakSpeed = MIN((int)((peakPositionsPerSecond * 1000) / maxPPSForAxis), SCALE_CORE);
 
   if (localDebug) {
     fprintf(stderr, "Peak speed: %d (max PPS for axis is %" PRId64 ", peakPPS is %lf)\n",
