@@ -47,13 +47,13 @@ bool tricasterModuleInit(void) {
   tally_source_name = getConfigKey(kTallySourceName);
 
   gTricasterIPAddress = getConfigKey(kTricasterIPKey);
-  if (gTricasterIPAddress == NULL) {
+  if (gTricasterIPAddress == NULL || strlen(gTricasterIPAddress) == 0) {
     fprintf(stderr, "Tricaster IP not set.  Initialization failed.\n");
     fprintf(stderr, "Run 'viscaptz --settricasterip <IP address>' to fix.\n");
     return false;
   }
 
-  if (tally_source_name == NULL) {
+  if (tally_source_name == NULL || strlen(tally_source_name) == 0) {
     fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
     fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
     return false;
@@ -278,6 +278,9 @@ tallyStateType tricaster_getTallyState(void) {
 
     // Watch for tally_source_name.
     ssize_t length = strlen(tally_source_name);
+    if (length == 0) {
+      return;
+    }
 
     bool found = false;
     if (!strncmp(value, tally_source_name, length)) {

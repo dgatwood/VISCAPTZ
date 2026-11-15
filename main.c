@@ -587,7 +587,7 @@ int main(int argc, char *argv[]) {
 
 #ifdef SET_IP_ADDR
   char *cameraIP = getConfigKey(kCameraIPKey);
-  if (cameraIP == NULL) {
+  if (cameraIP == NULL || strlen(cameraIP) == 0) {
     fprintf(stderr, "This software is configured for an IP-based camera, but you have not set\n");
     fprintf(stderr, "an IP-based address.  Run viscaptz --setcameraip to fix this.\n");
     exit(1);
@@ -1959,9 +1959,11 @@ bool handleVISCAPacket(visca_cmd_t *command, int sock, struct sockaddr *client, 
   }
   if (command->header.cmd[1] == 0x10) {
     return handleVISCAInquiry(command->data, payloadLen, command->header.sequence_number, sock, client, structLength);
-  } else {
+  } else if (command->header.cmd[1] == 0x00) {
     return handleVISCACommand(command->data, payloadLen, command->header.sequence_number, sock, client, structLength);
   }
+  fprintf(stderr, "INVALID[1 = %02x]\n", command->header.cmd[1]);
+  return false;
 }
 
 uint8_t getDeviceID(void) {
@@ -2576,21 +2578,36 @@ bool savePreset(int presetNumber) {
     preset.zoomPosition = GET_ZOOM_POSITION();
 
     if (retval) {
-        FILE *fp = fopen(presetFilename(presetNumber), "w");
+        char *filename = presetFilename(presetNumber);
+        char *tempFilename = NULL;
+        asprintf(&tempFilename, "%s.tmp", filename);
+        FILE *fp = fopen(tempFilename, "w");
         if (!fp) {
             fprintf(stderr, "Failed to save preset %d (I/O Error)\n", presetNumber);
+            free(tempFilename);
             return false;
         }
 
         if (fwrite((void *)&preset, sizeof(preset), 1, fp) != 1) {
             fprintf(stderr, "Failed to write preset %d (I/O Error)\n", presetNumber);
             fclose(fp);
+            unlink(tempFilename);
+            free(tempFilename);
             return false;
         }
         if (fclose(fp) != 0) {
             fprintf(stderr, "Failed to close preset %d (I/O Error)\n", presetNumber);
+            unlink(tempFilename);
+            free(tempFilename);
             return false;
         }
+        if (rename(tempFilename, filename) != 0) {
+            fprintf(stderr, "Failed to rename preset %d (I/O Error)\n", presetNumber);
+            unlink(tempFilename);
+            free(tempFilename);
+            return false;
+        }
+        free(tempFilename);
         fprintf(stderr, "Saving preset %d (pan=%" PRId64 ", tilt=%" PRId64
                         ", zoom=%" PRId64 "\n",
                 presetNumber,
@@ -2953,6 +2970,10 @@ void waitForAxisMove(axis_identifier_t axis) {
       atomic_store(&gAxisMoveInProgress[axis], false);
       gAxisStalls[axis] = 0;
       setAxisSpeed(axis, 0, false);
+
+      // This is not necessarily an error.  It is usually a natural side
+      // effect of the motor voltage being too low to actually move the
+      // camera.  So just break out of the loop.
       break;
     }
     usleep(100000);  // Wake up 10x per second or so.
@@ -3519,6 +3540,12 @@ void setTricasterIP(char *TricasterIP) {
 #pragma mark - Tests
 
 void runStartupTests(void) {
+  char testConfigPath[] = "/tmp/viscaptz-test-config-XXXXXX";
+  int testFd = mkstemp(testConfigPath);
+  assert(testFd != -1);
+  close(testFd);
+  setConfigFilePathForTesting(testConfigPath);
+
   char *bogusValue = getConfigKey("nonexistentKey");
   assert(bogusValue == NULL);
 
@@ -3573,6 +3600,9 @@ void runStartupTests(void) {
   assert(removeConfigKey("key2"));
   assert(removeConfigKey("randomValue"));
   assert(removeConfigKey(calibrationDataKeyNameForAxis(30)));
+
+  setConfigFilePathForTesting(NULL);
+  unlink(testConfigPath);
 
   int64_t source1000Values[] = {
     0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000

@@ -24,8 +24,18 @@ static bool configuratorDebug = false;
 static pthread_mutex_t configFileMutex = PTHREAD_MUTEX_INITIALIZER;
 static std::unordered_map<std::string, std::string> configMap;
 static bool configLoaded = false;
+static char *testConfigFilePath = NULL;
 
 static const char *getConfigFilePath(void);
+
+void setConfigFilePathForTesting(const char *path) {
+  pthread_mutex_lock(&configFileMutex);
+  free(testConfigFilePath);
+  testConfigFilePath = (path != NULL) ? strdup(path) : NULL;
+  configMap.clear();
+  configLoaded = false;
+  pthread_mutex_unlock(&configFileMutex);
+}
 
 // Returns true if the specified line's key portion matches the specified key.
 static bool lineMatchesKey(const char *buf, const char *key) {
@@ -110,6 +120,9 @@ bool getConfigKeyBool(const char *key) {
 // Returns the configuration file path (~/.viscaptz.conf unless overridden).
 // Must be called with configFileMutex held.
 static const char *getConfigFilePath(void) {
+  if (testConfigFilePath != NULL) {
+    return testConfigFilePath;
+  }
   #ifdef CONFIG_FILE_PATH
     return CONFIG_FILE_PATH;
   #else

@@ -64,7 +64,8 @@ bool obsModuleInit(void) {
     setTallyOff();
 
     char *OBSWebSocketURL = getConfigKey(kOBSWebSocketURLKey);
-    if (OBSWebSocketURL == NULL) {
+    if (OBSWebSocketURL == NULL || strlen(OBSWebSocketURL) == 0) {
+      free(OBSWebSocketURL);
       fprintf(stderr, "No OBS web socket URL specified.  Initialization failed.\n");
       fprintf(stderr, "Run 'viscaptz --setobsurl <URL>' to fix.\n");
       return false;
@@ -73,7 +74,8 @@ bool obsModuleInit(void) {
 
     char *tallySourceName = getConfigKey(kTallySourceName);
 
-    if (tallySourceName == NULL) {
+    if (tallySourceName == NULL || strlen(tallySourceName) == 0) {
+      free(tallySourceName);
       fprintf(stderr, "No tally source name specified.  Initialization failed.\n");
       fprintf(stderr, "Run 'viscaptz --settallysourcename <URL>' to fix.\n");
       return false;

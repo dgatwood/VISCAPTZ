@@ -60,6 +60,12 @@ bool setConfigKeyInteger(const char *key, int64_t value);
  */
 bool removeConfigKey(const char *key);
 
+/**
+ * Overrides the configuration file path for startup unit tests, resetting any
+ * cached configuration state.  Pass NULL to restore the default path.
+ */
+void setConfigFilePathForTesting(const char *path);
+
 #ifdef __cplusplus
 }
 #endif
