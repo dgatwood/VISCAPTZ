@@ -1957,6 +1957,10 @@ void printbuf(uint8_t *buf, int len) {
 }
 
 bool handleVISCAPacket(visca_cmd_t *command, int sock, struct sockaddr *client, socklen_t structLength) {
+  // Nota bene: This is not intended to handle every possible VISCA command.  Different cameras have
+  // slightly different supported command sets.  We're generally not handling manufacturer-specific
+  // extensions, such as resetting the sequence number, and a lot of commands are marked as not
+  // implemented.
   uint16_t payloadLen = ntohs(command->header.len);
   if (debug_verbose) fprintf(stderr, "GOT VISCA PACKET %s\n", VISCAMessageDebugString(command->data, payloadLen));
 
