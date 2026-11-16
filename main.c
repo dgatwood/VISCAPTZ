@@ -589,11 +589,13 @@ int main(int argc, char *argv[]) {
 #ifdef SET_IP_ADDR
   char *cameraIP = getConfigKey(kCameraIPKey);
   if (cameraIP == NULL || strlen(cameraIP) == 0) {
+    free(cameraIP);
     fprintf(stderr, "This software is configured for an IP-based camera, but you have not set\n");
     fprintf(stderr, "an IP-based address.  Run viscaptz --setcameraip to fix this.\n");
     exit(1);
   }
   SET_IP_ADDR(cameraIP);
+  free(cameraIP);
 #endif
 
   if (!motorModuleInit()) {
@@ -1934,7 +1936,7 @@ void *runNetworkThread(void *argIgnored) {
 }
 
 bool sendVISCAResponse(visca_response_t *response, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
-  uint16_t length = htons(response->header.len);
+  uint16_t length = ntohs(response->header.len);
   response->header.sequence_number = sequenceNumber;
   if (length > 0) {
     length += sizeof(visca_header_t);
@@ -3359,7 +3361,7 @@ int64_t *readCalibrationDataForAxis(axis_identifier_t axis,
   int count = 0;
   char *pos = rawCalibrationData;
   while (*pos != '\0') {
-    int64_t value = strtoull(pos, NULL, 10);
+    int64_t value = strtoll(pos, NULL, 10);
     int64_t *newData = realloc(data, size + sizeof(int64_t));
     size += sizeof(int64_t);
     if (newData == NULL) {
@@ -3492,7 +3494,7 @@ int64_t zoomOutLimit(void) {
 }
 
 bool zoomEncoderReversed(void) {
-  return getConfigKeyInteger(kZoomEncoderReversedKey);
+  return getConfigKeyBool(kZoomEncoderReversedKey);
 }
 
 
