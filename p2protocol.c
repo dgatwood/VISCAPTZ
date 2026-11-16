@@ -84,6 +84,7 @@ ssize_t syncReadLong(int fd, char *buf, size_t capacity);
 
 static pthread_mutex_t gSocketLock, gSpeedLock;
 static pthread_cond_t gZoomDataCond;
+static bool gZoomDataReceived = false;
 
 static int gP2UDPSocket = -1;
 static int gP2TCPSocket = -1;
@@ -519,9 +520,14 @@ int64_t p2GetZoomPositionRaw(bool *isCached) {
       timeout.tv_nsec = now.tv_usec * 1000;
 
       pthread_mutex_lock(&gSpeedLock);
-      int err = pthread_cond_timedwait(&gZoomDataCond, &gSpeedLock, &timeout);
+      gZoomDataReceived = false;
+      int err = 0;
+      while (!gZoomDataReceived && err == 0) {
+        err = pthread_cond_timedwait(&gZoomDataCond, &gSpeedLock, &timeout);
+      }
+      bool gotData = gZoomDataReceived;
       pthread_mutex_unlock(&gSpeedLock);
-      if (err != 0) {
+      if (!gotData) {
         fprintf(stderr, "Timed out waiting for P2 UDP zoom position broadcast during calibration.  Bailing.\n");
         p2SetZoomSpeed(0, true);
         exit(1);
@@ -676,7 +682,7 @@ char *getP2Auth(int sock) {
   free(message);
   if (length != expectedLength) {
     perror("write");
-    fprintf(stderr, "Could not write auth message 1; got %" PRId64 "\n", (uint64_t)length);
+    fprintf(stderr, "Could not write auth message 1; got %" PRId64 "\n", (int64_t)length);
     return NULL;
   }
 
@@ -800,7 +806,7 @@ bool requestEnv(char *authToken, int sock) {
   message = NULL;
   if (length != expectedLength) {
     perror("write");
-    fprintf(stderr, "Could not write auth message 2; got %" PRId64 "\n", (uint64_t)length);
+    fprintf(stderr, "Could not write auth message 2; got %" PRId64 "\n", (int64_t)length);
     return false;
   }
 
@@ -821,7 +827,7 @@ bool requestEnv(char *authToken, int sock) {
   free(message);
   message = NULL;
   if (length != expectedLength) {
-    fprintf(stderr, "Could not write auth message 3; got %" PRId64 "\n", (uint64_t)length);
+    fprintf(stderr, "Could not write auth message 3; got %" PRId64 "\n", (int64_t)length);
     return false;
   }
 
@@ -1035,7 +1041,10 @@ void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSi
         newZoomPosition, expectedPosition);
 
     freeSpeedChanges();
+    pthread_mutex_lock(&gSpeedLock);
+    gZoomDataReceived = true;
     pthread_cond_broadcast(&gZoomDataCond);
+    pthread_mutex_unlock(&gSpeedLock);
   } else if (message_type == 0x0A) {
     if (packetSize < sizeof(p2_camera_data_t)) {
       fprintf(stderr, "Ignoring short packet for message type 0xA (camera data).\n");

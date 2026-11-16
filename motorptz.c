@@ -761,6 +761,8 @@ void motorModuleCalibrate(void) {
 
   writeCalibrationDataForAxis(axis_identifier_pan, panCalibrationData, PAN_TILT_SCALE_HARDWARE);
   writeCalibrationDataForAxis(axis_identifier_tilt, tiltCalibrationData, PAN_TILT_SCALE_HARDWARE);
+  free(panCalibrationData);
+  free(tiltCalibrationData);
 
   fprintf(stderr, "Done calibrating motors.\n");
 }

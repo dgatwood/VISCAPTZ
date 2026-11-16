@@ -32,8 +32,9 @@ LDFLAGS+=-lpthread -lm -lcrypto -lxml2
 endif
 
 ifeq ($(UNAME), Darwin)
-CFLAGS+=-I/opt/homebrew/Cellar/openssl@3/3.4.1/include/
-LDFLAGS+=-L/opt/homebrew/Cellar/openssl@3/3.4.1/lib/
+OPENSSL_PREFIX := $(shell brew --prefix openssl@3 2>/dev/null || echo /opt/homebrew/opt/openssl@3)
+CFLAGS+=-I$(OPENSSL_PREFIX)/include/
+LDFLAGS+=-L$(OPENSSL_PREFIX)/lib/
 endif
 
 ifeq ($(USE_OBS_TALLY_SOURCE), 1)

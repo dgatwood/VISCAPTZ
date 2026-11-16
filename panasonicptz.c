@@ -248,6 +248,8 @@ bool panaSetPanTiltSpeed(int64_t panSpeed, int64_t tiltSpeed, bool isRaw) {
     int scaledTiltSpeed =
         (isRaw ? tiltSpeed : scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
                                         pana_tilt_scaled_data)) + PANASONIC_HARDWARE_SCALE_OFFSET;
+    scaledPanSpeed = MIN(MAX(scaledPanSpeed, 1), 99);
+    scaledTiltSpeed = MIN(MAX(scaledTiltSpeed, 1), 99);
 
     char *values[2] = {
         panaIntString(scaledPanSpeed, 2, false),
@@ -438,6 +440,7 @@ bool panaSetZoomSpeed(int64_t speed, bool isRaw) {
     int intSpeed =
         (isRaw ? speed : scaleSpeed(speed, SCALE_CORE, ZOOM_SCALE_HARDWARE,
                                     panasonicScaledZoomCalibrationData)) + PANASONIC_HARDWARE_SCALE_OFFSET;
+    intSpeed = MIN(MAX(intSpeed, 1), 99);
     char *intSpeedString = panaIntString(intSpeed, 2, false);
 
     if (localDebug) {

@@ -34,9 +34,7 @@
 bool pana_enable_debugging = false;
 
 /** Maps hardware zoom values to linearized values. n=hw_zoom_positions+1 */
-static int64_t *zoom_position_map;
-
-static int zoom_position_map_count;
+static int64_t *zoom_position_map = NULL;
 
 
 #pragma mark - Data types
@@ -88,7 +86,7 @@ void panasonicSharedInit(int64_t **calibrationDataBuffer, int *maxSpeed) {
 // Anyway, this converts a hardware zoom value into something roughly linear.
 int64_t panaMakeZoomLinear(int64_t zoomPosition) {
   bool localDebug = false || pana_enable_debugging;
-  if (zoom_position_map_count == 0) {
+  if (zoom_position_map == NULL) {
     fprintf(stderr, "WARNING: Zoom position map empty.\n");
     return zoomPosition;
   }
@@ -104,15 +102,14 @@ int64_t panaMakeZoomLinear(int64_t zoomPosition) {
 
   int64_t retval = zoom_position_map[entry];
   if (localDebug) {
-    fprintf(stderr, "panaMakeZoomLinear: minZoom: %" PRId64 "\nEntry:%lld\nCount: %d\n", minZoom, (long long)entry, zoom_position_map_count);
+    fprintf(stderr, "panaMakeZoomLinear: minZoom: %" PRId64 "\nEntry:%lld\nCount: %lld\n", minZoom, (long long)entry, (long long)(maxZoom - minZoom + 1));
     fprintf(stderr, "panaMakeZoomLinear: %lld -> %lld\n", (long long)zoomPosition, (long long)retval);
   }
 
   return retval;
 }
 
-// No attempt is made to free any preexisting tables.  This function
-// should be called exactly once per launch.
+// Re-populates the zoom nonlinearity table from the current configuration.
 void populateZoomNonlinearityTable(void) {
   bool localDebug = false || pana_enable_debugging;
   int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
@@ -125,8 +122,9 @@ void populateZoomNonlinearityTable(void) {
     return;
   }
 
-  zoom_position_map_count = maxZoom - minZoom + 1;
-  zoom_position_map = malloc(zoom_position_map_count * sizeof(int64_t));
+  free(zoom_position_map);
+  int count = maxZoom - minZoom + 1;
+  zoom_position_map = malloc(count * sizeof(int64_t));
 
   int64_t position = 0;  // minZoom - minZoom
   int64_t scaledPosition = scaleLinearZoomToRawZoom(position);
@@ -318,6 +316,7 @@ void panaModuleCalibrate(void) {
 
   writeCalibrationDataForAxis(axis_identifier_zoom, zoomCalibrationData,
                               ZOOM_SCALE_HARDWARE - ZOOM_MIN_HARDWARE);
+  free(zoomCalibrationData);
 }
 
 
