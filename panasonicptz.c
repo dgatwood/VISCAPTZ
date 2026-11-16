@@ -319,7 +319,8 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
 
     fprintf(stderr, "SET ZOOM POSITION TO %" PRId64 " SPEED %d\n", position, (int)maxSpeed);
 
-    char *value = panaIntString(position, 3, true);
+    uint64_t rawPosition = scaleLinearZoomToRawZoom(position);
+    char *value = panaIntString(rawPosition, 3, true);
     char *response = sendCommand("ptz", "#AXZ", &value, 1, "axz");
     if (response != NULL) {
         free(response);
@@ -408,7 +409,7 @@ char *sendCommand(const char *group, const char *command, char *values[],
 
 
 
-    free(encoded_command);
+    curl_free(encoded_command);
     free(valueString);
 
     curl_easy_cleanup(curlQueryHandle);
