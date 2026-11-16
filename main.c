@@ -1023,7 +1023,7 @@ void handleRecallUpdates(void) {
           }
 
           if (maxPPSForAxis > 0 && timeBeforeSlowingDown > 0) {
-            peakSpeed = MIN(MAX((int)((1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown)), 1), SCALE_CORE);
+            peakSpeed = (int)MIN(MAX((1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown), 1.0), (double)SCALE_CORE);
           }
 
           if (localDebug) {
@@ -1695,7 +1695,7 @@ int peakSpeedForMove(axis_identifier_t axis, int64_t fromPosition, int64_t toPos
   if (maxPPSForAxis == 0) {
     return SCALE_CORE;
   }
-  int peakSpeed = MIN((int)((peakPositionsPerSecond * 1000) / maxPPSForAxis), SCALE_CORE);
+  int peakSpeed = (int)MIN((peakPositionsPerSecond * 1000.0) / maxPPSForAxis, (double)SCALE_CORE);
 
   if (localDebug) {
     fprintf(stderr, "Peak speed: %d (max PPS for axis is %" PRId64 ", peakPPS is %lf)\n",

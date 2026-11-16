@@ -180,11 +180,11 @@ void addSceneOnProgram(const char *sceneName) {
       fprintf(stderr, "Program source %s is a monitored source\n",
               sceneName);
     }
-    updateTallyState();
   } else if (obs_tally_debug) {
     fprintf(stderr, "Program source %s is not a monitored source\n",
             sceneName);
   }
+  updateTallyState();
 }
 
 /**
@@ -201,11 +201,11 @@ void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
       fprintf(stderr, "Preview source %s is a monitored source.\n",
               sceneName);
     }
-    updateTallyState();
   } else if (obs_tally_debug) {
     fprintf(stderr, "Preview source %s is not a monitored source.\n",
             sceneName);
   }
+  updateTallyState();
 }
 
 /**
@@ -220,11 +220,11 @@ void markSceneInactive(const char *sceneName) {
               sceneName);
     }
     removeActiveSceneWithName(sceneName);
-    updateTallyState();
   } else if (obs_tally_debug) {
     fprintf(stderr, "Inactive source %s is not a monitored source.\n",
             sceneName);
   }
+  updateTallyState();
 }
 
 void runOBSTests(void) {
@@ -280,6 +280,7 @@ void removeActiveSceneWithName(const char *name) {
 }
 
 static void updateTallyState(void) {
+  static bool isStateCurrent = false;
   tallyStateType maxState = kTallyStateOff;
   for (tally_scene_item_t *item = activeScenes ; item ; item = item->next) {
     if (maxState < kTallyStateRed) {
@@ -294,14 +295,19 @@ static void updateTallyState(void) {
       }
     }
   }
-  atomic_store(&gCurrentOBSTallyState, maxState);
-  if (maxState == kTallyStateRed) {
-    setTallyRed();
-  } else if (maxState == kTallyStateGreen) {
-    setTallyGreen();
-  } else {
-    setTallyOff();
+  if (isStateCurrent && atomic_load(&gCurrentOBSTallyState) == maxState) {
+    return;
   }
+  atomic_store(&gCurrentOBSTallyState, maxState);
+  bool success = false;
+  if (maxState == kTallyStateRed) {
+    success = setTallyRed();
+  } else if (maxState == kTallyStateGreen) {
+    success = setTallyGreen();
+  } else {
+    success = setTallyOff();
+  }
+  isStateCurrent = success;
 }
 
 
