@@ -16,6 +16,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <netinet/in.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <sys/ioctl.h>
@@ -2575,7 +2576,9 @@ char *presetFilename(int presetNumber) {
     if (buf != NULL) {
         free(buf);
     }
-    asprintf(&buf, "preset_%d", presetNumber);
+    struct passwd *pw = getpwuid(getuid());
+    const char *basepath = (pw != NULL && pw->pw_dir != NULL) ? pw->pw_dir : getenv("HOME");
+    asprintf(&buf, "%s/.viscaptz_preset_%d", (basepath ?: "."), presetNumber);
     return buf;
 }
 
