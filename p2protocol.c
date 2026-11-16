@@ -8,6 +8,7 @@
 #include <math.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -95,13 +96,13 @@ void *runP2UDPThread(void *argIgnored);
 static bool p2_enable_debugging = false;
 
 /** The last zoom speed that was set. */
-static int64_t gLastZoomSpeed = 0;
+static _Atomic int64_t gLastZoomSpeed = 0;
 
 /** The last zoom position received. */
-static int64_t gLastZoomPosition = 0;
+static _Atomic int64_t gLastZoomPosition = 0;
 
 /** The last tally state received. */
-static int64_t gLastTallyState = 0;
+static _Atomic int64_t gLastTallyState = 0;
 
 /** The IP address of the camera. */
 static char *g_cameraIPAddr = NULL;
@@ -229,6 +230,11 @@ bool p2ModuleInit(void) {
 
   #if USE_PANASONIC_PTZ && ENABLE_P2_MODE
     if (p2_enable_debugging) fprintf(stderr, "P2 module init\n");
+
+    if (g_cameraIPAddr == NULL) {
+        fprintf(stderr, "No camera IP address configured.\n");
+        return false;
+    }
 
     gP2UDPSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (gP2UDPSocket == -1) {
@@ -364,7 +370,7 @@ bool p2GetZoomRange(int64_t *min, int64_t *max) {
 int64_t p2GetZoomSpeed(void) {
     // Just return the last cached value.  The camera doesn't provide
     // a way to query this.
-    return gLastZoomSpeed;
+    return atomic_load(&gLastZoomSpeed);
 }
 
 // Queries $ZmSpd:c and caches the minimum and maximum zoom speeds.
@@ -482,7 +488,7 @@ bool p2SetZoomSpeed(int64_t speed, bool isRaw) {
     if (!ok /* || !response || atoi(response) != intSpeed */) {
         retval = false;
     } else {
-        gLastZoomSpeed = intSpeed;
+        atomic_store(&gLastZoomSpeed, intSpeed);
         markSpeedChange(intSpeed);
     }
     free(response);
@@ -522,7 +528,7 @@ int64_t p2GetZoomPositionRaw(bool *isCached) {
       }
     }
 
-    return gLastZoomPosition;
+    return atomic_load(&gLastZoomPosition);
 }
 
 // Public function.  Docs in header.
@@ -557,7 +563,7 @@ int p2GetTallyState(void) {
   // by calling $RTlySw:? and $GTlySw:?, but it isn't worth the effort when we're getting
   // both values twice per second anyway.
 
-  return gLastTallyState;
+  return atomic_load(&gLastTallyState);
 }
 
 // Public function.  Docs in header.
@@ -1012,7 +1018,7 @@ void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSi
       return;
     }
 
-    int64_t expectedPosition = gLastZoomPosition + estimatedPositionsSinceLastPositionData();
+    int64_t expectedPosition = atomic_load(&gLastZoomPosition) + estimatedPositionsSinceLastPositionData();
     // fprintf(stderr, "Zoom position message type\n");
 
     p2_optical_data_t *optical_data = (p2_optical_data_t *)packetBuffer;
@@ -1021,11 +1027,12 @@ void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSi
       return;
     }
 
-    gLastZoomPosition = zoomPositionFromData(optical_data);
-    fprintf(stderr, "ZOOM POSITION NOW %lld\n", (long long)gLastZoomPosition);
+    int64_t newZoomPosition = zoomPositionFromData(optical_data);
+    atomic_store(&gLastZoomPosition, newZoomPosition);
+    fprintf(stderr, "ZOOM POSITION NOW %lld\n", (long long)newZoomPosition);
 
     fprintf(stderr, "@@@ Zoom position: %" PRId64 " expected %" PRId64 "\n",
-        gLastZoomPosition, expectedPosition);
+        newZoomPosition, expectedPosition);
 
     freeSpeedChanges();
     pthread_cond_broadcast(&gZoomDataCond);
@@ -1041,7 +1048,7 @@ void updateZoomPositionAndTallyFromP2Data(uint8_t *packetBuffer, size_t packetSi
     // Return 6 for green (preview).
     bool redState = (camera_data->tally_and_thumbnail & 0x01);
     bool greenState = (camera_data->tally_and_thumbnail & 0x02);
-    gLastTallyState = redState ? kTallyStateRed : greenState ? kTallyStateGreen : 0;
+    atomic_store(&gLastTallyState, redState ? kTallyStateRed : greenState ? kTallyStateGreen : 0);
   }
 }
 
@@ -1207,7 +1214,7 @@ void freeSpeedChanges(void) {
   gSpeedHead = NULL;
 
   // Create a speed change entry starting from the time when the zoom data became available.
-  markSpeedChangeNoLock(gLastZoomSpeed);
+  markSpeedChangeNoLock(atomic_load(&gLastZoomSpeed));
 
   pthread_mutex_unlock(&gSpeedLock);
   for (speed_time_t *pos = oldHead; pos;) {
