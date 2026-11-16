@@ -289,6 +289,8 @@ bool p2ModuleReload(void) {
   #if USE_PANASONIC_PTZ
     int maxSpeed = 0;
     bool localDebug = false;
+    free(p2ScaledZoomCalibrationData);
+    p2ScaledZoomCalibrationData = NULL;
     panasonicSharedInit(&p2ZoomCalibrationData, &maxSpeed);
     int minZoomSpeed = ZOOM_MIN_HARDWARE;
     int maxZoomSpeed = ZOOM_SCALE_HARDWARE;

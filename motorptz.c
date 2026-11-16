@@ -132,6 +132,10 @@ bool motorModuleStart(void) {
 bool motorModuleReload(void) {
   #if USE_MOTOR_PAN_AND_TILT
     int maxSpeed = 0;
+    free(motor_pan_data);
+    motor_pan_data = NULL;
+    free(motor_pan_scaled_data);
+    motor_pan_scaled_data = NULL;
     motor_pan_data =
         readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
     if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
@@ -143,6 +147,10 @@ bool motorModuleReload(void) {
         motor_pan_data = NULL;
     }
 
+    free(motor_tilt_data);
+    motor_tilt_data = NULL;
+    free(motor_tilt_scaled_data);
+    motor_tilt_scaled_data = NULL;
     motor_tilt_data =
         readCalibrationDataForAxis(axis_identifier_tilt, &maxSpeed);
     if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {

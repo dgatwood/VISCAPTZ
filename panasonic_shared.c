@@ -65,6 +65,7 @@ int64_t *sharedCalibrationData = NULL;
 #pragma mark - Functions
 
 void panasonicSharedInit(int64_t **calibrationDataBuffer, int *maxSpeed) {
+  free(*calibrationDataBuffer);
   *calibrationDataBuffer =
       readCalibrationDataForAxis(axis_identifier_zoom, maxSpeed);
   if (*calibrationDataBuffer != NULL && ZOOM_SCALE_HARDWARE > ZOOM_MIN_HARDWARE &&
@@ -227,6 +228,7 @@ void panaModuleCalibrate(void) {
   SET_ZOOM_SPEED(-ZOOM_SCALE_HARDWARE, true);
   waitForZoomStop(NULL, NULL);
 
+  // The motor is stopped after waitForZoomStop, so cached values are okay.
   int64_t rawZoomOutLimit = GET_RAW_ZOOM_POSITION(NULL);
   setConfigKeyInteger(kZoomOutInternalLimitKey, rawZoomOutLimit);
 
@@ -246,6 +248,7 @@ void panaModuleCalibrate(void) {
     waitForZoomStop(&positionArray, &count);
     fprintf(stderr, "Done capturing positions per second for nonlinearity.");
 
+    // The motor is stopped after waitForZoomStop, so cached values are okay.
     int64_t rawZoomInLimit = GET_RAW_ZOOM_POSITION(NULL);
     setConfigKeyInteger(kZoomInInternalLimitKey, rawZoomInLimit);
 
@@ -268,6 +271,7 @@ void panaModuleCalibrate(void) {
     // data for computing a new table or not!
     SET_ZOOM_SPEED(ZOOM_SCALE_HARDWARE, true);
     waitForZoomStop(NULL, NULL);
+    // The motor is stopped after waitForZoomStop, so cached values are okay.
     int64_t rawZoomInLimit = GET_RAW_ZOOM_POSITION(NULL);
     setConfigKeyInteger(kZoomInInternalLimitKey, rawZoomInLimit);
 
@@ -281,6 +285,7 @@ void panaModuleCalibrate(void) {
   fprintf(stderr, "Populating nonlinearity table.\n");
   populateZoomNonlinearityTable();
 
+  // The motor is stopped after waitForZoomStop, so cached values are okay.
   int64_t minimumZoom = GET_ZOOM_POSITION();
 
   if (localDebug) {
@@ -293,6 +298,7 @@ void panaModuleCalibrate(void) {
   SET_ZOOM_SPEED(ZOOM_SCALE_HARDWARE, true);
   waitForZoomStop(NULL, NULL);
 
+  // The motor is stopped after waitForZoomStop, so cached values are okay.
   int64_t maximumZoom = GET_ZOOM_POSITION();
 
   if (localDebug) {
