@@ -1813,6 +1813,13 @@ void cancelRecallIfNeeded(char *context) {
   }
 }
 
+void emergencyStop(char *context) {
+  cancelRecallIfNeeded(context);
+  for (axis_identifier_t axis = axis_identifier_pan; axis < NUM_AXES; axis++) {
+    setAxisSpeed(axis, 0, false);
+  }
+}
+
 bool setAxisPositionIncrementally(axis_identifier_t axis, int64_t position, int64_t maxSpeed, double duration,
                                   double startTime) {
   bool localDebug = false;

@@ -212,3 +212,6 @@ void setDeviceID(uint8_t deviceID);
 
 /** Returns the VISCA response address byte for this device ((getDeviceID() << 4) | 0x80, default 0x90). */
 uint8_t getDeviceResponseID(void);
+
+/** Cancels any active recalls and sets all motor speeds to zero. */
+void emergencyStop(char *context);
