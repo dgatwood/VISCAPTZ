@@ -21,8 +21,8 @@
 
 bool tricasterDebug = false;
 
-bool g_onProgram = false;
-bool g_onPreview = false;
+static _Atomic bool g_onProgram = false;
+static _Atomic bool g_onPreview = false;
 
 #if USE_TRICASTER_TALLY_SOURCE
 static pthread_t tricaster_tally_thread;
@@ -301,14 +301,14 @@ tallyStateType tricaster_getTallyState(void) {
     }
 
     if (setProgram) {
-      g_onProgram = found;
+      atomic_store(&g_onProgram, found);
     }
     if (setPreview) {
-      g_onPreview = found;
+      atomic_store(&g_onPreview, found);
     }
-    if (g_onProgram) {
+    if (atomic_load(&g_onProgram)) {
         setTallyStateFromTricaster(kTallyStateRed);
-    } else if (g_onPreview) {
+    } else if (atomic_load(&g_onPreview)) {
         setTallyStateFromTricaster(kTallyStateGreen);
     } else {
       setTallyStateFromTricaster(kTallyStateOff);

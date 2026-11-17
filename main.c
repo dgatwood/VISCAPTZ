@@ -1045,7 +1045,7 @@ void handleRecallUpdates(void) {
 
       if (axisPositionHasChanged) {
         double deltaTimeSinceLastChange = currentTime - gAxisPreviousPositionTimestamp[axis];
-        uint64_t deltaPositionSinceLastChange = axisPosition - gAxisPreviousPosition[axis];
+        int64_t deltaPositionSinceLastChange = axisPosition - gAxisPreviousPosition[axis];
         int64_t maxPPSForAxis = maximumPositionsPerSecondForAxis(axis);
         double targetPPS = peakSpeed * maxPPSForAxis / 1000.0;
 
@@ -1053,7 +1053,7 @@ void handleRecallUpdates(void) {
           fprintf(stderr, "POSITION CHANGE: %" PRId64 "\n", deltaPositionSinceLastChange);
           fprintf(stderr, "TIME CHANGE: %lf\n", deltaTimeSinceLastChange);
           fprintf(stderr, "COMPUTED SPEED: %lf pps EXPECTED: %lf pps\n",
-                  (double)((int)deltaPositionSinceLastChange / deltaTimeSinceLastChange),
+                  (double)llabs(deltaPositionSinceLastChange) / deltaTimeSinceLastChange,
                   targetPPS);
         }
 

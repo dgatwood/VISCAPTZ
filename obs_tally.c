@@ -33,6 +33,7 @@ static bool obs_tally_debug = false;
   static pthread_t obs_tally_thread;
 #endif
 static _Atomic(tallyStateType) gCurrentOBSTallyState = kTallyStateOff;
+static pthread_mutex_t gOBSTallyMutex = PTHREAD_MUTEX_INITIALIZER;
 static char **gTallySourceNames = NULL;
 static int gNumberOfTallySourceNames = 0;
 
@@ -174,6 +175,7 @@ bool isMonitoredScene(const char *sceneName, char **monitoredSources, int number
  * sets the tally state to red.
  */
 void addSceneOnProgram(const char *sceneName) {
+  pthread_mutex_lock(&gOBSTallyMutex);
   if (isMonitoredScene(sceneName, gTallySourceNames, gNumberOfTallySourceNames)) {
     addActiveSceneWithName(sceneName, kTallyStateRed);
     if (obs_tally_debug) {
@@ -185,6 +187,7 @@ void addSceneOnProgram(const char *sceneName) {
             sceneName);
   }
   updateTallyState();
+  pthread_mutex_unlock(&gOBSTallyMutex);
 }
 
 /**
@@ -195,6 +198,7 @@ void addSceneOnProgram(const char *sceneName) {
  * tally state to green if the scene name matches a monitored scene.
  */
 void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
+  pthread_mutex_lock(&gOBSTallyMutex);
   if (isMonitoredScene(sceneName, gTallySourceNames, gNumberOfTallySourceNames)) {
     addActiveSceneWithName(sceneName, alsoOnProgram ? kTallyStateRed : kTallyStateGreen);
     if (obs_tally_debug) {
@@ -206,6 +210,7 @@ void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
             sceneName);
   }
   updateTallyState();
+  pthread_mutex_unlock(&gOBSTallyMutex);
 }
 
 /**
@@ -214,6 +219,7 @@ void addSceneOnPreview(const char *sceneName, bool alsoOnProgram) {
  * a monitored scene, the tally state is set to off.
  */
 void markSceneInactive(const char *sceneName) {
+  pthread_mutex_lock(&gOBSTallyMutex);
   if (isMonitoredScene(sceneName, gTallySourceNames, gNumberOfTallySourceNames)) {
     if (obs_tally_debug) {
       fprintf(stderr, "Inactive source %s is a monitored source.\n",
@@ -225,6 +231,7 @@ void markSceneInactive(const char *sceneName) {
             sceneName);
   }
   updateTallyState();
+  pthread_mutex_unlock(&gOBSTallyMutex);
 }
 
 void runOBSTests(void) {
