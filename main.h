@@ -152,6 +152,14 @@ bool setZoomEncoderReversed(bool isReversed);
  */
 bool setZoomMotorReversed(bool isReversed);
 
+/*
+ * NOTE: The pan and tilt limit functions below apply ONLY during calibration
+ * and recalibration to determine how far the software can safely move the axes
+ * while measuring speeds.  They are intentionally ignored during normal
+ * operation because the valid range can shift due to hardware disassembly,
+ * rotating the gimbal on a tripod, etc.
+ */
+
 /** The leftmost position used during calibration. */
 int64_t leftPanLimit(void);
 

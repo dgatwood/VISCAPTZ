@@ -46,6 +46,14 @@ const char *kPanEncoderReversedKey = "pan_axis_encoder_reversed";
 /** Boolean key indicating that the tilt encoder direction is reversed. */
 const char *kTiltEncoderReversedKey = "tilt_axis_encoder_reversed";
 
+/*
+ * NOTE: The pan and tilt limits below apply ONLY during calibration and
+ * recalibration to determine how far the software can safely move the axes
+ * while measuring speeds.  They are completely ignored during normal
+ * operation because what constitutes a reasonable range can change due to
+ * disassembly, rotating the gimbal on a tripod, etc.
+ */
+
 /** Integer key providing the left pan limit for calibration and recalibration. */
 const char *kPanLimitLeftKey = "pan_limit_left";
 
@@ -918,16 +926,9 @@ void handleRecallUpdates(void) {
         fprintf(stderr, "Axis %d updated direction %d\n", axis, direction);
       }
       int64_t axisPosition = getAxisPosition(axis);
-#if EXPERIMENTAL_TIME_PROGRESS
-      double duration = gAxisDuration[axis];
-#else
-      double duration = 0;
-#endif
-      int moveProgressByPosition = actionProgress(axis, startPosition, axisPosition,
-                                                  targetPosition, gAxisPreviousPosition[axis],
-                                                  &gAxisStalls[axis], (duration != 0));
       double currentTime = timeStamp();
 #if EXPERIMENTAL_TIME_PROGRESS
+      double duration = gAxisDuration[axis];
       double remainingTime = gAxisStartTime[axis] + duration - currentTime;
 
       if (gAxisStartTime[axis] > currentTime) { 
@@ -936,6 +937,13 @@ void handleRecallUpdates(void) {
         }
         continue;  // Go on the the next axis.
       }
+#else
+      double duration = 0;
+#endif
+      int moveProgressByPosition = actionProgress(axis, startPosition, axisPosition,
+                                                  targetPosition, gAxisPreviousPosition[axis],
+                                                  &gAxisStalls[axis], (duration != 0));
+#if EXPERIMENTAL_TIME_PROGRESS
 
       // Time-based computation can be slightly imprecise.  If the progress based on position is
       // 1000, we're done with this axis no matter what the wall clock says.  And of course, if
@@ -2435,6 +2443,11 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 int16_t panPosition = (int16_t)rawPanValue;
                 int16_t tiltPosition = (int16_t)rawTiltValue;
 
+                // NOTE: Unlike zoom, pan and tilt limits (leftPanLimit, etc.) apply only during
+                // calibration to determine how far the axes can safely move while measuring
+                // speeds.  They are intentionally ignored during normal operation because the
+                // reasonable range can shift due to disassembly, rotating the gimbal on a
+                // tripod, etc.
                 cancelRecallIfNeeded("Pan/tilt absolute command received");
                 if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, false),
                                         tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, false),
