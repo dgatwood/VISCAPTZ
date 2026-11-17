@@ -2966,8 +2966,6 @@ void do_calibration(void) {
   if (localDebug) {
     fprintf(stderr, "Out of loop.  Writing configuration.\n");
   }
-  atomic_store(&gCalibrationModeVISCADisabled, false);
-  gCalibrationMode = false;
 
   if (!motorModuleReload()) {
     fprintf(stderr, "Motor module reload failed.  Bailing.\n");
@@ -2985,6 +2983,9 @@ void do_calibration(void) {
     exit(1);
   }
 #endif  // ENABLE_P2_MODE
+
+  atomic_store(&gCalibrationModeVISCADisabled, false);
+  gCalibrationMode = false;
 }
 
 double timeStamp(void) {

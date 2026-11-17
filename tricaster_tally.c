@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -91,6 +92,23 @@ tallyStateType tricaster_getTallyState(void) {
         perror("socket");
         break;
       }
+
+      int keepalive = 1;
+      int keepidle = 5;
+      int keepintvl = 1;
+      int keepcnt = 5;
+      setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
+#ifdef TCP_KEEPIDLE
+      setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+#elif defined(TCP_KEEPALIVE)
+      setsockopt(sock, IPPROTO_TCP, TCP_KEEPALIVE, &keepidle, sizeof(keepidle));
+#endif
+#ifdef TCP_KEEPINTVL
+      setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+#endif
+#ifdef TCP_KEEPCNT
+      setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+#endif
 
       memset((char *) &address, 0, sizeof(address));
       address.sin_family = AF_INET;
