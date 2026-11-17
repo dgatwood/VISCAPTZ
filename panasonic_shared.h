@@ -1,3 +1,6 @@
+#ifndef __PANASONIC_SHARED_H__
+#define __PANASONIC_SHARED_H__
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -30,3 +33,5 @@ int64_t panaMaximumTiltPositionsPerSecond(void);
 
 /** The number of zoom positions moved in one second at the maximum speed. */
 int64_t panaMaximumZoomPositionsPerSecond(void);
+
+#endif  // __PANASONIC_SHARED_H__

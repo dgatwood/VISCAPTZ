@@ -1,4 +1,7 @@
 
+#ifndef __MOTORPTZ_H__
+#define __MOTORPTZ_H__
+
 #include <inttypes.h>
 #include <stdbool.h>
 
@@ -104,3 +107,5 @@ int64_t motorMaximumTiltPositionsPerSecond(void);
     #define MAX_PAN_POSITIONS_PER_SECOND() motorMaximumPanPositionsPerSecond()
     #define MAX_TILT_POSITIONS_PER_SECOND() motorMaximumTiltPositionsPerSecond()
 #endif
+
+#endif  // __MOTORPTZ_H__

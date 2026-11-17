@@ -1,3 +1,6 @@
+#ifndef __TRICASTER_TALLY_H__
+#define __TRICASTER_TALLY_H__
+
 #include <inttypes.h>
 #include <stdbool.h>
 
@@ -13,3 +16,5 @@ tallyStateType tricaster_getTallyState(void);
 #if USE_TRICASTER_TALLY_SOURCE
   #define GET_TALLY_STATE() tricaster_getTallyState()
 #endif
+
+#endif  // __TRICASTER_TALLY_H__

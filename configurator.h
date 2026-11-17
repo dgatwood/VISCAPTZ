@@ -1,3 +1,6 @@
+#ifndef __CONFIGURATOR_H__
+#define __CONFIGURATOR_H__
+
 #include <inttypes.h>
 #include <stdbool.h>
 
@@ -69,3 +72,5 @@ void setConfigFilePathForTesting(const char *path);
 #ifdef __cplusplus
 }
 #endif
+
+#endif  // __CONFIGURATOR_H__

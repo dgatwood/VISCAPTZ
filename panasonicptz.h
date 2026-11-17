@@ -1,4 +1,7 @@
 
+#ifndef __PANASONICPTZ_H__
+#define __PANASONICPTZ_H__
+
 #include <inttypes.h>
 #include <stdbool.h>
 
@@ -146,3 +149,5 @@ int64_t panaMaximumZoomPositionsPerSecond(void);
     #endif  // !PANASONIC_PTZ_ZOOM_ONLY
 
 #endif
+
+#endif  // __PANASONICPTZ_H__

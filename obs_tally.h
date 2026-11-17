@@ -1,3 +1,6 @@
+#ifndef __OBS_TALLY_H__
+#define __OBS_TALLY_H__
+
 #include <inttypes.h>
 #include <stdbool.h>
 
@@ -17,3 +20,5 @@ tallyStateType obs_getTallyState(void);
 #if USE_OBS_TALLY_SOURCE
   #define GET_TALLY_STATE() obs_getTallyState()
 #endif
+
+#endif  // __OBS_TALLY_H__

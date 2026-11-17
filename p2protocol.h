@@ -1,4 +1,7 @@
 
+#ifndef __P2PROTOCOL_H__
+#define __P2PROTOCOL_H__
+
 #include <inttypes.h>
 #include <stdbool.h>
 
@@ -92,3 +95,5 @@ int p2GetMaxZoomSpeed(void);
     #define MIN_ZOOM_POSITIONS_PER_SECOND() p2MinimumZoomPositionsPerSecond()
     #define MAX_ZOOM_POSITIONS_PER_SECOND() p2MaximumZoomPositionsPerSecond()
 #endif
+
+#endif  // __P2PROTOCOL_H__

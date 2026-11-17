@@ -1,3 +1,6 @@
+#ifndef __MAIN_H__
+#define __MAIN_H__
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -215,3 +218,5 @@ uint8_t getDeviceResponseID(void);
 
 /** Cancels any active recalls and sets all motor speeds to zero. */
 void emergencyStop(char *context);
+
+#endif  // __MAIN_H__
