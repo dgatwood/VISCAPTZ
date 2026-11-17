@@ -691,8 +691,9 @@ int actionProgress(int axis, int64_t startPosition, int64_t curPosition, int64_t
 
   // For position-based computation, we don't count stalls before the
   // motor starts moving.  For time-based computation, we count all
-  // stalls equally.
-  if ( (usingTimeComputation || (startPosition != curPosition)) &&
+  // stalls equally whenever the commanded motor speed is non-zero.
+  if ( (gAxisLastMoveSpeed[axis] != 0) &&
+       (usingTimeComputation || (startPosition != curPosition)) &&
        (previousPosition == curPosition) ) {
     // We may have slowed down to the point where the motors no longer move.
     // Don't keep wasting power and heating up the motors.
