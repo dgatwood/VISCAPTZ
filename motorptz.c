@@ -50,9 +50,9 @@ static bool motor_enable_debugging = false;
 #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
   #if USE_CANBUS
     int motorOpenCANSock(void);
-    bool updatePositionsCANBus(int sock, bool *didReadDataOut);
+    bool updatePositionsCANBus(int sock, bool *didReadPanOut, bool *didReadTiltOut);
     void resetCenterPositionsCANBus(int sock);
-    bool handleCANFrame(struct can_frame *frame);
+    bool handleCANFrame(struct can_frame *frame, bool *didReadPanOut, bool *didReadTiltOut);
     bool sendCANRequestFrame(int sock, uint8_t deviceID);
   #else
     int motorOpenSerialDev(char *path);
@@ -250,29 +250,37 @@ void *runPositionMonitorThread(void *argIgnored) {
 
   // Read the position.
   #if ENABLE_HARDWARE && USE_CANBUS
-    double lastDataTime = timeStamp();
+    double lastPanDataTime = timeStamp();
+    double lastTiltDataTime = lastPanDataTime;
   #endif
   while (1) {
 #if ENABLE_HARDWARE
     #if USE_CANBUS
-        bool didReadData = false;
-        if (!updatePositionsCANBus(sock, &didReadData)) {
+        bool didReadPan = false;
+        bool didReadTilt = false;
+        if (!updatePositionsCANBus(sock, &didReadPan, &didReadTilt)) {
             if (localDebug) fprintf(stderr, "Reopening socket after failure.\n");
             // NOTE: Do NOT add a backoff delay before the 1-second emergencyStop timeout.
             // Encoder position monitoring is latency-critical while motors are moving, so
             // CAN bus recovery must retry immediately until emergencyStop has stopped all
             // motors; once stopped, sleep between retries until a value is fetched again.
             do {
-                if ((timeStamp() - lastDataTime) >= 1.0) {
+                double now = timeStamp();
+                if ((now - lastPanDataTime) >= 1.0 || (now - lastTiltDataTime) >= 1.0) {
                     emergencyStop("CAN bus encoder read timeout");
                     usleep(200000);
                 }
                 sock = motorOpenCANSock();
             } while (sock == -1);
         }
-        if (didReadData) {
-            lastDataTime = timeStamp();
-        } else if ((timeStamp() - lastDataTime) >= 1.0) {
+        double now = timeStamp();
+        if (didReadPan) {
+            lastPanDataTime = now;
+        }
+        if (didReadTilt) {
+            lastTiltDataTime = now;
+        }
+        if ((now - lastPanDataTime) >= 1.0 || (now - lastTiltDataTime) >= 1.0) {
             emergencyStop("CAN bus encoder read timeout");
         }
     #else  // !USE_CANBUS
@@ -339,15 +347,45 @@ int motorOpenCANSock(void) {
 }
 
 /** Updates the current encoder positions (CANBus version). */
-bool updatePositionsCANBus(int sock, bool *didReadDataOut) {
-    if (didReadDataOut != NULL) {
-        *didReadDataOut = false;
+bool updatePositionsCANBus(int sock, bool *didReadPanOut, bool *didReadTiltOut) {
+    if (didReadPanOut != NULL) {
+        *didReadPanOut = false;
     }
+    if (didReadTiltOut != NULL) {
+        *didReadTiltOut = false;
+    }
+    static bool awaitingPan = false;
+    static bool awaitingTilt = false;
     if (sock < 0) {
         fprintf(stderr, "Invalid socket\n");
+        awaitingPan = false;
+        awaitingTilt = false;
         return false;
     }
     bool localDebug = false;
+
+    // If neither encoder has a request in flight, request position data before waiting.
+    if (!awaitingPan && !awaitingTilt) {
+        if (localDebug) fprintf(stderr, "Sending data request.\n");
+        if (!sendCANRequestFrame(sock, panCANBusID)) {
+            if (localDebug) fprintf(stderr, "CANBus packet write failed.\n");
+            awaitingPan = false;
+            awaitingTilt = false;
+            close(sock);
+            return false;
+        }
+        if (!sendCANRequestFrame(sock, tiltCANBusID)) {
+            if (localDebug) fprintf(stderr, "CANBus packet write failed.\n");
+            awaitingPan = false;
+            awaitingTilt = false;
+            close(sock);
+            return false;
+        }
+        awaitingPan = true;
+        awaitingTilt = true;
+        if (localDebug) fprintf(stderr, "Done sending CANBus packet\n");
+    }
+
     bool gotRead = false;
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -364,13 +402,25 @@ bool updatePositionsCANBus(int sock, bool *didReadDataOut) {
             ssize_t bytesRead = read(sock, &frame, sizeof(frame));
             if (bytesRead != sizeof(frame)) {
                 if (localDebug) fprintf(stderr, "CANBus packet read failed.  (Expected %zu got %zu)\n", sizeof(frame), bytesRead);
+                awaitingPan = false;
+                awaitingTilt = false;
                 close(sock);
                 return false;
             }
             if (localDebug) fprintf(stderr, "Reading CANBus packet\n");
-            gotRead = handleCANFrame(&frame);
-            if (didReadDataOut != NULL) {
-                *didReadDataOut = gotRead;
+            bool gotPan = false, gotTilt = false;
+            gotRead = handleCANFrame(&frame, &gotPan, &gotTilt);
+            if (gotPan) {
+                awaitingPan = false;
+                if (didReadPanOut != NULL) {
+                    *didReadPanOut = true;
+                }
+            }
+            if (gotTilt) {
+                awaitingTilt = false;
+                if (didReadTiltOut != NULL) {
+                    *didReadTiltOut = true;
+                }
             }
             if (localDebug) fprintf(stderr, "Done reading CANBus packet\n");
         }
@@ -378,19 +428,27 @@ bool updatePositionsCANBus(int sock, bool *didReadDataOut) {
         perror("motorptz");
         fprintf(stderr, "Select returned -1\n");
     }
-    if (!gotRead) {
-        if (localDebug) fprintf(stderr, "Timed out reading CANBus packet.  Requesting data.\n");
+    if (!gotRead || (!awaitingPan && !awaitingTilt)) {
+        if (!gotRead && localDebug) {
+            fprintf(stderr, "Timed out reading CANBus packet.  Requesting data.\n");
+        }
         if (localDebug) fprintf(stderr, "Sending data request.\n");
         if (!sendCANRequestFrame(sock, panCANBusID)) {
             if (localDebug) fprintf(stderr, "CANBus packet write failed.\n");
+            awaitingPan = false;
+            awaitingTilt = false;
             close(sock);
             return false;
         }
         if (!sendCANRequestFrame(sock, tiltCANBusID)) {
             if (localDebug) fprintf(stderr, "CANBus packet write failed.\n");
+            awaitingPan = false;
+            awaitingTilt = false;
             close(sock);
             return false;
         }
+        awaitingPan = true;
+        awaitingTilt = true;
         if (localDebug) fprintf(stderr, "Done sending CANBus packet\n");
     }
     return true;
@@ -407,7 +465,7 @@ struct can_frame CANBusFrameMake(uint32_t can_id, uint8_t can_dlc, uint8_t *data
 }
 
 /** Processes a CANBus response from the encoder. */
-bool handleCANFrame(struct can_frame *response) {
+bool handleCANFrame(struct can_frame *response, bool *didReadPanOut, bool *didReadTiltOut) {
     bool localDebug = false;
     if (localDebug) fprintf(stderr, "Processing CAN frame.\n");
     if (response->data[0] == 0x7 && response->data[2] == 0x1) {
@@ -420,10 +478,16 @@ bool handleCANFrame(struct can_frame *response) {
         if (response->data[1] == panCANBusID) {
             if (localDebug) fprintf(stderr, "Got pan: %" PRId64 ".\n", value);
             atomic_store(&g_last_pan_position, value);
+            if (didReadPanOut != NULL) {
+                *didReadPanOut = true;
+            }
             return true;
         } else if (response->data[1] == tiltCANBusID) {
             if (localDebug) fprintf(stderr, "Got tilt: %" PRId64 ".\n", value);
             atomic_store(&g_last_tilt_position, value);
+            if (didReadTiltOut != NULL) {
+                *didReadTiltOut = true;
+            }
             return true;
         } else {
             if (localDebug) fprintf(stderr, "Received message from unknown CAN bus ID %d", response->data[1]);
