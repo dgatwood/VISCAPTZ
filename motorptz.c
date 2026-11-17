@@ -258,12 +258,14 @@ void *runPositionMonitorThread(void *argIgnored) {
         bool didReadData = false;
         if (!updatePositionsCANBus(sock, &didReadData)) {
             if (localDebug) fprintf(stderr, "Reopening socket after failure.\n");
-            // NOTE: Do NOT add a backoff delay here.  Encoder position monitoring is
-            // latency-critical while motors are moving, so CAN bus recovery must retry
-            // immediately without waiting an extra millisecond.
+            // NOTE: Do NOT add a backoff delay before the 1-second emergencyStop timeout.
+            // Encoder position monitoring is latency-critical while motors are moving, so
+            // CAN bus recovery must retry immediately until emergencyStop has stopped all
+            // motors; once stopped, sleep between retries until a value is fetched again.
             do {
                 if ((timeStamp() - lastDataTime) >= 1.0) {
                     emergencyStop("CAN bus encoder read timeout");
+                    usleep(200000);
                 }
                 sock = motorOpenCANSock();
             } while (sock == -1);
