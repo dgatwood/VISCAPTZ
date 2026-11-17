@@ -321,7 +321,13 @@ bool panaSetZoomPosition(int64_t position, int64_t maxSpeed) {
 
     fprintf(stderr, "SET ZOOM POSITION TO %" PRId64 " SPEED %d\n", position, (int)maxSpeed);
 
-    uint64_t rawPosition = scaleLinearZoomToRawZoom(position);
+    int64_t minZoom = getConfigKeyInteger(kZoomOutInternalLimitKey);
+    int64_t maxZoom = getConfigKeyInteger(kZoomInInternalLimitKey);
+    int64_t rawPosition = scaleLinearZoomToRawZoom(MAX(position, (int64_t)0));
+    if (minZoom < maxZoom) {
+        rawPosition = MIN(MAX(rawPosition, minZoom), maxZoom);
+    }
+    rawPosition = MIN(MAX(rawPosition, (int64_t)0x555), (int64_t)0xFFF);
     char *value = panaIntString(rawPosition, 3, true);
     char *response = sendCommand("ptz", "#AXZ", &value, 1, "axz");
     if (response != NULL) {

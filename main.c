@@ -2031,6 +2031,10 @@ visca_response_t *tallyModeResponse(int tallyState) {
 }
 
 bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
+  if (gCalibrationModeVISCADisabled) {
+    return false;
+  }
+
   if (debug_verbose) fprintf(stderr, "GOT VISCA INQUIRY %s\n", VISCAMessageDebugString(command, len));
 
   // All VISCA inquiries start with 0x8x (default 0x81).  Responses start with 0xy0 (default 0x90).
