@@ -192,7 +192,7 @@ bool gCalibrationModeZoomOnly = false;
  * True during phases of calibration in which VISCA controls
  * should be disabled.
  */
-bool gCalibrationModeVISCADisabled = false;
+_Atomic bool gCalibrationModeVISCADisabled = false;
 
 /**
  * True if the encoders should update their center position based on their
@@ -2031,7 +2031,7 @@ visca_response_t *tallyModeResponse(int tallyState) {
 }
 
 bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
-  if (gCalibrationModeVISCADisabled) {
+  if (atomic_load(&gCalibrationModeVISCADisabled)) {
     return false;
   }
 
@@ -2204,7 +2204,7 @@ char *VISCAMessageDebugString(uint8_t *command, uint16_t len) {
 
 bool handleVISCACommand(uint8_t *command, uint16_t len, uint32_t sequenceNumber, int sock, struct sockaddr *client, socklen_t structLength) {
 
-  if (gCalibrationModeVISCADisabled) {
+  if (atomic_load(&gCalibrationModeVISCADisabled)) {
     return false;
   }
 
@@ -2929,7 +2929,7 @@ void do_calibration(void) {
   fprintf(stderr, "Tilt motor reversed: %s\n", tiltMotorReversed() ? "YES" : "NO");
   fprintf(stderr, "Tilt encoder reversed: %s\n\n", tiltEncoderReversed() ? "YES" : "NO");
 
-  gCalibrationModeVISCADisabled = true;
+  atomic_store(&gCalibrationModeVISCADisabled, true);
 
   if (!gCalibrationModeZoomOnly) {
     if (localDebug) {
@@ -2952,7 +2952,7 @@ void do_calibration(void) {
   if (localDebug) {
     fprintf(stderr, "Out of loop.  Writing configuration.\n");
   }
-  gCalibrationModeVISCADisabled = false;
+  atomic_store(&gCalibrationModeVISCADisabled, false);
   gCalibrationMode = false;
 
   if (!motorModuleReload()) {
