@@ -856,14 +856,23 @@ bool requestEnv(char *authToken, int sock) {
     xmlFreeDoc(doc);
     return false;
   }
+  // Forget any session from a previous connection, so that a response without a session ID
+  // can't leave a stale one behind.
+  free(gSessionID);
+  gSessionID = NULL;
   for (xmlAttr *attribute = camctl->properties; attribute ; attribute = attribute->next) {
     if (!strcmp((const char *)attribute->name, "SessionID")) {
       xmlChar *attributeValue = xmlNodeListGetString(doc, attribute->children, 1);
-      free(gSessionID);
-      gSessionID = NULL;
-      asprintf(&gSessionID, "%s", (const char *)attributeValue);
-      xmlFree(attributeValue);
+      if (attributeValue != NULL) {
+        asprintf(&gSessionID, "%s", (const char *)attributeValue);
+        xmlFree(attributeValue);
+      }
     }
+  }
+  if (gSessionID == NULL) {
+    fprintf(stderr, "No SessionID in environment/connect response.\n");
+    xmlFreeDoc(doc);
+    return false;
   }
   fprintf(stderr, "Session ID: \"%s\"\n", gSessionID);
   buf[length] = '\0';
@@ -908,12 +917,19 @@ bool sendP2Request(char *request, char **buf) {
     }
     gP2TCPSocket = openP2Socket();
     fprintf(stderr, "Set gP2TCPSocket to %d\n", gP2TCPSocket);
+    if (gP2TCPSocket == -1) {
+      // Don't carry on with the stale auth token and session from the previous connection.
+      // The next request will try to open the socket again.
+      fprintf(stderr, "Could not open P2 socket for sendP2Request\n");
+      pthread_mutex_unlock(&gSocketLock);
+      return false;
+    }
     timestampForCrappyFirmware = timeStamp();
   }
 
   char *authToken = gAuthToken; //getP2Auth(gP2TCPSocket);
-  if (authToken == NULL) {
-    fprintf(stderr, "Could not get auth token for sendP2Request\n");
+  if (authToken == NULL || gSessionID == NULL) {
+    fprintf(stderr, "Could not get auth token or session ID for sendP2Request\n");
     pthread_mutex_unlock(&gSocketLock);
     return false;
   }
@@ -931,6 +947,10 @@ bool sendP2Request(char *request, char **buf) {
   fprintf(stderr, "sendP2Request point 2 %zu %zu\n", size, expectedSize);
 
   if (size < 0) {
+    // The connection is dead.  Close it so that the next request reconnects right away
+    // instead of failing on the dead descriptor until the 10-second timer expires.
+    close(gP2TCPSocket);
+    gP2TCPSocket = -1;
     pthread_mutex_unlock(&gSocketLock);
     return false;
   }
@@ -944,6 +964,10 @@ bool sendP2Request(char *request, char **buf) {
   ssize_t length = syncRead(gP2TCPSocket, localBuf, 4096);
 
   if (!retval || length <= 0) {
+    // Short write, EOF, reset or timeout.  The stream state is unknown, so drop the
+    // connection and reconnect on the next request.
+    close(gP2TCPSocket);
+    gP2TCPSocket = -1;
     free(localBuf);
     pthread_mutex_unlock(&gSocketLock);
     return false;
