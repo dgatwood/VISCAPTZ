@@ -1,6 +1,7 @@
 #ifndef __MAIN_H__
 #define __MAIN_H__
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -12,8 +13,8 @@
 /** Returns seconds since January 1, 1970 with microsecond precision. */
 double timeStamp(void);
 
-/** True when in calibration mode. */
-extern bool gCalibrationMode;
+/** True when in calibration mode.  Atomic because the VISCA network thread reads it. */
+extern _Atomic bool gCalibrationMode;
 
 /** True if we are recalibrating. */
 extern bool gCalibrationModeQuick;

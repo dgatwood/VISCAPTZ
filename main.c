@@ -196,8 +196,8 @@ typedef struct {
 
 // General state
 
-/** True if in calibration mode, else false. */
-bool gCalibrationMode = false;
+/** True if in calibration mode, else false.  Atomic because the VISCA network thread reads it. */
+_Atomic bool gCalibrationMode = false;
 
 /**
  * True if recalibrating pan/tilt/zoom speeds without reconfiguring the
@@ -684,9 +684,11 @@ int main(int argc, char *argv[]) {
   motorWaitForRecenter();
 
   // Make sure the encoder midpoints are stored.  This can write the configuration (and, if
-  // there are no calibrated limits, waits for the first encoder reading).  Skip this when
-  // recentering (already done) and when calibrating (do_calibration stores them).
-  if (!gRecenter && !gCalibrationMode) {
+  // there are no calibrated limits, waits for the first encoder reading).  After a successful
+  // --recenter this is just a lookup; if the recenter failed or there is no encoder hardware,
+  // it stores a fallback midpoint here rather than leaving that to the first VISCA packet.
+  // Skip this when calibrating (do_calibration stores them).
+  if (!gCalibrationMode) {
     midpointForAxis(axis_identifier_pan);
     midpointForAxis(axis_identifier_tilt);
   }
@@ -3195,8 +3197,10 @@ void do_calibration(void) {
   }
 #endif  // ENABLE_P2_MODE
 
+  // Leave calibration mode before re-enabling VISCA, so there is no window in which VISCA is
+  // enabled while gCalibrationMode is still set.
+  atomic_store(&gCalibrationMode, false);
   atomic_store(&gCalibrationModeVISCADisabled, false);
-  gCalibrationMode = false;
 }
 
 double timeStamp(void) {
