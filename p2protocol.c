@@ -61,7 +61,7 @@ void markSpeedChange(int newSpeed);
 int64_t estimatedPositionsSinceLastPositionData(void);
 void freeSpeedChanges(void);
 
-int64_t p2GetZoomPositionRaw(void);
+int64_t p2GetZoomPositionRaw(bool *isCached);
 char *md5_string(uint8_t *hashbuf);
 char *getP2Auth(int sock);
 
@@ -274,7 +274,7 @@ bool p2ModuleInit(void) {
   #endif
   // fprintf(stderr, "p2ModuleInit4\n");
 
-  // int64_t zp = p2GetZoomPositionRaw();
+  // int64_t zp = p2GetZoomPositionRaw(NULL);
   // fprintf(stderr, "zpr: %" PRId64 "\n", zp);
 
   populateZoomNonlinearityTable();

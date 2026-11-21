@@ -212,7 +212,9 @@ int decDigits(uint64_t value) {
 /**
  * Returns a string containing the provided number, zero-padded to have the specified
  * number of digits.  If hex is true, the result is in base 16 (but with no leading 0x).
- * Otherwise, the result is in base 10.
+ * Otherwise, the result is in base 10.  The value is unsigned, so callers must clamp or
+ * mask anything that might be negative first (a negative int64_t would otherwise become a
+ * 16-digit hex string).
  */
 char *panaIntString(uint64_t value, int digits, bool hex) {
     int actualDigits = hex ? hexDigits(value) : decDigits(value);
@@ -222,7 +224,9 @@ char *panaIntString(uint64_t value, int digits, bool hex) {
     if (hex) {
         sprintf(str + MAX(0, (digits - actualDigits)), "%" PRIx64 "", value);
     } else {
-        sprintf(str + MAX(0, (digits - actualDigits)), "%" PRId64 "", value);
+        // Unsigned format to match decDigits(); a signed one would print a '-' for values
+        // above INT64_MAX and overflow the buffer.
+        sprintf(str + MAX(0, (digits - actualDigits)), "%" PRIu64 "", value);
     }
     return str;
 }
@@ -276,6 +280,11 @@ bool panaSetPanTiltPosition(int64_t panPosition, int64_t panSpeed,
     // considered entirely unsupported.  Why don't these use PAN_TILT_SCALE_HARDWARE?
     int convertedPanSpeed = MAX(scaleSpeed(panSpeed, SCALE_CORE, 0x1D, NULL) - 1, 0);    // Speeds are 0 through 0x1D?
     int convertedTiltSpeed = MAX(scaleSpeed(tiltSpeed, SCALE_CORE, 3, NULL) - 1, 0);  // Speeds are 0, 1, or 2?
+
+    // Positions are four hex digits (0x0000-0xFFFF).  Clamp rather than letting a negative or
+    // oversized value turn into a longer string.
+    panPosition = MAX((int64_t)0, MIN(panPosition, (int64_t)0xFFFF));
+    tiltPosition = MAX((int64_t)0, MIN(tiltPosition, (int64_t)0xFFFF));
 
     char *values[4] = {
         panaIntString(panPosition, 4, true),

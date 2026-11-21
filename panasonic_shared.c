@@ -123,8 +123,21 @@ void populateZoomNonlinearityTable(void) {
   }
 
   free(zoom_position_map);
-  int count = maxZoom - minZoom + 1;
-  zoom_position_map = malloc(count * sizeof(int64_t));
+  zoom_position_map = NULL;
+
+  // The table has one entry per raw zoom value.  Use 64-bit math and refuse absurd ranges
+  // (for example, from bogus limits) rather than overflowing or allocating gigabytes.
+  const int64_t kMaxZoomTableEntries = 1 << 20;
+  int64_t count = maxZoom - minZoom + 1;
+  if (count <= 0 || count > kMaxZoomTableEntries) {
+    fprintf(stderr, "Zoom range is too large for the nonlinearity table (%lld to %lld).\n",
+            (long long)minZoom, (long long)maxZoom);
+  }
+  // An unusable table is fatal on purpose: carrying on without one would silently produce
+  // wrong zoom positions.
+  assert(count > 0 && count <= kMaxZoomTableEntries);
+  int64_t *newMap = malloc((size_t)count * sizeof(int64_t));
+  assert(newMap != NULL);
 
   int64_t position = 0;  // minZoom - minZoom
   int64_t scaledPosition = scaleLinearZoomToRawZoom(position);
@@ -137,18 +150,32 @@ void populateZoomNonlinearityTable(void) {
   // SHOW_NONLINEARITY_DATA_POINTS macro.
 
   if (localDebug) fprintf(stderr, "%d <= %lld\n", (int)floor(scaledPosition), (long long)minZoom);
+  if (floor(scaledPosition) > minZoom) {
+    fprintf(stderr, "Zoom nonlinearity map does not fit this camera (minimum zoom %lld is below %lld).\n",
+            (long long)minZoom, (long long)floor(scaledPosition));
+  }
   assert(floor(scaledPosition) <= minZoom);
 
-  int lastPosition = minZoom - 1;
+  int64_t lastPosition = minZoom - 1;
 
   while (lastPosition < maxZoom) {
+    // The scaled values should increase without bound, but fail instead of spinning forever
+    // if they don't.
+    if (position > ((int64_t)1 << 30)) {
+      fprintf(stderr, "Zoom nonlinearity map never reaches %lld.\n", (long long)maxZoom);
+    }
+    assert(position <= ((int64_t)1 << 30));
+
     // fprintf(stderr, "min/max: %lld %lld\n", (long long)minZoom, (long long)maxZoom);
     // fprintf(stderr, "pos %lld scaled %lld (between %lld and %lld, inclusive)\n",
     // (long long)position, (long long)scaledPosition, (long long)minZoom, (long long)maxZoom);
 
     // The scaled values always increase as the input goes towards infinity, so this
     // will eventually stop.  If the scaling computation ever changes, adjust accordingly.
-    if (scaledPosition > lastPosition) {
+    //
+    // The scaled value can advance by more than one raw zoom value per step, so fill in every
+    // raw value it has passed, not just one.
+    while (scaledPosition > lastPosition && lastPosition < maxZoom) {
       lastPosition++;
 
       // Initially minZoom - 1 + 1 - minZoom = 0.
@@ -156,11 +183,11 @@ void populateZoomNonlinearityTable(void) {
       // So last time is when lastPosition = maxZoom - 1 + 1
       // So when lastPosition == maxZoom, drop out of the loop.
       uint64_t index = lastPosition - minZoom;
-      zoom_position_map[index] = position;
+      newMap[index] = position;
 
       if (localDebug) {
         fprintf(stderr, "zoom_position_map[%lld] = %lld\n", (long long)index,
-                (long long)zoom_position_map[index]);
+                (long long)newMap[index]);
       }
     }
 
@@ -170,6 +197,7 @@ void populateZoomNonlinearityTable(void) {
       fprintf(stderr, "Scaled position: %lld\n", (long long)scaledPosition);
     }
   }
+  zoom_position_map = newMap;
   fprintf(stderr, "Nonlinearity table populated.\n");
 }
 
