@@ -653,8 +653,6 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Starting threads\n");
 
-  pthread_create(&gVISCANetworkThread, NULL, runNetworkThread, NULL);
-
   if (!obsModuleStart()) {
     fprintf(stderr, "OBS module init failed.  Bailing.\n");
     exit(1);
@@ -681,15 +679,22 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Created threads.\n");
 
+  // Wait for --recenter (if any) to finish, so that no position is reported against a stale
+  // midpoint.  The position monitor thread stores the new midpoints itself.
+  motorWaitForRecenter();
+
   // Make sure the encoder midpoints are stored.  This can write the configuration (and, if
-  // there are no calibrated limits, waits for the first encoder reading), so it has to happen
-  // here rather than on a VISCA handler thread.  Skip this when recentering (the position
-  // monitor thread stores the midpoints itself) and when calibrating (do_calibration stores
-  // them).
+  // there are no calibrated limits, waits for the first encoder reading).  Skip this when
+  // recentering (already done) and when calibrating (do_calibration stores them).
   if (!gRecenter && !gCalibrationMode) {
     midpointForAxis(axis_identifier_pan);
     midpointForAxis(axis_identifier_tilt);
   }
+
+  // Only now start accepting VISCA commands.  The network thread must not start earlier,
+  // because handling a pan/tilt command or inquiry can call midpointForAxis(), which may write
+  // the configuration, and it must not see positions from before the midpoints are settled.
+  pthread_create(&gVISCANetworkThread, NULL, runNetworkThread, NULL);
 
   if (gCalibrationMode) {
     fprintf(stderr, "Starting calibration.\n");
@@ -2266,6 +2271,9 @@ bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber,
           // Pan/tilt position inquiry: 8x 09 06 12 FF ->
           //   y0 50 0p 0p 0p 0p 0p 0t 0t 0t 0t 0t FF  (five nibbles per axis, as in the commands)
           if (len >= 5 && command[3] == 0x12 && command[4] == 0xFF) {
+            // Positions are meaningless while the axes are being calibrated.
+            if (gCalibrationMode) return false;
+
             // Fail the inquiry rather than reporting bogus zeroes if the encoders can't be read.
             int64_t panEncoderPosition, tiltEncoderPosition;
             if (!GET_PAN_TILT_POSITION(&panEncoderPosition, &tiltEncoderPosition)) {

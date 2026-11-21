@@ -84,6 +84,14 @@ int64_t motorMaximumPanPositionsPerSecond(void);
  */
 int64_t motorMaximumTiltPositionsPerSecond(void);
 
+/**
+ * If the program was started with --recenter, blocks until the position monitor thread has
+ * finished recentering the encoders and storing the new midpoints (or has given up).  Returns
+ * immediately otherwise.  Call after motorModuleStart() and before exposing positions to
+ * anything that depends on the midpoints.
+ */
+void motorWaitForRecenter(void);
+
 
 // If motor pan and tilt are enabled, map the standard motion and position macros
 // to functions in this module.

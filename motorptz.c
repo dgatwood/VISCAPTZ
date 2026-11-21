@@ -91,6 +91,9 @@ static _Atomic int64_t g_last_tilt_position = 0;
   static _Atomic bool g_tilt_position_valid = true;
 #endif
 
+// False only while --recenter is being carried out by the position monitor thread.
+static _Atomic bool g_recenter_complete = true;
+
 const char *kMotorsAreSwappedKey = "motors_are_swapped";
 
 #if USE_MOTOR_PAN_AND_TILT
@@ -134,6 +137,9 @@ bool motorModuleStart(void) {
   pthread_create(&motor_control_thread, NULL, runMotorControlThread, NULL);
 
   #if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
+    if (gRecenter) {
+      atomic_store(&g_recenter_complete, false);
+    }
     position_monitor_thread_started = true;
     pthread_create(&position_monitor_thread, NULL, runPositionMonitorThread, NULL);
   #endif  // !(ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE)
@@ -249,6 +255,7 @@ void *runPositionMonitorThread(void *argIgnored) {
     int sock = motorOpenCANSock();
     if (sock == -1) {
       fprintf(stderr, "Could not open CAN socket.  This is fatal.\n");
+      atomic_store(&g_recenter_complete, true);  // Don't leave main() waiting.
       return NULL;
     }
   #else  // !USE_CANBUS
@@ -257,6 +264,7 @@ void *runPositionMonitorThread(void *argIgnored) {
 
     if (pan_fd < 0 || tilt_fd < 0) {
       fprintf(stderr, "Could not open serial ports.  Disabling position monitoring.\n");
+      atomic_store(&g_recenter_complete, true);  // Don't leave main() waiting.
       return NULL;
     }
   #endif  // USE_CANBUS
@@ -284,7 +292,12 @@ void *runPositionMonitorThread(void *argIgnored) {
         double readbackStart = timeStamp();
         while (!(gotPan && gotTilt) && (timeStamp() - readbackStart) < 3.0) {
           bool didReadPan = false, didReadTilt = false;
-          if (!updatePositionsCANBus(sock, &didReadPan, &didReadTilt)) break;
+          if (!updatePositionsCANBus(sock, &didReadPan, &didReadTilt)) {
+            // updatePositionsCANBus closed the socket on failure.  Don't keep the stale
+            // descriptor; the main loop below sees -1 and reopens the socket.
+            sock = -1;
+            break;
+          }
           gotPan = gotPan || didReadPan;
           gotTilt = gotTilt || didReadTilt;
         }
@@ -303,6 +316,7 @@ void *runPositionMonitorThread(void *argIgnored) {
       } else {
         fprintf(stderr, "Recenter: could not read the encoders back.  Midpoints NOT updated.\n");
       }
+      atomic_store(&g_recenter_complete, true);
     }
 #endif  // ENABLE_HARDWARE
   }
@@ -903,6 +917,15 @@ void motorModuleCalibrate(void) {
   free(tiltCalibrationData);
 
   fprintf(stderr, "Done calibrating motors.\n");
+}
+
+// Public function.  Docs in header.
+//
+// Blocks until --recenter (if any) has finished.
+void motorWaitForRecenter(void) {
+  while (!atomic_load(&g_recenter_complete)) {
+    usleep(10000);
+  }
 }
 
 // Public function.  Docs in header.
