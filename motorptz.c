@@ -94,10 +94,10 @@ static _Atomic int64_t g_last_tilt_position = 0;
 const char *kMotorsAreSwappedKey = "motors_are_swapped";
 
 #if USE_MOTOR_PAN_AND_TILT
-  int64_t *motor_pan_data = NULL;
-  int32_t *motor_pan_scaled_data = NULL;
-  int64_t *motor_tilt_data = NULL;
-  int32_t *motor_tilt_scaled_data = NULL;
+  static int64_t *motor_pan_data = NULL;
+  static int32_t *motor_pan_scaled_data = NULL;
+  static int64_t *motor_tilt_data = NULL;
+  static int32_t *motor_tilt_scaled_data = NULL;
 #endif  // USE_MOTOR_PAN_AND_TILT
 
 
