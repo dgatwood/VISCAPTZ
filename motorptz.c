@@ -56,7 +56,7 @@ static bool motor_enable_debugging = false;
     bool sendCANRequestFrame(int sock, uint8_t deviceID);
   #else
     int motorOpenSerialDev(char *path);
-    void updatePositionsSerial(int pan_fd, int tilt_fd);
+    bool updatePositionsSerial(int pan_fd, int tilt_fd);
     void resetCenterPositionsSerial(int tilt_fd, int pan_fd);
   #endif
 #endif
@@ -68,12 +68,28 @@ void *runMotorControlThread(void *argIgnored);
 void *runPositionMonitorThread(void *argIgnored);
 
 static pthread_mutex_t g_motor_speed_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Protects motor_{pan,tilt}_data and motor_{pan,tilt}_scaled_data.  motorModuleReload()
+// swaps in new tables under this lock and frees the old ones only afterwards; every
+// reader must hold the lock for as long as it dereferences those pointers.
+static pthread_mutex_t g_motor_data_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int64_t g_pan_speed = 0;
 static int64_t g_tilt_speed = 0;
 static bool g_pan_tilt_raw = false;
 
 static _Atomic int64_t g_last_pan_position = 0;
 static _Atomic int64_t g_last_tilt_position = 0;
+
+// True once the position monitor thread has read each encoder at least once, so that callers
+// can tell a real reading from the initial zero.  If there is no encoder hardware to read
+// (simulated positions), the values are valid from the start.
+#if ENABLE_ENCODER_HARDWARE && ENABLE_HARDWARE
+  static _Atomic bool g_pan_position_valid = false;
+  static _Atomic bool g_tilt_position_valid = false;
+#else
+  static _Atomic bool g_pan_position_valid = true;
+  static _Atomic bool g_tilt_position_valid = true;
+#endif
 
 const char *kMotorsAreSwappedKey = "motors_are_swapped";
 
@@ -131,36 +147,46 @@ bool motorModuleStart(void) {
 // Reinitializes the motor control/encoder module after calibration.
 bool motorModuleReload(void) {
   #if USE_MOTOR_PAN_AND_TILT
+    // Build the new tables without holding the lock, then swap them in under the lock so
+    // that the motor control thread never sees a freed or half-built table.
     int maxSpeed = 0;
-    free(motor_pan_data);
-    motor_pan_data = NULL;
-    free(motor_pan_scaled_data);
-    motor_pan_scaled_data = NULL;
-    motor_pan_data =
-        readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
+    int64_t *new_pan_data = readCalibrationDataForAxis(axis_identifier_pan, &maxSpeed);
+    int32_t *new_pan_scaled_data = NULL;
     if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
-        motor_pan_scaled_data =
-            convertSpeedValues(motor_pan_data, PAN_TILT_SCALE_HARDWARE,
-                               axis_identifier_pan);
+        new_pan_scaled_data =
+            convertSpeedValues(new_pan_data, PAN_TILT_SCALE_HARDWARE, axis_identifier_pan);
     } else {
-        free(motor_pan_data);
-        motor_pan_data = NULL;
+        free(new_pan_data);
+        new_pan_data = NULL;
     }
 
-    free(motor_tilt_data);
-    motor_tilt_data = NULL;
-    free(motor_tilt_scaled_data);
-    motor_tilt_scaled_data = NULL;
-    motor_tilt_data =
-        readCalibrationDataForAxis(axis_identifier_tilt, &maxSpeed);
+    maxSpeed = 0;
+    int64_t *new_tilt_data = readCalibrationDataForAxis(axis_identifier_tilt, &maxSpeed);
+    int32_t *new_tilt_scaled_data = NULL;
     if (maxSpeed == PAN_TILT_SCALE_HARDWARE) {
-        motor_tilt_scaled_data =
-            convertSpeedValues(motor_tilt_data, PAN_TILT_SCALE_HARDWARE,
-                               axis_identifier_tilt);
+        new_tilt_scaled_data =
+            convertSpeedValues(new_tilt_data, PAN_TILT_SCALE_HARDWARE, axis_identifier_tilt);
     } else {
-        free(motor_tilt_data);
-        motor_tilt_data = NULL;
+        free(new_tilt_data);
+        new_tilt_data = NULL;
     }
+
+    pthread_mutex_lock(&g_motor_data_mutex);
+    int64_t *old_pan_data = motor_pan_data;
+    int32_t *old_pan_scaled_data = motor_pan_scaled_data;
+    int64_t *old_tilt_data = motor_tilt_data;
+    int32_t *old_tilt_scaled_data = motor_tilt_scaled_data;
+    motor_pan_data = new_pan_data;
+    motor_pan_scaled_data = new_pan_scaled_data;
+    motor_tilt_data = new_tilt_data;
+    motor_tilt_scaled_data = new_tilt_scaled_data;
+    pthread_mutex_unlock(&g_motor_data_mutex);
+
+    // Safe to free now: no reader can still reach the old pointers.
+    free(old_pan_data);
+    free(old_pan_scaled_data);
+    free(old_tilt_data);
+    free(old_tilt_scaled_data);
   #endif  // USE_MOTOR_PAN_AND_TILT
   return true;
 }
@@ -202,7 +228,8 @@ bool motorGetPanTiltPosition(int64_t *panPosition, int64_t *tiltPosition) {
   if (tiltPosition != NULL) {
     *tiltPosition = atomic_load(&g_last_tilt_position);
   }
-  return true;
+  // Report failure until both encoders have actually been read.
+  return atomic_load(&g_pan_position_valid) && atomic_load(&g_tilt_position_valid);
 }
 
 
@@ -245,6 +272,38 @@ void *runPositionMonitorThread(void *argIgnored) {
   #else  // !USE_CANBUS
     resetCenterPositionsSerial(tilt_fd, pan_fd);
   #endif  // USE_CANBUS
+
+    // On --recenter, record the encoders' new position as the midpoint (VISCA position
+    // 32768).  Read the position back instead of assuming a value, because the number the
+    // encoder reports after a reset is up to the encoder.  (Full calibration clears the
+    // stored midpoints and derives them from the calibrated limits instead.)
+    if (gRecenter) {
+      bool gotPosition = false;
+      #if USE_CANBUS
+        bool gotPan = false, gotTilt = false;
+        double readbackStart = timeStamp();
+        while (!(gotPan && gotTilt) && (timeStamp() - readbackStart) < 3.0) {
+          bool didReadPan = false, didReadTilt = false;
+          if (!updatePositionsCANBus(sock, &didReadPan, &didReadTilt)) break;
+          gotPan = gotPan || didReadPan;
+          gotTilt = gotTilt || didReadTilt;
+        }
+        gotPosition = gotPan && gotTilt;
+      #else  // !USE_CANBUS
+        for (int attempt = 0; attempt < 10 && !gotPosition; attempt++) {
+          gotPosition = updatePositionsSerial(pan_fd, tilt_fd);
+        }
+      #endif  // USE_CANBUS
+      int64_t panMidpoint = 0, tiltMidpoint = 0;
+      if (gotPosition && motorGetPanTiltPosition(&panMidpoint, &tiltMidpoint)) {
+        setConfigKeyInteger(kPanEncoderMidpointKey, panMidpoint);
+        setConfigKeyInteger(kTiltEncoderMidpointKey, tiltMidpoint);
+        fprintf(stderr, "Recentered.  Pan midpoint: %" PRId64 "  Tilt midpoint: %" PRId64 "\n",
+                panMidpoint, tiltMidpoint);
+      } else {
+        fprintf(stderr, "Recenter: could not read the encoders back.  Midpoints NOT updated.\n");
+      }
+    }
 #endif  // ENABLE_HARDWARE
   }
 
@@ -478,6 +537,7 @@ bool handleCANFrame(struct can_frame *response, bool *didReadPanOut, bool *didRe
         if (response->data[1] == panCANBusID) {
             if (localDebug) fprintf(stderr, "Got pan: %" PRId64 ".\n", value);
             atomic_store(&g_last_pan_position, value);
+            atomic_store(&g_pan_position_valid, true);
             if (didReadPanOut != NULL) {
                 *didReadPanOut = true;
             }
@@ -485,6 +545,7 @@ bool handleCANFrame(struct can_frame *response, bool *didReadPanOut, bool *didRe
         } else if (response->data[1] == tiltCANBusID) {
             if (localDebug) fprintf(stderr, "Got tilt: %" PRId64 ".\n", value);
             atomic_store(&g_last_tilt_position, value);
+            atomic_store(&g_tilt_position_valid, true);
             if (didReadTiltOut != NULL) {
                 *didReadTiltOut = true;
             }
@@ -660,7 +721,8 @@ static bool readSerialBytes(int fd, uint8_t *buf, size_t count) {
 }
 
 /** Updates the current encoder positions (serial/Modbus version). */
-void updatePositionsSerial(int pan_fd, int tilt_fd) {
+bool updatePositionsSerial(int pan_fd, int tilt_fd) {
+    bool panOK = false, tiltOK = false;
     static const uint8_t requestBuf[] =
         { 0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0a };
     uint8_t responseBuf[7];
@@ -671,6 +733,8 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
             responseBuf[0] == 0x01 && responseBuf[1] == 0x03 && responseBuf[2] == 0x02) {
             uint16_t pan_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
             atomic_store(&g_last_pan_position, pan_position);
+            atomic_store(&g_pan_position_valid, true);
+            panOK = true;
         }
     }
 
@@ -680,8 +744,11 @@ void updatePositionsSerial(int pan_fd, int tilt_fd) {
             responseBuf[0] == 0x01 && responseBuf[1] == 0x03 && responseBuf[2] == 0x02) {
             uint16_t tilt_position = ((uint16_t)(responseBuf[3]) << 8) | responseBuf[4];
             atomic_store(&g_last_tilt_position, tilt_position);
+            atomic_store(&g_tilt_position_valid, true);
+            tiltOK = true;
         }
     }
+    return panOK && tiltOK;
 }
 
 /** Resets the center position of the encoders to the current position (serial/Modbus version). */
@@ -729,14 +796,19 @@ void *runMotorControlThread(void *argIgnored) {
     bool isRaw = g_pan_tilt_raw;
     pthread_mutex_unlock(&g_motor_speed_mutex);
 
-    int scaledPanSpeed = isRaw ?
-        llabs(panSpeed) :
-        llabs(scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                         motor_pan_scaled_data));
-    int scaledTiltSpeed = isRaw ?
-        llabs(tiltSpeed) :
-        llabs(scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
-                         motor_tilt_scaled_data));
+    int scaledPanSpeed, scaledTiltSpeed;
+    if (isRaw) {
+      scaledPanSpeed = llabs(panSpeed);
+      scaledTiltSpeed = llabs(tiltSpeed);
+    } else {
+      // Hold the lock while the scaled tables are dereferenced (see motorModuleReload).
+      pthread_mutex_lock(&g_motor_data_mutex);
+      scaledPanSpeed = llabs(scaleSpeed(panSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                                        motor_pan_scaled_data));
+      scaledTiltSpeed = llabs(scaleSpeed(tiltSpeed, SCALE_CORE, PAN_TILT_SCALE_HARDWARE,
+                                         motor_tilt_scaled_data));
+      pthread_mutex_unlock(&g_motor_data_mutex);
+    }
 
 #if (ENABLE_HARDWARE && ENABLE_MOTOR_HARDWARE)
 
@@ -838,7 +910,10 @@ void motorModuleCalibrate(void) {
 // Returns the minimum nonzero number of positions per second that the pan axis moves
 // at its slowest non-stalled speed.
 int64_t motorMinimumPanPositionsPerSecond(void) {
-  return minimumPositionsPerSecondForData(motor_pan_data, PAN_TILT_SCALE_HARDWARE);
+  pthread_mutex_lock(&g_motor_data_mutex);
+  int64_t result = minimumPositionsPerSecondForData(motor_pan_data, PAN_TILT_SCALE_HARDWARE);
+  pthread_mutex_unlock(&g_motor_data_mutex);
+  return result;
 }
 
 // Public function.  Docs in header.
@@ -846,7 +921,10 @@ int64_t motorMinimumPanPositionsPerSecond(void) {
 // Returns the minimum nonzero number of positions per second that the tilt axis moves
 // at its slowest non-stalled speed.
 int64_t motorMinimumTiltPositionsPerSecond(void) {
-  return minimumPositionsPerSecondForData(motor_tilt_data, PAN_TILT_SCALE_HARDWARE);
+  pthread_mutex_lock(&g_motor_data_mutex);
+  int64_t result = minimumPositionsPerSecondForData(motor_tilt_data, PAN_TILT_SCALE_HARDWARE);
+  pthread_mutex_unlock(&g_motor_data_mutex);
+  return result;
 }
 
 // Public function.  Docs in header.
@@ -854,10 +932,10 @@ int64_t motorMinimumTiltPositionsPerSecond(void) {
 // Returns the number of positions per second that the pan axis moves at its fastest
 // speed.
 int64_t motorMaximumPanPositionsPerSecond(void) {
-  if (motor_pan_data == NULL) {
-    return 0;
-  }
-  return motor_pan_data[PAN_TILT_SCALE_HARDWARE];
+  pthread_mutex_lock(&g_motor_data_mutex);
+  int64_t result = (motor_pan_data == NULL) ? 0 : motor_pan_data[PAN_TILT_SCALE_HARDWARE];
+  pthread_mutex_unlock(&g_motor_data_mutex);
+  return result;
 }
 
 // Public function.  Docs in header.
@@ -865,10 +943,10 @@ int64_t motorMaximumPanPositionsPerSecond(void) {
 // Returns the number of positions per second that the tilt axis moves at its fastest
 // speed.
 int64_t motorMaximumTiltPositionsPerSecond(void) {
-  if (motor_tilt_data == NULL) {
-    return 0;
-  }
-  return motor_tilt_data[PAN_TILT_SCALE_HARDWARE];
+  pthread_mutex_lock(&g_motor_data_mutex);
+  int64_t result = (motor_tilt_data == NULL) ? 0 : motor_tilt_data[PAN_TILT_SCALE_HARDWARE];
+  pthread_mutex_unlock(&g_motor_data_mutex);
+  return result;
 }
 
 double getVISCATimestamp(void) {

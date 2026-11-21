@@ -54,6 +54,18 @@ const char *kTiltEncoderReversedKey = "tilt_axis_encoder_reversed";
  * disassembly, rotating the gimbal on a tripod, etc.
  */
 
+/**
+ * Integer key providing the raw pan encoder value that maps to VISCA position 32768
+ * for 16-bit VISCA requests.
+ */
+const char *kPanEncoderMidpointKey = "pan_encoder_midpoint";
+
+/**
+ * Integer key providing the raw tilt encoder value that maps to VISCA position 32768
+ * for 16-bit VISCA requests.
+ */
+const char *kTiltEncoderMidpointKey = "tilt_encoder_midpoint";
+
 /** Integer key providing the left pan limit for calibration and recalibration. */
 const char *kPanLimitLeftKey = "pan_limit_left";
 
@@ -308,6 +320,13 @@ void cancelRecallIfNeeded(char *context);
  *
  */
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition);
+
+/**
+ * Like durationForMove, but uses the specified VISCA recall speed (clamped to 1..24)
+ * instead of the globally configured recall speed.
+ */
+double durationForMoveAtRecallSpeed(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition,
+                                    int64_t zoomPosition, int recallSpeed);
 
 /**
  * Computes the maximum speed (in core speed) that the motor should reach
@@ -662,6 +681,16 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "Created threads.\n");
 
+  // Make sure the encoder midpoints are stored.  This can write the configuration (and, if
+  // there are no calibrated limits, waits for the first encoder reading), so it has to happen
+  // here rather than on a VISCA handler thread.  Skip this when recentering (the position
+  // monitor thread stores the midpoints itself) and when calibrating (do_calibration stores
+  // them).
+  if (!gRecenter && !gCalibrationMode) {
+    midpointForAxis(axis_identifier_pan);
+    midpointForAxis(axis_identifier_tilt);
+  }
+
   if (gCalibrationMode) {
     fprintf(stderr, "Starting calibration.\n");
     fprintf(stderr, "Starting calibration.  Move the camera as far to the left as possible, then as far to the\n");
@@ -886,6 +915,14 @@ bool moveInProgress(void) {
 
 void handleRecallUpdates(void) {
   int localDebug = 0;
+  /**
+   * The peak speed most recently computed by the closed-loop feedback during the cruise phase
+   * (20%-80% of move time) of a time-based move, or 0 if none.  The ramp-down phase reuses
+   * this value so that the speed does not jump when the feedback adjustment stops running at
+   * the 80% mark.
+   */
+  static int perAxisPeakCruiseSpeed[NUM_AXES];
+
 
   for (axis_identifier_t axis = axis_identifier_pan ; axis < NUM_AXES; axis++) {
     if (atomic_load(&gAxisMoveInProgress[axis])) {
@@ -1036,11 +1073,25 @@ void handleRecallUpdates(void) {
 
           if (maxPPSForAxis > 0 && timeBeforeSlowingDown > 0) {
             peakSpeed = (int)MIN(MAX((1000.0 * distanceLeft) / (maxPPSForAxis * timeBeforeSlowingDown), 1.0), (double)SCALE_CORE);
+          } else if (perAxisPeakCruiseSpeed[axis] > 0) {
+            // No time left to adjust (end of the cruise phase).  Keep the last adjusted value
+            // rather than snapping back to the unadjusted peak speed.
+            peakSpeed = perAxisPeakCruiseSpeed[axis];
           }
+          perAxisPeakCruiseSpeed[axis] = peakSpeed;
 
           if (localDebug) {
             fprintf(stderr, "Axis %s peak speed after adjustment: %d\n", nameForAxis(axis), peakSpeed);
           }
+      } else if (!usingPositionBasedProgress) {
+        if (moveProgressByTime < kRampUpPeriodLength) {
+          // Start of a move.  Forget any adjusted peak speed left over from a previous move.
+          perAxisPeakCruiseSpeed[axis] = 0;
+        } else if (perAxisPeakCruiseSpeed[axis] > 0) {
+          // Ramp-down: continue from the speed the cruise phase ended at, so that there is no
+          // sudden jump or drop when the S-curve begins.
+          peakSpeed = perAxisPeakCruiseSpeed[axis];
+        }
       }
       bool creeping = (moveProgress == 1000) && (moveProgressByPosition < 1000);
 #else
@@ -1324,6 +1375,113 @@ int64_t scaleVISCAZoomSpeedToCoreSpeed(int speed) {
   return retval;
 }
 
+bool setPanTiltPosition(int64_t panPosition, int64_t panSpeed,
+                        int64_t tiltPosition, int64_t tiltSpeed, double duration,
+                        double panStartTime, double tiltStartTime);
+
+/** The VISCA pan/tilt position that corresponds to the stored encoder midpoint. */
+#define kVISCAPositionMidpoint 32768
+
+/** The largest VISCA pan/tilt position (five nibbles, so 20 bits). */
+#define kVISCAPositionMax 0xFFFFF
+
+/**
+ * Decodes the specified number of VISCA nibbles (one per byte, most significant first) into
+ * an unsigned value.  Some manufacturers send four nibbles (16 bits) per axis and some send
+ * five (20 bits), so commands accept either; the value is used as-is with no scaling.
+ */
+static uint32_t viscaNibbleValue(const uint8_t *nibbles, int count) {
+  uint32_t value = 0;
+  for (int i = 0; i < count; i++) {
+    value = (value << 4) | (nibbles[i] & 0xf);
+  }
+  return value;
+}
+
+/** Encodes a 20-bit value as five VISCA nibbles (one per byte, most significant first). */
+static void viscaFiveNibbleEncode(uint32_t value, uint8_t *nibbles) {
+  for (int i = 0; i < 5; i++) {
+    nibbles[i] = (value >> (4 * (4 - i))) & 0xf;
+  }
+}
+
+int64_t midpointForAxis(axis_identifier_t axis) {
+  bool isPan = (axis == axis_identifier_pan);
+  const char *midpointKey = isPan ? kPanEncoderMidpointKey : kTiltEncoderMidpointKey;
+  char *stored = getConfigKey(midpointKey);
+  if (stored != NULL) {
+    free(stored);
+    return getConfigKeyInteger(midpointKey);
+  }
+
+  // No stored midpoint.  Use the midpoint of the calibrated limits, if there are any.
+  const char *lowKey = isPan ? kPanLimitLeftKey : kTiltLimitTopKey;
+  const char *highKey = isPan ? kPanLimitRightKey : kTiltLimitBottomKey;
+  char *low = getConfigKey(lowKey);
+  char *high = getConfigKey(highKey);
+  int64_t midpoint = 0;
+  if (low != NULL && high != NULL) {
+    midpoint = (getConfigKeyInteger(lowKey) + getConfigKeyInteger(highKey)) / 2;
+    setConfigKeyInteger(midpointKey, midpoint);
+    fprintf(stderr, "Stored %s = %" PRId64 " (midpoint of calibrated limits)\n", midpointKey, midpoint);
+  } else {
+    // No calibrated limits.  Use wherever the encoder is right now.  This only happens once
+    // per installation, so blocking is fine.  Make three attempts to read a position (giving
+    // the position monitor thread time to get its first reading), and then fail hard rather
+    // than storing a bogus midpoint.
+#if PAN_AND_TILT_POSITION_SUPPORTED
+    int64_t panPosition = 0, tiltPosition = 0;
+    bool gotPosition = false;
+    for (int attempt = 0; attempt < 3 && !gotPosition; attempt++) {
+      if (attempt > 0) {
+        usleep(1000000);
+      }
+      gotPosition = GET_PAN_TILT_POSITION(&panPosition, &tiltPosition);
+    }
+    if (!gotPosition) {
+      fprintf(stderr, "FATAL: Could not read the pan/tilt encoder positions after three attempts,\n"
+                      "so %s cannot be determined.  Check the encoder connections.\n", midpointKey);
+      exit(1);
+    }
+    midpoint = isPan ? panPosition : tiltPosition;
+    setConfigKeyInteger(midpointKey, midpoint);
+    fprintf(stderr, "Stored %s = %" PRId64 " (current encoder position)\n", midpointKey, midpoint);
+#endif
+  }
+  free(low);
+  free(high);
+  return midpoint;
+}
+
+/** Converts a VISCA pan/tilt position (16 or 20 bits) to a raw encoder position.  Mapping is 1:1. */
+static int64_t encoderPositionFromVISCAPosition(axis_identifier_t axis, int64_t viscaPosition) {
+  return viscaPosition - kVISCAPositionMidpoint + midpointForAxis(axis);
+}
+
+/**
+ * Converts a raw pan/tilt encoder position to a VISCA position, clamped to the VISCA
+ * range (0..0xFFFFF).  Mapping is 1:1.  (If the encoder wanders out of range, use --recenter.)
+ */
+static int64_t viscaPositionFromEncoderPosition(axis_identifier_t axis, int64_t encoderPosition) {
+  int64_t viscaPosition = encoderPosition - midpointForAxis(axis) + kVISCAPositionMidpoint;
+  return MAX(0, MIN(kVISCAPositionMax, viscaPosition));
+}
+
+/**
+ * Starts a closed-loop pan/tilt move to the specified raw encoder positions, taking the
+ * duration from the VISCA pan/tilt speed bytes in the command (1..24) rather than from the
+ * globally configured recall speed.
+ */
+static bool setPanTiltPositionFromVISCA(int64_t panEncoderPosition, int viscaPanSpeed,
+                                        int64_t tiltEncoderPosition, int viscaTiltSpeed) {
+  int speed = MAX(1, MIN(24, MAX(viscaPanSpeed, viscaTiltSpeed)));
+  double duration = durationForMoveAtRecallSpeed(kFlagMovePan | kFlagMoveTilt, panEncoderPosition,
+                                                 tiltEncoderPosition, kUnusedPosition, speed);
+  return setPanTiltPosition(panEncoderPosition, scaleVISCAPanTiltSpeedToCoreSpeed(viscaPanSpeed, false),
+                            tiltEncoderPosition, scaleVISCAPanTiltSpeedToCoreSpeed(viscaTiltSpeed, false),
+                            duration, 0, 0);
+}
+
 int64_t getAxisPosition(axis_identifier_t axis) {
   switch(axis) {
     case axis_identifier_pan:
@@ -1438,16 +1596,21 @@ double makeDurationValid(axis_identifier_t axis, double duration, int64_t positi
  * fast axis (or a very short move) from changing things too severely.
  */
 double durationForMove(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition, int64_t zoomPosition) {
+  return durationForMoveAtRecallSpeed(flags, panPosition, tiltPosition, zoomPosition,
+                                      getVISCARecallSpeed());
+}
+
+double durationForMoveAtRecallSpeed(moveModeFlags flags, int64_t panPosition, int64_t tiltPosition,
+                                    int64_t zoomPosition, int recallSpeed) {
   bool localDebug = false;
 
   // VISCA (or at least the PTZOptics dialect thereof) allows a range of 1 to 24.  This
-  // maps those into speeds.
-
-  // These speeds are just sort of arbitrary mappings.
-  int recallSpeed = getVISCARecallSpeed();  // Range 1 to 24.
+  // maps those into speeds.  Clamp so that out-of-range values from the wire can't
+  // produce nonsensical (or negative) durations.
+  recallSpeed = MAX(1, MIN(24, recallSpeed));
 
   if (localDebug) {
-    fprintf(stderr, "Recall speed: %d\n", getVISCARecallSpeed());
+    fprintf(stderr, "Recall speed: %d\n", recallSpeed);
     fprintf(stderr, "Recall speed set: %s\n", gRecallSpeedSet ? "YES" : "NO");
 
     if (gRecallSpeedSet) fprintf(stderr, "Requested recall speed: %d\n", gVISCARecallSpeed);
@@ -2098,6 +2261,32 @@ bool handleVISCAInquiry(uint8_t *command, uint16_t len, uint32_t sequenceNumber,
 #endif
           }
           break;
+        case 0x06:
+#if PAN_AND_TILT_POSITION_SUPPORTED
+          // Pan/tilt position inquiry: 8x 09 06 12 FF ->
+          //   y0 50 0p 0p 0p 0p 0p 0t 0t 0t 0t 0t FF  (five nibbles per axis, as in the commands)
+          if (len >= 5 && command[3] == 0x12 && command[4] == 0xFF) {
+            // Fail the inquiry rather than reporting bogus zeroes if the encoders can't be read.
+            int64_t panEncoderPosition, tiltEncoderPosition;
+            if (!GET_PAN_TILT_POSITION(&panEncoderPosition, &tiltEncoderPosition)) {
+              return false;
+            }
+            int64_t panPosition = viscaPositionFromEncoderPosition(axis_identifier_pan, panEncoderPosition);
+            int64_t tiltPosition = viscaPositionFromEncoderPosition(axis_identifier_tilt, tiltEncoderPosition);
+            int failCount = 0;
+            while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
+            static visca_response_t response;
+            uint8_t data[13] = { getDeviceResponseID(), 0x50 };
+            viscaFiveNibbleEncode((uint32_t)panPosition, &data[2]);
+            viscaFiveNibbleEncode((uint32_t)tiltPosition, &data[7]);
+            data[12] = 0xff;
+            SET_RESPONSE(&response, data);
+            failCount = 0;
+            while (!sendVISCAResponse(&response, sequenceNumber, sock, client, structLength) && ++failCount < 10);
+            return true;
+          }
+#endif
+          break;
         case 0x7e:
           if (len >= 6 && command[3] == 0x01 && command[4] == 0x0a) {
             int failCount = 0;
@@ -2424,7 +2613,16 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               }
               case 0x02: // Pan/tilt absolute
               {
-                 if (len < 15) return false;
+                 // Pan and tilt have no fixed center: the encoders report floating absolute
+                 // positions.  VISCA position 32768 corresponds to the stored encoder midpoint
+                 // (see midpointForAxis), and one VISCA step is one encoder step.
+                 //
+                 //   15 bytes: 8x 01 06 02 VV WW 0p 0p 0p 0p 0t 0t 0t 0t FF  (16-bit positions)
+                 //   17 bytes: 8x 01 06 02 VV WW 0p 0p 0p 0p 0p 0t 0t 0t 0t 0t FF  (20-bit positions)
+                 //
+                 // Manufacturers differ, so both are accepted.  Positions are unsigned.
+                 if ((len != 15 && len != 17) || command[len - 1] != 0xFF) return false;
+                 int nibblesPerAxis = (len == 17) ? 5 : 4;
 
                  // Do not attempt to use absolute positioning while in calibration mode!
                  if (gCalibrationMode) {
@@ -2436,12 +2634,12 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
                 int16_t panSpeed = command[4];
                 int16_t tiltSpeed = command[5];
-                uint16_t rawPanValue = ((command[6] & 0xf) << 12) | ((command[7] & 0xf) << 8) |
-                                       ((command[8] & 0xf) << 4) | (command[9] & 0xf);
-                uint16_t rawTiltValue = ((command[10] & 0xf) << 12) | ((command[11] & 0xf) << 8) |
-                                        ((command[12] & 0xf) << 4) | (command[13] & 0xf);
-                int16_t panPosition = (int16_t)rawPanValue;
-                int16_t tiltPosition = (int16_t)rawTiltValue;
+                uint32_t panViscaPosition = viscaNibbleValue(&command[6], nibblesPerAxis);
+                uint32_t tiltViscaPosition = viscaNibbleValue(&command[6 + nibblesPerAxis], nibblesPerAxis);
+                int64_t panEncoderValue =
+                    encoderPositionFromVISCAPosition(axis_identifier_pan, panViscaPosition);
+                int64_t tiltEncoderValue =
+                    encoderPositionFromVISCAPosition(axis_identifier_tilt, tiltViscaPosition);
 
                 // NOTE: Unlike zoom, pan and tilt limits (leftPanLimit, etc.) apply only during
                 // calibration to determine how far the axes can safely move while measuring
@@ -2449,9 +2647,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 // reasonable range can shift due to disassembly, rotating the gimbal on a
                 // tripod, etc.
                 cancelRecallIfNeeded("Pan/tilt absolute command received");
-                if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, false),
-                                        tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, false),
-                                        0, 0, 0)) {
+                if (!setPanTiltPositionFromVISCA(panEncoderValue, panSpeed,
+                                                 tiltEncoderValue, tiltSpeed)) {
                     return false;
                 }
 
@@ -2461,7 +2658,10 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               }
               case 0x03: // Pan/tilt relative
               {
-                 if (len < 15) return false;
+                 // Same layouts as absolute (15 or 17 bytes), but with signed 16-bit or
+                 // 20-bit offsets.
+                 if ((len != 15 && len != 17) || command[len - 1] != 0xFF) return false;
+                 int nibblesPerAxis = (len == 17) ? 5 : 4;
 
                  // Do not attempt to use relative positioning while in calibration mode!
                  if (gCalibrationMode) {
@@ -2473,22 +2673,21 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
                 while (!sendVISCAResponse(enqueuedVISCAResponse(), sequenceNumber, sock, client, structLength) && ++failCount < 10);
                 int16_t panSpeed = command[4];
                 int16_t tiltSpeed = command[5];
-                uint16_t rawPanPosition = ((command[6] & 0xf) << 12) | ((command[7] & 0xf) << 8) |
-                                           ((command[8] & 0xf) << 4) | (command[9] & 0xf);
-                uint16_t rawTiltPosition = ((command[10] & 0xf) << 12) | ((command[11] & 0xf) << 8) |
-                                            ((command[12] & 0xf) << 4) | (command[13] & 0xf);
-                int16_t relativePanPosition = (int16_t)rawPanPosition;
-                int16_t relativeTiltPosition = (int16_t)rawTiltPosition;
+                // Sign-extend the 16-bit or 20-bit offsets.
+                int signShift = 32 - (4 * nibblesPerAxis);
+                int32_t relativePanPosition =
+                    (int32_t)(viscaNibbleValue(&command[6], nibblesPerAxis) << signShift) >> signShift;
+                int32_t relativeTiltPosition =
+                    (int32_t)(viscaNibbleValue(&command[6 + nibblesPerAxis], nibblesPerAxis) << signShift) >> signShift;
 
                 int64_t panPosition, tiltPosition;
                 if (GET_PAN_TILT_POSITION(&panPosition, &tiltPosition)) {
+                    // One VISCA step is one encoder step, so the signed offsets apply directly.
                     panPosition += relativePanPosition;
                     tiltPosition += relativeTiltPosition;
 
                     cancelRecallIfNeeded("Pan/tilt relative command received");
-                    if (!setPanTiltPosition(panPosition, scaleVISCAPanTiltSpeedToCoreSpeed(panSpeed, false),
-                                            tiltPosition, scaleVISCAPanTiltSpeedToCoreSpeed(tiltSpeed, false),
-                                            0, 0, 0)) {
+                    if (!setPanTiltPositionFromVISCA(panPosition, panSpeed, tiltPosition, tiltSpeed)) {
                         return false;
                     }
                 } else {
@@ -2786,7 +2985,7 @@ double adjustedStartTimeForMove(double totalDuration, double shortMoveDuration, 
 
 void setRecallSpeedVISCA(int value) {
   gRecallSpeedSet = true;
-  gVISCARecallSpeed = value;
+  gVISCARecallSpeed = MAX(1, MIN(24, value));  // Valid range is 1 to 24.
 }
 
 
@@ -2932,6 +3131,10 @@ void do_calibration(void) {
   } else {
     fprintf(stderr, "Quick recalibration.  Using defaults.\n");
   }
+
+  // Now that the limits are known, store the encoder midpoints (if they aren't already).
+  midpointForAxis(axis_identifier_pan);
+  midpointForAxis(axis_identifier_tilt);
 
   fprintf(stderr, "Pan limit left: %" PRId64 "\n", leftPanLimit());
   fprintf(stderr, "Pan limit right: %" PRId64 "\n", rightPanLimit());
@@ -3437,6 +3640,8 @@ bool resetCalibration(void) {
   retval = removeConfigKey(kPanEncoderReversedKey) && retval;
   retval = removeConfigKey(kTiltEncoderReversedKey) && retval;
   retval = removeConfigKey(kZoomEncoderReversedKey) && retval;
+  retval = removeConfigKey(kPanEncoderMidpointKey) && retval;
+  retval = removeConfigKey(kTiltEncoderMidpointKey) && retval;
   retval = removeConfigKey(kPanLimitLeftKey) && retval;
   retval = removeConfigKey(kPanLimitRightKey) && retval;
   retval = removeConfigKey(kTiltLimitTopKey) && retval;

@@ -63,7 +63,7 @@ The following harware is currently supported:
 
   * Waveshare Motor Driver HAT for motor control
   * Waveshare RS485 CAN HAT for reading the encoders
-  * BRT38-COM4069D24-RT1 encoders (CAN-based)
+  * BRT38-COM4096D24-RT1 encoders (CAN-based)
   * Panasonic AG-CX350 (zoom only)
 
 I have this attached to a Vidpro MH-430 motorized gimbal, which provides the

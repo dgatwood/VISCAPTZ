@@ -161,6 +161,26 @@ bool setZoomMotorReversed(bool isReversed);
  */
 
 /** The leftmost position used during calibration. */
+/**
+ * Configuration keys holding the raw encoder value that corresponds to VISCA pan/tilt
+ * position 32768 (the center of the 16-bit VISCA position range).
+ */
+extern const char *kPanEncoderMidpointKey;
+extern const char *kTiltEncoderMidpointKey;
+
+/**
+ * Returns the raw encoder value that corresponds to VISCA pan or tilt position 32768.
+ *
+ * If the axis has no stored midpoint, this computes the midpoint of the calibrated limits,
+ * stores it in the configuration, and returns it.  If there are no calibrated limits, it
+ * waits for the encoder's first reading and uses its current position instead.
+ *
+ * IMPORTANT: Because this can write the configuration, the first call for each axis must
+ * happen at launch or during calibration (see setConfigKey).  main() and do_calibration()
+ * make those calls.
+ */
+int64_t midpointForAxis(axis_identifier_t axis);
+
 int64_t leftPanLimit(void);
 
 /** The rightmost position used during calibration. */
