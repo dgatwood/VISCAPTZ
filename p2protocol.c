@@ -723,6 +723,11 @@ char *getP2Auth(int sock) {
   char *nonce = NULL;
 
   while (curnode) {
+    // Skip anything that isn't an element (whitespace text, comments, and so on).
+    if (curnode->type != XML_ELEMENT_NODE || curnode->name == NULL) {
+      curnode = curnode->next;
+      continue;
+    }
     if (!strcmp((const char *)curnode->name, "Realm")) {
       if (realm != NULL) {
         xmlFree(realm);
