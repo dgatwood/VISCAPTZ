@@ -184,10 +184,33 @@ tallyStateType tricaster_getTallyState(void) {
           return;
         }
 
+        // The Tricaster sends XML text, so a NUL byte is never legitimate.  Remove any, because
+        // everything below uses C string functions (strstr, strrchr) and a NUL would make the
+        // string length disagree with the byte counts used to track pending data.
+        ssize_t kept = 0;
+        for (ssize_t i = 0; i < length; i++) {
+          if (buf[i] != '\0') {
+            buf[kept++] = buf[i];
+          }
+        }
+        length = kept;
         buf[length] = '\0';
+        if (length == 0) {
+          continue;
+        }
 
-        char *concatBuf = NULL;
-        asprintf(&concatBuf, "%s%s", pendingBytes ?: "", buf);
+        // Concatenate by explicit byte count.  pending is always the length of pendingBytes.
+        char *concatBuf = malloc(pending + length + 1);
+        if (concatBuf == NULL) {
+          fprintf(stderr, "tricaster_tally: Out of memory.\n");
+          free(pendingBytes);
+          return;
+        }
+        if (pending > 0) {
+          memcpy(concatBuf, pendingBytes, pending);
+        }
+        memcpy(concatBuf + pending, buf, length);
+        concatBuf[pending + length] = '\0';
 
         free(pendingBytes);
         pendingBytes = NULL;
@@ -199,7 +222,12 @@ tallyStateType tricaster_getTallyState(void) {
         pending = length + pending - bytesProcessed;
 
         pendingBytes = malloc(pending + 1);
-        bcopy(&concatBuf[bytesProcessed], pendingBytes, pending + 1);
+        if (pendingBytes == NULL) {
+          fprintf(stderr, "tricaster_tally: Out of memory.\n");
+          free(concatBuf);
+          return;
+        }
+        memcpy(pendingBytes, &concatBuf[bytesProcessed], pending + 1);  // Includes the NUL.
 
         if (tricasterDebug) {
           fprintf(stderr, "Bytes remaining in buffer: %" PRId64 "\n", (uint64_t)pending);
