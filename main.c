@@ -1460,17 +1460,39 @@ int64_t midpointForAxis(axis_identifier_t axis) {
   return midpoint;
 }
 
-/** Converts a VISCA pan/tilt position (16 or 20 bits) to a raw encoder position.  Mapping is 1:1. */
+/**
+ * Returns +1 if increasing VISCA pan/tilt positions correspond to increasing encoder values,
+ * or -1 if they correspond to decreasing encoder values.
+ *
+ * VISCA positions follow the physical direction: pan increases to the right and tilt increases
+ * upward.  (Like the 06 01 drive commands, this has to take the calibrated encoder polarity into
+ * account.)  A normal encoder increases going left/up, and a reversed encoder increases going
+ * right/down.  So for pan, VISCA follows the encoder only if it is reversed, and for tilt,
+ * only if it is not reversed.
+ */
+static int viscaDirectionForAxis(axis_identifier_t axis) {
+  bool encoderReversed = (axis == axis_identifier_pan) ? panEncoderReversed() : tiltEncoderReversed();
+  bool viscaFollowsEncoder = (axis == axis_identifier_pan) ? encoderReversed : !encoderReversed;
+  return viscaFollowsEncoder ? 1 : -1;
+}
+
+/**
+ * Converts a VISCA pan/tilt position (16 or 20 bits) to a raw encoder position.  One VISCA step
+ * is one encoder step; only the direction can differ.
+ */
 static int64_t encoderPositionFromVISCAPosition(axis_identifier_t axis, int64_t viscaPosition) {
-  return viscaPosition - kVISCAPositionMidpoint + midpointForAxis(axis);
+  return midpointForAxis(axis) +
+         ((viscaPosition - kVISCAPositionMidpoint) * viscaDirectionForAxis(axis));
 }
 
 /**
  * Converts a raw pan/tilt encoder position to a VISCA position, clamped to the VISCA
- * range (0..0xFFFFF).  Mapping is 1:1.  (If the encoder wanders out of range, use --recenter.)
+ * range (0..0xFFFFF).  (If the encoder wanders out of range, use --recenter.)
  */
 static int64_t viscaPositionFromEncoderPosition(axis_identifier_t axis, int64_t encoderPosition) {
-  int64_t viscaPosition = encoderPosition - midpointForAxis(axis) + kVISCAPositionMidpoint;
+  // The direction is +1 or -1, so it is its own inverse.
+  int64_t viscaPosition = kVISCAPositionMidpoint +
+      ((encoderPosition - midpointForAxis(axis)) * viscaDirectionForAxis(axis));
   return MAX(0, MIN(kVISCAPositionMax, viscaPosition));
 }
 
@@ -2625,7 +2647,8 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
               {
                  // Pan and tilt have no fixed center: the encoders report floating absolute
                  // positions.  VISCA position 32768 corresponds to the stored encoder midpoint
-                 // (see midpointForAxis), and one VISCA step is one encoder step.
+                 // (see midpointForAxis), and one VISCA step is one encoder step.  Positions
+                 // increase to the right (pan) and upward (tilt), whatever the encoder polarity.
                  //
                  //   15 bytes: 8x 01 06 02 VV WW 0p 0p 0p 0p 0t 0t 0t 0t FF  (16-bit positions)
                  //   17 bytes: 8x 01 06 02 VV WW 0p 0p 0p 0p 0p 0t 0t 0t 0t 0t FF  (20-bit positions)
@@ -2692,9 +2715,10 @@ fprintf(stderr, "Speed: %d\n", zoomSpeed);
 
                 int64_t panPosition, tiltPosition;
                 if (GET_PAN_TILT_POSITION(&panPosition, &tiltPosition)) {
-                    // One VISCA step is one encoder step, so the signed offsets apply directly.
-                    panPosition += relativePanPosition;
-                    tiltPosition += relativeTiltPosition;
+                    // One VISCA step is one encoder step, but positive offsets mean right/up,
+                    // so the sign depends on the encoder polarity.
+                    panPosition += relativePanPosition * viscaDirectionForAxis(axis_identifier_pan);
+                    tiltPosition += relativeTiltPosition * viscaDirectionForAxis(axis_identifier_tilt);
 
                     cancelRecallIfNeeded("Pan/tilt relative command received");
                     if (!setPanTiltPositionFromVISCA(panPosition, panSpeed, tiltPosition, tiltSpeed)) {
